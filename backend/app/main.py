@@ -519,6 +519,7 @@ def _user_public(u: dict, with_email: bool = True) -> dict:
         "owner": bool(u.get("is_owner")), "disabled": bool(u.get("disabled")), "last_seen": u.get("last_seen"),
         "last_login": u.get("last_login"), "custom_sections": json.loads(u["sections"]) if u.get("sections") else None,
         "sections": user_sections(store, u), "admin": bool(u.get("email") and u["email"].lower() == admin_plex_email()),
+        "servers": json.loads(u["servers"]) if u.get("servers") else [],
     }
 
 
@@ -533,10 +534,14 @@ def api_my_history(request: Request, before: int | None = None, limit: int = 50)
 
 
 @app.get("/api/users")
-def api_users(request: Request, q: str = "", limit: int = 50):
+def api_users(request: Request, q: str = "", server: str = "", limit: int = 50):
+    """Search people by username, display name or email. server: only people on that server."""
     admin(request)
-    rows = directory.search_users(q[:100], max(1, min(limit, 200)))
-    return {"rows": [{**_user_public(u), "plays": u["plays"], "plays_30d": u["plays_30d"], "last_play": u["last_play"]} for u in rows]}
+    rows = directory.search_users(q[:100], max(1, min(limit, 5000)) if not server else 5000)
+    out = [{**_user_public(u), "plays": u["plays"], "plays_30d": u["plays_30d"], "last_play": u["last_play"]} for u in rows]
+    if server:
+        out = [u for u in out if server in u["servers"]][: max(1, min(limit, 5000))]
+    return {"rows": out, "servers": [s.name for s in poller.cfg.servers]}
 
 
 @app.get("/api/users/{plex_id}")

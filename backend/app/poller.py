@@ -113,6 +113,7 @@ class Poller:
                 r["user_id"] = owner["plex_id"] if owner else None
             if r.get("user_id"):
                 self.directory.saw_user(r["user_id"], r.get("user"), r.get("user_thumb"))
+                self.directory.add_user_server(r["user_id"], r["server"])
             act = self.active_plays.get(key)
             if act and act["rating_key"] != r.get("rating_key"):
                 self.directory.stop_play(act["id"])
@@ -140,10 +141,16 @@ class Poller:
             return 0
         acct = PlexAccount(self.http, self.client_id)
         owner = await acct.user_info(token)
-        self.directory.upsert_user(owner, shared=True, is_owner=True)
+        mine = self.store.list_servers()
+        by_id = {s["machine_id"]: s["name"] for s in mine if s.get("machine_id")}
+        names = {s["name"].lower(): s["name"] for s in mine}
+        self.directory.upsert_user({**owner, "servers": [s["name"] for s in mine]}, shared=True, is_owner=True)
         users = await acct.shared_users(token)
         for u in users:
-            self.directory.upsert_user(u, shared=True)
+            # Which of the monitored servers this person is shared on: by machine id, else by name.
+            on = {by_id[m] for m in u.pop("server_ids", []) if m in by_id}
+            on |= {names[n.lower()] for n in u.pop("server_names", []) if n.lower() in names}
+            self.directory.upsert_user({**u, "servers": sorted(on)}, shared=True)
         self.users_synced_at, self.users_sync_error = time.time(), None
         return len(users) + 1
 
@@ -182,6 +189,8 @@ class Poller:
                     "title": title, "subtitle": sub, "kind": kind, "art": art, "viewed_at": int(it.get("viewedAt") or 0),
                 })
                 added += int(ok)
+                if user:
+                    self.directory.add_user_server(user["plex_id"], s.name)
                 skipped += int(not ok)
         return {"added": added, "already_had": skipped, "errors": errors}
 

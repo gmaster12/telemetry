@@ -137,7 +137,8 @@ class PlexAccount:
             a = u.attrib
             out.append({"id": str(a.get("id")), "username": a.get("username") or a.get("title"), "title": a.get("title") or a.get("username"),
                         "email": (a.get("email") or "").lower() or None, "thumb": a.get("thumb"),
-                        "servers": [s.attrib.get("name") for s in u.iter("Server") if s.attrib.get("name")]})
+                        "server_names": [s.attrib.get("name") for s in u.iter("Server") if s.attrib.get("name")],
+                        "server_ids": [s.attrib.get("machineIdentifier") for s in u.iter("Server") if s.attrib.get("machineIdentifier")]})
         return out
 
     async def servers(self, account_token: str) -> list[dict]:

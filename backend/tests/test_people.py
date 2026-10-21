@@ -120,3 +120,36 @@ def test_sessions_and_admin_password_change(env):
     d.set_admin_password(aid, hash_password("another long passphrase"))
     assert d.get_session(_hash_token(tok)) is None
     assert d.get_admin("OPS")["id"] == aid  # usernames are case-insensitive
+
+
+def test_user_servers(env):
+    _, d = env
+    d.upsert_user({"id": "2001", "username": "sable", "servers": ["Orion", "Atlas"]}, shared=True)
+    assert json.loads(d.get_user("2001")["servers"]) == ["Atlas", "Orion"]
+    d.add_user_server("2001", "Beta")
+    d.add_user_server("2001", "Atlas")
+    assert json.loads(d.get_user("2001")["servers"]) == ["Atlas", "Beta", "Orion"]
+    d.upsert_user({"id": "2001", "title": "Sable"})  # no servers given: keep them
+    assert json.loads(d.get_user("2001")["servers"]) == ["Atlas", "Beta", "Orion"]
+
+
+def test_track_plays_records_server(env):
+    store, d = env
+    from app.poller import Poller
+    Poller(store).track_plays([row(server="Basestar")], {"Basestar"})
+    assert json.loads(d.get_user("2001")["servers"]) == ["Basestar"]
+
+
+def test_old_users_table_gets_servers_column(tmp_path, monkeypatch):
+    import sqlite3
+    monkeypatch.setenv("SECRET_KEY", Fernet.generate_key().decode())
+    db = tmp_path / "old.db"
+    con = sqlite3.connect(db)
+    con.execute("CREATE TABLE users (plex_id TEXT PRIMARY KEY, username TEXT, title TEXT, email TEXT, thumb TEXT, shared INTEGER NOT NULL DEFAULT 0,"
+                " is_owner INTEGER NOT NULL DEFAULT 0, sections TEXT, disabled INTEGER NOT NULL DEFAULT 0, first_seen INTEGER, last_seen INTEGER, last_login INTEGER)")
+    con.commit(); con.close()
+    from app.secrets import SecretBox
+    from app.store import Directory, Store
+    d = Directory(Store(str(db), SecretBox()))
+    d.upsert_user({"id": "1", "username": "x", "servers": ["Atlas"]})
+    assert json.loads(d.get_user("1")["servers"]) == ["Atlas"]

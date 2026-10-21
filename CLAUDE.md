@@ -107,7 +107,7 @@ Before loading datasets the shim calls `GET /api/me` (401 sends the browser to
 |---|---|---|
 | Sign in | `POST /api/auth/plex/start`, `GET /api/auth/plex/check/{pin}`, `POST /api/auth/local`, `POST /api/auth/logout` | anyone |
 | Me | `GET /api/me`, `GET /api/me/history?before=` | signed in (`history` section) |
-| Users | `GET /api/users?q=` (username, name or email), `GET /api/users/{id}`, `GET /api/users/{id}/history` | admin |
+| Users | `GET /api/users?q=&server=` (username, name or email; returns each person's `servers` and the monitored server names), `GET /api/users/{id}`, `GET /api/users/{id}/history` | admin |
 | Settings | everything under `/api/settings`, including `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
 
 Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie
@@ -140,8 +140,14 @@ design system). The dashboard adds its own patterns:
   "Telemetry" label, charcoal on light and glow on dark; loading splash on UI
   Navy; "Nothing playing right now" with a faint mark watermark; favicon and
   home-screen icons via `manifest.webmanifest`.
-- Users: admin-only Users section with search, history drawer (`people.js`),
-  viewer names on stream cards open it. Viewers get a My history section.
+- Users: admin-only Users card with a find-a-person dropdown (`user-picker.js`):
+  search by username, name or email, grouped by the Plex server each person is
+  on (`users.servers`, from plex.tv shares by machine id plus servers they
+  stream from), with a server filter. Built for hundreds of people: nothing is
+  listed until it opens. Picking someone opens the history drawer
+  (`people.js`); viewer names on stream cards open it too. Viewers get a My
+  history section. Settings, Access lists at most 50 people, with search and a
+  server filter.
 - Status is always a word plus a shape, never color alone. No emoji.
 
 ## Running tests

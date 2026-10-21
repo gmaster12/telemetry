@@ -296,15 +296,11 @@
   }
 
   // ---------- people section: Users (admin) or My history (viewer) ----------
-  var usersQ = '';
-  var usersTimer = null;
-  var usersReq = 0;
   function focusUsers() {
     var card = document.getElementById('people-card');
     if (window.sdGoTab) window.sdGoTab('people');
     if (card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    var q = document.getElementById('people-q');
-    if (q) setTimeout(function () { q.focus(); }, 300);
+    if (picker) setTimeout(function () { picker.focus(); }, 300);
   }
   function renderPeople() {
     var card = document.getElementById('people-card');
@@ -329,58 +325,37 @@
       card.appendChild(el('p', { class: 'st-msg st-msg--error', role: 'alert' }, el('b', { text: 'Error: ' }), e.message));
     });
   }
+  let picker = null;
+  let usersLoadedAt = 0;
   function renderUsers(card) {
     card.hidden = false;
-    var count = el('span', { class: 'sd-sec-count', id: 'people-count' });
-    var input = el('input', { id: 'people-q', type: 'search', placeholder: 'Search by username or email', 'aria-label': 'Search users by username or email', autocomplete: 'off', spellcheck: 'false', value: usersQ });
-    var list = el('div', { class: 'gp-users', id: 'people-list', role: 'list', 'aria-live': 'polite' });
-    input.addEventListener('input', function () {
-      usersQ = input.value;
-      clearTimeout(usersTimer);
-      usersTimer = setTimeout(function () { loadUsers(list, count); }, 220);
-    });
-    card.append(
-      el('div', { class: 'sd-toolbar gp-toolbar' },
-        el('div', { class: 'sd-sec-head' }, el('h2', { class: 'sd-sec-title', id: 'people-title', text: 'Users' }), count),
-        el('label', { class: 'sd-search gp-search' }, el('span', { 'aria-hidden': 'true' }, icon('search', 18)), input)),
-      el('p', { class: 'sd-hint', text: 'Everyone you share a Plex server with, plus anyone who has streamed. Select a person to see their playback history.' }),
-      list);
-    loadUsers(list, count);
+    if (!picker) picker = window.gsUserPicker({ idPrefix: 'people', icon: icon, onPick: function (p) { openHistory(p.key, p.name); } });
+    var sub = el('span', { class: 'gp-finder__sub', id: 'people-sub' });
+    card.replaceChildren(el('div', { class: 'gp-finder', 'aria-labelledby': 'people-title' },
+      el('div', { class: 'gp-finder__head' }, el('h2', { class: 'sd-sec-title', id: 'people-title', text: 'Users' }), sub),
+      picker.el,
+      el('p', { class: 'sd-hint', text: 'Pick someone to open their playback history. The list groups people by the Plex server they are on.' })));
+    loadUsers();
   }
-  function loadUsers(list, count) {
-    var n = ++usersReq;
-    api('GET', '/api/users?limit=60&q=' + encodeURIComponent(usersQ.trim())).then(function (r) {
-      if (n !== usersReq) return;
-      list.replaceChildren();
-      var rows = r.rows || [];
-      count.textContent = rows.length >= 60 ? '60+' : String(rows.length);
-      if (!rows.length) {
-        list.appendChild(el('div', { class: 'gp-empty' },
-          el('b', { text: usersQ.trim() ? 'No one matches “' + usersQ.trim() + '”' : 'No users yet' }),
-          el('span', { text: usersQ.trim() ? 'Search matches part of a username, display name or email address.' : 'Sign in with Plex under Settings, then use Sync Plex users in Access. People who stream also appear here automatically.' }),
-          usersQ.trim() ? null : el('button', { type: 'button', class: 'st-btn', text: 'Open Access settings', onclick: function () { openSettingsTab('access'); } })));
-        return;
-      }
-      rows.forEach(function (u) {
-        var tags = [];
-        if (u.admin) tags.push(el('span', { class: 'gp-tag gp-tag--admin', text: 'Admin' }));
-        if (u.disabled) tags.push(el('span', { class: 'gp-tag gp-tag--off', text: 'Access off' }));
-        else if (u.owner) tags.push(el('span', { class: 'gp-tag', text: 'Owner' }));
-        list.appendChild(el('button', { type: 'button', role: 'listitem', class: 'gp-user', onclick: function () { openHistory(u.id, u.name); } },
-          avatar(u.name, 'sm'),
-          el('span', { class: 'gp-user__main' },
-            el('b', { text: u.name || u.username || 'Plex user' }),
-            el('span', { text: [u.username && u.username !== u.name ? '@' + u.username : null, u.email].filter(Boolean).join(' · ') || 'No email on file' })),
-          el('span', { class: 'gp-user__num' }, el('b', { text: String(u.plays_30d) }), el('span', { text: 'plays, 30 d' })),
-          el('span', { class: 'gp-user__last' }, el('span', { text: 'Last played' }), el('b', { text: ago(u.last_play) })),
-          el('span', { class: 'gp-user__tags' }, tags),
-          el('span', { class: 'gp-user__go', 'aria-hidden': 'true' }, icon('right', 16))));
+  function loadUsers() {
+    usersLoadedAt = Date.now();
+    api('GET', '/api/users?limit=5000').then(function (r) {
+      picker.setData({
+        servers: r.servers || [],
+        people: (r.rows || []).map(function (u) {
+          return { key: u.id, name: u.name || u.username || 'Plex user', username: u.username, email: u.email, servers: u.servers || [],
+            plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner };
+        })
       });
+      var sub = document.getElementById('people-sub');
+      if (sub) sub.textContent = plural(picker.count(), 'person', 'people') + ' on ' + plural(picker.serverCount(), 'server', 'servers');
     }).catch(function (e) {
-      if (n !== usersReq) return;
-      list.replaceChildren(el('p', { class: 'st-msg st-msg--error', role: 'alert' }, el('b', { text: 'Error: ' }), e.message));
+      var sub = document.getElementById('people-sub');
+      if (sub) sub.textContent = 'Could not load people: ' + e.message;
     });
   }
+  // Pick up new people now and then (sync runs every 6 hours, new viewers appear as they stream).
+  setInterval(function () { if (picker && Date.now() - usersLoadedAt > 5 * 60000 && !document.hidden) loadUsers(); }, 60000);
 
   // ---------- public API for the page ----------
   window.gsPeople = {

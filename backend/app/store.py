@@ -3,6 +3,7 @@ history row per server per minute for the bandwidth chart, viewing heatmap
 and how long a server has been hot."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -52,7 +53,8 @@ CREATE TABLE IF NOT EXISTS users (
   disabled INTEGER NOT NULL DEFAULT 0,
   first_seen INTEGER,
   last_seen INTEGER,
-  last_login INTEGER
+  last_login INTEGER,
+  servers TEXT
 );
 CREATE INDEX IF NOT EXISTS users_username ON users (username COLLATE NOCASE);
 CREATE TABLE IF NOT EXISTS plays (
@@ -109,6 +111,10 @@ class Store:
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(users)")}
+        if "servers" not in cols:  # added after the first users release
+            self.db.execute("ALTER TABLE users ADD COLUMN servers TEXT")
+            self.db.commit()
         self.box = box
         self.lock = threading.Lock()
 
@@ -254,8 +260,9 @@ class Directory:
             row = self.db.execute("SELECT plex_id FROM users WHERE plex_id = ?", (u["id"],)).fetchone()
             if row is None:
                 self.db.execute(
-                    "INSERT INTO users (plex_id, username, title, email, thumb, shared, is_owner, first_seen, last_seen) VALUES (?,?,?,?,?,?,?,?,?)",
-                    (u["id"], u.get("username"), u.get("title"), u.get("email"), u.get("thumb"), int(bool(shared)), int(bool(is_owner)), now, now if seen else None),
+                    "INSERT INTO users (plex_id, username, title, email, thumb, shared, is_owner, first_seen, last_seen, servers) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    (u["id"], u.get("username"), u.get("title"), u.get("email"), u.get("thumb"), int(bool(shared)), int(bool(is_owner)), now, now if seen else None,
+                     json.dumps(sorted(set(u["servers"]))) if u.get("servers") is not None else None),
                 )
             else:
                 sets, vals = [], []
@@ -269,6 +276,8 @@ class Directory:
                     sets.append("is_owner = ?"); vals.append(int(is_owner))
                 if seen:
                     sets.append("last_seen = ?"); vals.append(now)
+                if u.get("servers") is not None:
+                    sets.append("servers = ?"); vals.append(json.dumps(sorted(set(u["servers"]))))
                 if sets:
                     self.db.execute(f"UPDATE users SET {', '.join(sets)} WHERE plex_id = ?", vals + [u["id"]])
             self.db.commit()
@@ -284,6 +293,19 @@ class Directory:
                 "thumb = COALESCE(NULLIF(users.thumb, ''), excluded.thumb)",
                 (plex_id, name, name, thumb, now, now),
             )
+            self.db.commit()
+
+    def add_user_server(self, plex_id: str, server: str) -> None:
+        """Remember a server this person uses (keeps the ones already known)."""
+        with self.lock:
+            r = self.db.execute("SELECT servers FROM users WHERE plex_id = ?", (plex_id,)).fetchone()
+            if r is None:
+                return
+            have = set(json.loads(r["servers"] or "[]"))
+            if server in have:
+                return
+            have.add(server)
+            self.db.execute("UPDATE users SET servers = ? WHERE plex_id = ?", (json.dumps(sorted(have)), plex_id))
             self.db.commit()
 
     def get_user(self, plex_id: str) -> dict | None:

@@ -12,8 +12,9 @@ hour and a week-by-hour viewing heatmap.
 - Tokens are stored encrypted in SQLite and never sent to the browser.
 - Shows sample data until the first Plex server is added.
 - Keeps every viewer's **playback history** (and can import each server's own
-  Plex watch history). Search people by username or email and open anyone's
-  history from their name on a live stream card.
+  Plex watch history). Find anyone by username or email from a dropdown
+  grouped by the Plex server they are on, or open their history from their
+  name on a live stream card.
 - **Sign in with Plex** for everyone you share a server with. Viewers see only
   the sections you allow. The Plex account in `ADMIN_PLEX_EMAIL` is the only
   Plex administrator; you can also add username and password admin logins
@@ -125,7 +126,8 @@ curl -s http://127.0.0.1:8791/healthz
 | `web/index.html` | The dashboard page |
 | `web/settings.js` | The Settings screen |
 | `web/dash-shim.js` | Loads the signed-in user and the data the page may show |
-| `web/people.js` | User menu, Users search, playback history, loading splash |
+| `web/people.js` | User menu, Users card, playback history, loading splash |
+| `web/user-picker.js` | Find-a-person dropdown grouped by Plex server |
 | `web/login.html`, `web/login.js` | Sign-in page |
 | `web/assets/` | Logo, mark, favicon and app icons from the Greystar logo pack |
 | `docs/design-system/` | Greystar Networks design system: brand book and tokens |

@@ -18,6 +18,9 @@
   var access = null;
   var accUsers = null;
   var accQ = '';
+  var accServer = '';
+  var accServers = [];
+  var accTotal = 0;
   var accTimer = null;
   var accEditing = null;
   var accRemoving = null;
@@ -506,8 +509,10 @@
   }
 
   function loadAccUsers(quiet) {
-    return api('GET', '/api/users?limit=100&q=' + encodeURIComponent(accQ.trim())).then(function (r) {
-      accUsers = r.rows || [];
+    return api('GET', '/api/users?limit=51&q=' + encodeURIComponent(accQ.trim()) + '&server=' + encodeURIComponent(accServer)).then(function (r) {
+      accUsers = (r.rows || []).slice(0, 50);
+      accTotal = (r.rows || []).length;
+      accServers = r.servers || [];
       if (!quiet) render();
     }).catch(function (e) { setMsg('acc-users', 'error', e.message); });
   }
@@ -571,6 +576,10 @@
       clearTimeout(accTimer);
       accTimer = setTimeout(function () { loadAccUsers(false); }, 220);
     });
+    var serverSel = el('select', { class: 'st-select', id: 'acc-server' }, el('option', { value: '', text: 'All servers' }),
+      accServers.map(function (n) { return el('option', { value: n, text: n }); }));
+    serverSel.value = accServer;
+    serverSel.addEventListener('change', function () { accServer = serverSel.value; drafts['acc-server'] = accServer; loadAccUsers(false); });
     var usersSec = el('section', { class: 'st-section' },
       el('h3', { text: 'Plex users' }),
       el('p', { class: 'st-note', text: sync.synced_at ? 'Shared users last loaded from Plex ' + ago(sync.synced_at) + '.' : 'Load the people you share servers with from your Plex account.' }),
@@ -594,7 +603,7 @@
             }).catch(function (e) { setMsg('acc-users', 'error', e.message); }));
           } })),
       message('acc-users'),
-      field('Find a user', q));
+      el('div', { class: 'st-toolbar' }, field('Find a user', q), field('Plex server', serverSel)));
     var list = el('ul', { class: 'st-list' });
     (accUsers || []).forEach(function (u) {
       var key = 'acc-u-' + u.id;
@@ -651,8 +660,11 @@
       };
       if (def && cus) { def.onchange = sync; cus.onchange = sync; sync(); }
     }, 0);
-    if (accUsers && !accUsers.length) usersSec.appendChild(el('p', { class: 'st-note', text: accQ.trim() ? 'No one matches that search.' : 'No Plex users yet. Sign in with Plex under Plex servers, then Sync Plex users.' }));
-    else usersSec.appendChild(list);
+    if (accUsers && !accUsers.length) usersSec.appendChild(el('p', { class: 'st-note', text: accQ.trim() || accServer ? 'No one matches that search.' : 'No Plex users yet. Sign in with Plex under Plex servers, then Sync Plex users.' }));
+    else {
+      usersSec.appendChild(list);
+      if (accTotal > 50) usersSec.appendChild(el('p', { class: 'st-note', text: 'Showing the first 50. Search or pick a server to find someone else.' }));
+    }
     pane.appendChild(usersSec);
 
     // Local admin logins
