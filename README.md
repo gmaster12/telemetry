@@ -11,6 +11,13 @@ hour and a week-by-hour viewing heatmap.
 - Server CPU and network come from **Netdata Cloud** (or each Netdata agent).
 - Tokens are stored encrypted in SQLite and never sent to the browser.
 - Shows sample data until the first Plex server is added.
+- Keeps every viewer's **playback history** (and can import each server's own
+  Plex watch history). Search people by username or email and open anyone's
+  history from their name on a live stream card.
+- **Sign in with Plex** for everyone you share a server with. Viewers see only
+  the sections you allow. The Plex account in `ADMIN_PLEX_EMAIL` is the only
+  Plex administrator; you can also add username and password admin logins
+  that are not Plex accounts.
 
 ## Install on the Linux server (Docker)
 
@@ -26,8 +33,9 @@ Edit `.env`:
    ```bash
    docker run --rm python:3.12-slim sh -c "pip -q install cryptography && python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
    ```
-2. `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD`: the dashboard login. Settings
-   cannot be saved without them.
+2. `ADMIN_PLEX_EMAIL`: the Plex account (by email) that administers the
+   dashboard. Already set to `cluster@mail.com` in the example.
+3. `COOKIE_SECURE=true` as long as the site is served over HTTPS.
 
 Lock the file down and start it:
 
@@ -43,7 +51,8 @@ HTTPS: see `deploy/nginx-telemetry.conf` or `deploy/Caddyfile.telemetry`.
 
 ## First run
 
-Open the dashboard, sign in, then **Settings** (the sliders button in the top bar):
+Open the dashboard and choose **Sign in with Plex** with the admin Plex account.
+Then open **Settings** (the sliders button in the top bar):
 
 1. **Plex servers**: **Sign in with Plex**, approve in the Plex tab that opens,
    then **Find my servers** and **Add server** for each one. Pick a local or
@@ -54,6 +63,34 @@ Open the dashboard, sign in, then **Settings** (the sliders button in the top ba
    **Test connection**. Back in **Plex servers**, **Edit** each server and pick
    its Netdata node.
 3. **Alerts**: set the CPU level that counts as "hot" (default 85%).
+4. **Access**:
+   - **Sync Plex users** loads everyone you share servers with (names and
+     emails). It also runs by itself every 6 hours.
+   - **Import Plex watch history** copies each server's own history so people
+     have a past from day one. Safe to run again.
+   - **Default access for Plex users** picks the sections viewers see. Each
+     person can get custom access or be turned off.
+   - **Admin logins** adds username and password logins with full admin rights.
+
+## Sign-in and roles
+
+| Who | How they sign in | What they see |
+|---|---|---|
+| The Plex account in `ADMIN_PLEX_EMAIL` | Sign in with Plex | Everything, plus Settings |
+| Admin logins | Administrator sign-in (username and password) | Everything, plus Settings |
+| Anyone you share a Plex server with, or who has streamed | Sign in with Plex | Only the sections allowed in Access (default: their own history) |
+| Any other Plex account | Refused | Nothing |
+
+Sections: Live streams, Servers, Bandwidth, When people watch, My history.
+Viewers never see email addresses of other people or any settings.
+
+If you are ever locked out, create an admin login from the server:
+
+```bash
+docker compose exec -it telemetry python -m app.tools.admin create ops      # prompts for a password
+docker compose exec -it telemetry python -m app.tools.admin password ops    # reset it
+docker compose exec telemetry python -m app.tools.admin list
+```
 
 The bandwidth chart fills in within an hour and the viewing heatmap within a
 week, because Plex only reports what is playing now; the app records one
@@ -71,7 +108,7 @@ cd /opt/telemetry && git pull && docker compose up -d --build
 docker compose logs -f telemetry
 docker compose exec telemetry python -m app.tools.probe plex      # raw Plex sessions and how they map
 docker compose exec telemetry python -m app.tools.probe netdata   # raw Netdata Cloud responses
-curl -s -u USER:PASS http://127.0.0.1:8791/api/status
+curl -s http://127.0.0.1:8791/healthz
 ```
 
 ## Layout
@@ -82,8 +119,13 @@ curl -s -u USER:PASS http://127.0.0.1:8791/api/status
 | `backend/app/plex.py` | Plex client, Sign in with Plex, session mapping |
 | `backend/app/netdata.py` | Netdata Cloud and agent clients |
 | `backend/app/poller.py` | Background polling and per-minute history |
-| `backend/app/store.py` | SQLite: servers, settings, history |
+| `backend/app/store.py` | SQLite: servers, settings, minute samples, users, plays, admin logins, sessions |
+| `backend/app/auth.py` | Sign-in sessions, roles, sections, password hashing |
+| `backend/app/tools/admin.py` | Command line for admin logins |
 | `web/index.html` | The dashboard page |
 | `web/settings.js` | The Settings screen |
-| `web/dash-shim.js` | Loads data from the API for the page |
+| `web/dash-shim.js` | Loads the signed-in user and the data the page may show |
+| `web/people.js` | User menu, Users search, playback history, loading splash |
+| `web/login.html`, `web/login.js` | Sign-in page |
+| `web/assets/` | Logo, mark, favicon and app icons from the Greystar logo pack |
 | `docs/design-system/` | Greystar Networks design system: brand book and tokens |

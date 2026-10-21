@@ -5,8 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Greystar Telemetry</title>
 <meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#070912">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-title" content="Telemetry">
 <link rel="stylesheet" href="system.css">
 <link rel="stylesheet" href="settings.css">
+<link rel="stylesheet" href="people.css">
 <script src="vendor/d3-7.9.0.min.js"></script>
 <script src="dash-shim.js"></script>
 </head>
@@ -414,6 +421,11 @@
   }
 </style>
 
+<div class="gs-splash" id="splash" role="status" aria-label="Loading">
+  <img src="assets/logo-glow.png" alt="Greystar Networks" width="1000" height="250">
+  <div class="gs-splash__dots" aria-hidden="true"><i></i><i></i><i></i></div>
+  <p>Connecting to your Plex servers</p>
+</div>
 <div class="gs-app" id="streams-app" data-mtab="home">
   <nav class="sd-nav" id="nav" aria-label="Sections"></nav>
 
@@ -423,9 +435,10 @@
         <div class="sd-settings__head"><h2 class="sd-settings__title" id="set-title">Settings</h2><button type="button" class="sd-settings__close" id="set-close" aria-label="Close settings"></button></div>
         <div class="st-tabs" role="tablist" aria-label="Settings sections">
           <button type="button" class="gs-chip gs-chip--selected" role="tab" id="st-tab-display" aria-selected="true" aria-controls="st-pane-display" data-tab="display">Display</button>
-          <button type="button" class="gs-chip" role="tab" id="st-tab-plex" aria-selected="false" aria-controls="st-pane-plex" data-tab="plex">Plex servers</button>
-          <button type="button" class="gs-chip" role="tab" id="st-tab-netdata" aria-selected="false" aria-controls="st-pane-netdata" data-tab="netdata">Netdata</button>
-          <button type="button" class="gs-chip" role="tab" id="st-tab-alerts" aria-selected="false" aria-controls="st-pane-alerts" data-tab="alerts">Alerts</button>
+          <button type="button" class="gs-chip" role="tab" id="st-tab-plex" aria-selected="false" aria-controls="st-pane-plex" data-tab="plex" data-admin hidden>Plex servers</button>
+          <button type="button" class="gs-chip" role="tab" id="st-tab-netdata" aria-selected="false" aria-controls="st-pane-netdata" data-tab="netdata" data-admin hidden>Netdata</button>
+          <button type="button" class="gs-chip" role="tab" id="st-tab-alerts" aria-selected="false" aria-controls="st-pane-alerts" data-tab="alerts" data-admin hidden>Alerts</button>
+          <button type="button" class="gs-chip" role="tab" id="st-tab-access" aria-selected="false" aria-controls="st-pane-access" data-tab="access" data-admin hidden>Access</button>
         </div>
         <div class="st-pane" id="st-pane-display" role="tabpanel" aria-labelledby="st-tab-display">
           <div class="sd-field">
@@ -439,9 +452,11 @@
         <div class="st-pane" id="st-pane-plex" role="tabpanel" aria-labelledby="st-tab-plex" hidden></div>
         <div class="st-pane" id="st-pane-netdata" role="tabpanel" aria-labelledby="st-tab-netdata" hidden></div>
         <div class="st-pane" id="st-pane-alerts" role="tabpanel" aria-labelledby="st-tab-alerts" hidden></div>
+        <div class="st-pane" id="st-pane-access" role="tabpanel" aria-labelledby="st-tab-access" hidden></div>
       </section>
     </div>
     <div class="sd-top">
+      <a class="sd-brand sd-brand--top" href="/" aria-label="Greystar Telemetry home"><img src="assets/mark-glow.png" alt="" width="160" height="126"></a>
       <div class="sd-livebar">
         <span class="sd-pill-title">Live now</span>
         <span class="sd-clock"><span class="sd-clock__dot" id="clock-icon"></span><span id="asof">—</span></span>
@@ -449,10 +464,14 @@
       </div>
       <div class="sd-look" role="group" aria-label="Appearance" id="look"></div>
       <button type="button" class="sd-gear" id="gear" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="settings"></button>
-      <div class="sd-user" id="user">
-        <span class="sd-avatar sd-avatar--2" aria-hidden="true">G<span class="sd-avatar__on"></span></span>
-        <span class="sd-user__text"><span class="sd-user__name">Glenn</span><br><span class="sd-user__org">Greystar Networks</span></span>
-      </div>
+      <div class="sd-user" id="user"></div>
+    </div>
+
+    <div class="sd-lockup">
+      <img class="sd-lockup__light" src="assets/logo-charcoal.png" alt="Greystar Networks" width="600" height="138">
+      <img class="sd-lockup__dark" src="assets/logo-glow.png" alt="Greystar Networks" width="1000" height="250">
+      <span class="sd-lockup__div" aria-hidden="true"></span>
+      <span class="sd-lockup__label">Telemetry</span>
     </div>
 
     <header class="sd-head">
@@ -590,12 +609,17 @@
       </div>
     </section>
 
+    <section class="sd-section" id="people-card" aria-labelledby="people-title" hidden></section>
+
     <section class="sd-section" id="alerts" aria-labelledby="al-title">
       <div class="sd-sec-head"><h2 class="sd-sec-title" id="al-title">Alerts</h2><span class="sd-sec-count" id="al-count"></span></div>
       <div class="sd-alertlist" id="alertlist" data-source="streams server_load"></div>
     </section>
 
     <nav class="sd-tabbar" id="tabbar" aria-label="Sections"></nav>
+  </div>
+  <div class="gp-drawer" id="hist" hidden role="dialog" aria-modal="true" aria-labelledby="hist-title">
+    <div class="gp-drawer__panel"></div>
   </div>
 </div>
 
@@ -639,6 +663,7 @@
     title: 'Viewing peak and quiet window',
     description: 'Busiest hour of the week, and the quietest 3-hour daytime window across the three quietest weekdays.',
     fn: (viewing_hours) => {
+      if (!viewing_hours.length) return [];
       const order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
       const fmtH = (h) => (h % 12 === 0 ? 12 : h % 12) + (h < 12 ? ' AM' : ' PM');
       const peak = viewing_hours.reduce((a, r) => (r.streams > a.streams ? r : a), viewing_hours[0]);
@@ -698,7 +723,10 @@
     close: ['M6 6l12 12', 'M18 6 6 18'],
     sun: ['M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', 'M12 2v2', 'M12 20v2', 'm4.9 4.9 1.4 1.4', 'm17.7 17.7 1.4 1.4', 'M2 12h2', 'M20 12h2', 'm4.9 19.1 1.4-1.4', 'm17.7 6.3 1.4-1.4'],
     moon: ['M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z'],
-    auto: ['M3 5h18v11H3z', 'M8 20h8', 'M12 16v4']
+    auto: ['M3 5h18v11H3z', 'M8 20h8', 'M12 16v4'],
+    users: ['M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', 'M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1', 'M16 3.1a4 4 0 0 1 0 7.8', 'M22 21v-1a6 6 0 0 0-4-5.6'],
+    history: ['M3 12a9 9 0 1 0 3-6.7L3 8', 'M3 3v5h5', 'M12 7v5l3 2'],
+    logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'm16 17 5-5-5-5', 'M21 12H9']
   };
   function icon(name, size) {
     const s = document.createElementNS(svgNS, 'svg');
@@ -708,6 +736,7 @@
     ICONS[name].forEach((d) => { const p = document.createElementNS(svgNS, 'path'); p.setAttribute('d', d); s.appendChild(p); });
     return s;
   }
+  window.sdIcon = icon;
   function el(tag, cls, text) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -773,17 +802,26 @@
     const target = id === 'top' ? root : document.getElementById(id);
     if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); dash.setLink(id === 'top' ? 'summary' : id); }
   };
+  const can = (s) => !window.dash.me || !window.dash.me() || window.dash.can(s);
+  const isAdmin = () => !!(window.dash.isAdmin && window.dash.isAdmin());
   const NAV = [
-    { id: 'summary', label: 'Overview', icon: 'grid' },
-    { id: 'bandwidth-card', label: 'Bandwidth', icon: 'activity' },
-    { id: 'servers-card', label: 'Servers', icon: 'server' },
-    { id: 'streams-card', label: 'Streams', icon: 'play' }
+    { id: 'summary', label: 'Overview', icon: 'grid', ok: () => can('streams') },
+    { id: 'bandwidth-card', label: 'Bandwidth', icon: 'activity', ok: () => can('bandwidth') },
+    { id: 'servers-card', label: 'Servers', icon: 'server', ok: () => can('servers') },
+    { id: 'streams-card', label: 'Streams', icon: 'play', ok: () => can('streams') },
+    { id: 'people-card', label: 'Users', icon: 'users', ok: () => isAdmin() },
+    { id: 'people-card', label: 'My history', icon: 'history', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') }
   ];
   let navActive = 'summary';
   function renderNav() {
     const nav = document.getElementById('nav');
     nav.replaceChildren();
-    NAV.forEach((n) => {
+    const brand = el('a', 'sd-brand');
+    brand.href = '/'; brand.setAttribute('aria-label', 'Greystar Telemetry home');
+    const mark = el('img'); mark.src = 'assets/mark-glow.png'; mark.alt = ''; mark.width = 160; mark.height = 126;
+    brand.appendChild(mark);
+    nav.appendChild(brand);
+    NAV.filter((n) => n.ok()).forEach((n) => {
       const b = el('button', 'sd-navbtn');
       b.type = 'button'; b.title = n.label; b.setAttribute('aria-label', n.label);
       b.setAttribute('aria-current', navActive === n.id ? 'true' : 'false');
@@ -1104,7 +1142,10 @@
     const head = el('div', 'sd-card__head');
     head.appendChild(avatar(r.user, 'lg'));
     const who = el('div', 'sd-scard__who');
-    who.append(el('h3', 'sd-scard__name', r.user), el('p', 'sd-scard__title', r.title));
+    const nameEl = el('h3', 'sd-scard__name');
+    const nb = window.gsPeople && window.gsPeople.nameButton(r);
+    if (nb) nameEl.appendChild(nb); else nameEl.textContent = r.user;
+    who.append(nameEl, el('p', 'sd-scard__title', r.title));
     const foot = el('div', 'sd-scard__foot');
     const left = el('div');
     left.appendChild(el('span', 'sd-micro', 'Playing on'));
@@ -1129,7 +1170,10 @@
     const card = notchCard('sd-scard sd-back sd-face', 'Flip back', (e) => { e.stopPropagation(); toggleFlip(r.id, e.currentTarget.closest('.sd-flip__inner')); });
     card.style.setProperty('--art', 'url(' + artFor(r) + ')');
     const head = el('div', 'sd-card__head');
-    head.append(el('p', 'sd-back__eyebrow', 'Playback details'), el('h3', 'sd-back__title', r.title), el('p', 'sd-back__sub', r.user + ' \u00b7 ' + r.id + ' \u00b7 ' + r.location));
+    const sub = el('p', 'sd-back__sub');
+    const nb = window.gsPeople && window.gsPeople.nameButton(r);
+    sub.append(nb || document.createTextNode(r.user), document.createTextNode(' \u00b7 ' + r.id + ' \u00b7 ' + r.location));
+    head.append(el('p', 'sd-back__eyebrow', 'Playback details'), el('h3', 'sd-back__title', r.title), sub);
     const tags = el('div', 'sd-tags');
     tags.appendChild(badge(METHOD_TONE[r.method] || 'neutral', r.method));
     tags.appendChild(el('span', 'sd-tag', r.quality));
@@ -1169,6 +1213,20 @@
     wrap.appendChild(inner);
     return wrap;
   }
+  function idleState() {
+    const box = el('div', 'sd-idle');
+    [['assets/mark-charcoal.png', 'sd-wm--light'], ['assets/mark-white.png', 'sd-wm--dark']].forEach(([src, cls]) => {
+      const img = el('img', cls); img.src = src; img.alt = ''; img.width = 480; img.height = 366; box.appendChild(img);
+    });
+    const sv = dash.data('servers');
+    const list = sv.status === 'ok' ? sv.data : [];
+    const on = list.filter((s) => s.status !== 'Offline').length;
+    const sub = !list.length ? 'New streams show up here within 10 seconds.'
+      : on === list.length ? (list.length === 1 ? 'Your server is online and idle.' : 'All ' + list.length + ' servers are online and idle.') + ' New streams show up here within 10 seconds.'
+      : on + ' of ' + list.length + ' servers are online. New streams show up here within 10 seconds.';
+    box.append(el('b', null, 'Nothing playing right now'), el('span', null, sub));
+    return box;
+  }
   function renderStreams() {
     const d = dash.data('streams');
     const p = dash.params();
@@ -1202,6 +1260,13 @@
     if (d.status !== 'ok') return;
     const rows = visibleRows();
     const none = 'No streams match' + (p.server ? ' on ' + p.server : '') + ' right now.';
+    if (!d.data.length && view !== 'table') {
+      const box = view === 'rows' ? list : view === 'carousel' ? car : cards;
+      box.appendChild(idleState());
+      hint.hidden = true;
+      renderSheet();
+      return;
+    }
     renderSheet();
     if (view === 'rows') {
       if (!rows.length) list.appendChild(el('p', 'sd-empty', none));
@@ -1248,6 +1313,7 @@
         if (c.key === 'method') td.appendChild(badge(METHOD_TONE[v] || 'neutral', v));
         else if (c.key === 'state') td.appendChild(badge(STATE_TONE[v] || 'neutral', v));
         else if (c.key === 'bitrate_mbps') td.textContent = n1(v);
+        else if (c.key === 'user' && window.gsPeople && window.gsPeople.canOpen(r)) td.appendChild(window.gsPeople.nameButton(r));
         else if (c.key === 'progress_pct') {
           const bar = el('span', 'sd-prog'); bar.setAttribute('aria-hidden', 'true');
           const fill = el('i'); fill.style.width = Math.min(100, v) + '%'; bar.appendChild(fill);
@@ -1295,6 +1361,13 @@
     top.append(th, head);
     const body = el('div', 'sd-sheet__body');
     body.append(...parts.slice(1));
+    if (window.gsPeople && window.gsPeople.canOpen(r)) {
+      const hb = el('button', 'st-btn st-btn--accent gp-histbtn');
+      hb.type = 'button';
+      hb.append(icon('history', 18), document.createTextNode(r.user + '\u2019s history'));
+      hb.addEventListener('click', () => window.gsPeople.openHistory(r.user_id, r.user));
+      body.appendChild(hb);
+    }
     sheet.append(el('div', 'sd-sheet__grab'), close, top, body);
   }
 
@@ -1344,18 +1417,30 @@
   }
 
   /* Phone tab bar */
-  const TABS = [{ id: 'home', label: 'Home', icon: 'grid', link: 'summary' }, { id: 'servers', label: 'Servers', icon: 'server', link: 'servers-card' }, { id: 'streams', label: 'Streams', icon: 'play', link: 'streams-card' }, { id: 'alerts', label: 'Alerts', icon: 'bell', link: 'alerts' }];
+  const TABS = [
+    { id: 'home', label: 'Home', icon: 'grid', link: 'summary', ok: () => can('streams') || can('bandwidth') || can('viewing') },
+    { id: 'servers', label: 'Servers', icon: 'server', link: 'servers-card', ok: () => can('servers') },
+    { id: 'streams', label: 'Streams', icon: 'play', link: 'streams-card', ok: () => can('streams') },
+    { id: 'alerts', label: 'Alerts', icon: 'bell', link: 'alerts', ok: () => can('streams') && can('servers') },
+    { id: 'people', label: 'Users', icon: 'users', link: 'people-card', ok: () => isAdmin() },
+    { id: 'people', label: 'History', icon: 'history', link: 'people-card', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') }
+  ];
+  const okTabs = () => TABS.filter((t) => t.ok());
+  window.sdGoTab = (id) => { if (isMobile()) goTab(id); };
   function goTab(id) {
     mtab = id;
     root.dataset.mtab = id;
     renderAll();
     root.scrollIntoView({ block: 'start' });
-    dash.setLink(TABS.find((t) => t.id === id).link);
+    const t = TABS.find((x) => x.id === id);
+    if (t) dash.setLink(t.link);
   }
   function renderTabbar(alertCount) {
     const bar = document.getElementById('tabbar');
     bar.replaceChildren();
-    TABS.forEach((t) => {
+    const tabs = okTabs();
+    bar.classList.toggle('is-single', tabs.length < 2);
+    tabs.forEach((t) => {
       const b = el('button', 'sd-tab'); b.type = 'button';
       b.setAttribute('aria-current', mtab === t.id ? 'true' : 'false');
       b.setAttribute('aria-label', t.label + (t.id === 'alerts' && alertCount ? ', ' + alertCount + ' alerts' : ''));
@@ -1523,7 +1608,10 @@
   document.getElementById('card-size-reset').addEventListener('click', () => { applySize(100); dash.setParams({ cardsize: 100 }); });
 
   function renderAll() {
+    const tabs = okTabs();
+    if (tabs.length && !tabs.some((t) => t.id === mtab)) mtab = tabs[0].id;
     root.dataset.mtab = mtab;
+    renderNav();
     document.getElementById('sample-badge').hidden = !(dash.isSample && dash.isSample());
     applySize(Number(dash.params().cardsize) || 100);
     renderLook();
@@ -1542,6 +1630,7 @@
 })();
 </script>
 
+<script src="people.js"></script>
 <script src="settings.js"></script>
 </body>
 </html>

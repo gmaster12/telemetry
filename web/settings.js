@@ -15,8 +15,20 @@
   var busy = {};
   var drafts = {};
   var manualOpen = false;
+  var access = null;
+  var accUsers = null;
+  var accQ = '';
+  var accTimer = null;
+  var accEditing = null;
+  var accRemoving = null;
+  var me = null;
 
   window.stActiveTab = function () { return tab; };
+  window.stOpenTab = function (t) { setTab(t); };
+  window.stFocusUser = function (q) { accQ = q || ''; accEditing = null; drafts['acc-q'] = accQ; };
+  function isAdmin() { return !!(me && me.role === 'admin'); }
+  document.addEventListener('gs:me', function (e) { me = e.detail; });
+  if (window.gsMe) me = window.gsMe;
 
   // ---------- helpers ----------
   function el(tag, props) {
@@ -132,11 +144,12 @@
       b.classList.toggle('gs-chip--selected', on);
       b.tabIndex = on ? 0 : -1;
     });
-    ['display', 'plex', 'netdata', 'alerts'].forEach(function (p) {
+    ['display', 'plex', 'netdata', 'alerts', 'access'].forEach(function (p) {
       var pane = document.getElementById('st-pane-' + p);
       if (pane) pane.hidden = p !== t;
     });
-    if (t !== 'display') loadState();
+    if (t === 'access') loadAccess();
+    else if (t !== 'display' && isAdmin()) loadState();
   }
 
   document.querySelectorAll('.st-tabs [role="tab"]').forEach(function (b) {
@@ -483,20 +496,241 @@
       message('alerts')));
   }
 
-  // ---------- render ----------
-  function readOnlyNote() {
-    if (!state || state.auth_configured) return null;
-    return el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }),
-      'Settings can’t be saved until a dashboard login is set. Add BASIC_AUTH_USER and BASIC_AUTH_PASSWORD to the server’s .env and restart.');
+  // ---------- Access: who can sign in and what they see ----------
+  function loadAccess() {
+    if (!isAdmin()) return Promise.resolve();
+    return Promise.all([api('GET', '/api/settings/access'), api('GET', '/api/settings'), loadAccUsers(true)]).then(function (r) {
+      access = r[0];
+      state = r[1];
+    }).then(render).catch(function (e) { setMsg('load', 'error', e.message); });
   }
 
+  function loadAccUsers(quiet) {
+    return api('GET', '/api/users?limit=100&q=' + encodeURIComponent(accQ.trim())).then(function (r) {
+      accUsers = r.rows || [];
+      if (!quiet) render();
+    }).catch(function (e) { setMsg('acc-users', 'error', e.message); });
+  }
+
+  function sectionChecks(prefix, chosen) {
+    var box = el('div', { class: 'st-checks', role: 'group' });
+    access.sections.forEach(function (sec) {
+      box.appendChild(el('label', { title: sec.hint },
+        el('input', { type: 'checkbox', id: prefix + '-' + sec.key, value: sec.key, checked: chosen.indexOf(sec.key) >= 0 }), sec.label));
+    });
+    return box;
+  }
+
+  function checked(prefix) {
+    return access.sections.map(function (s) { return s.key; }).filter(function (k) {
+      var c = document.getElementById(prefix + '-' + k);
+      return c && c.checked;
+    });
+  }
+
+  function ago(ts) {
+    if (!ts) return 'never';
+    var d = new Date(ts * 1000);
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function renderAccess(pane) {
+    if (!access) { pane.appendChild(el('p', { class: 'st-note', text: 'Loading…' })); return; }
+    var label = function (k) { var x = access.sections.find(function (s) { return s.key === k; }); return x ? x.label : k; };
+
+    // Who can sign in
+    pane.appendChild(el('section', { class: 'st-section' },
+      el('h3', { text: 'Who can sign in' }),
+      el('p', { class: 'st-note', text: 'Anyone you share a Plex server with can sign in with their Plex account and sees only the sections you allow. People who stream from your servers are added automatically.' }),
+      el('p', { class: 'st-note' }, 'The only Plex account with administrator access is ',
+        access.admin_plex_email ? el('b', { text: access.admin_plex_email }) : el('b', { text: 'not set' }),
+        access.admin_plex_email ? '. Change it with ADMIN_PLEX_EMAIL on the server.' : '. Set ADMIN_PLEX_EMAIL on the server.')));
+
+    // Defaults
+    pane.appendChild(el('section', { class: 'st-section' },
+      el('h3', { text: 'Default access for Plex users' }),
+      el('p', { class: 'st-note', text: 'Applies to everyone without custom access below.' }),
+      sectionChecks('acc-def', access.default_sections),
+      el('div', { class: 'st-row' },
+        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['acc-def'] ? 'Saving…' : 'Save defaults', disabled: busy['acc-def'],
+          onclick: function () {
+            var picked = checked('acc-def');
+            withBusy('acc-def', api('PUT', '/api/settings/access/defaults', { sections: picked }).then(function () {
+              clearDrafts('acc-def');
+              msgs['acc-def'] = { kind: 'ok', text: 'Saved.' };
+              return loadAccess();
+            }).catch(function (e) { setMsg('acc-def', 'error', e.message); }));
+          } })),
+      message('acc-def')));
+
+    // Plex users
+    var sync = state && state.users_sync || {};
+    var q = input({ type: 'search', placeholder: 'Search by username or email', value: accQ }, 'acc-q');
+    q.addEventListener('input', function () {
+      accQ = q.value;
+      clearTimeout(accTimer);
+      accTimer = setTimeout(function () { loadAccUsers(false); }, 220);
+    });
+    var usersSec = el('section', { class: 'st-section' },
+      el('h3', { text: 'Plex users' }),
+      el('p', { class: 'st-note', text: sync.synced_at ? 'Shared users last loaded from Plex ' + ago(sync.synced_at) + '.' : 'Load the people you share servers with from your Plex account.' }),
+      sync.error ? el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), sync.error) : null,
+      el('div', { class: 'st-row' },
+        el('button', { type: 'button', class: 'st-btn', text: busy['acc-sync'] ? 'Loading users…' : 'Sync Plex users', disabled: busy['acc-sync'],
+          onclick: function () {
+            withBusy('acc-sync', api('POST', '/api/settings/users/sync').then(function (r) {
+              msgs['acc-users'] = { kind: 'ok', text: 'Loaded ' + r.users + ' Plex accounts.' };
+              return loadAccess();
+            }).catch(function (e) { setMsg('acc-users', 'error', e.message); }));
+          } }),
+        el('button', { type: 'button', class: 'st-btn', text: busy['acc-import'] ? 'Importing…' : 'Import Plex watch history', disabled: busy['acc-import'],
+          title: 'Copies each server’s own watch history into the dashboard. Safe to run again.',
+          onclick: function () {
+            withBusy('acc-import', api('POST', '/api/settings/history/import').then(function (r) {
+              var t = 'Imported ' + r.added + ' plays' + (r.already_had ? ', ' + r.already_had + ' were already here' : '') + '.';
+              if (r.errors && r.errors.length) t += ' Problems: ' + r.errors.join('; ');
+              msgs['acc-users'] = { kind: r.errors && r.errors.length ? 'error' : 'ok', text: t };
+              return loadAccUsers(false);
+            }).catch(function (e) { setMsg('acc-users', 'error', e.message); }));
+          } })),
+      message('acc-users'),
+      field('Find a user', q));
+    var list = el('ul', { class: 'st-list' });
+    (accUsers || []).forEach(function (u) {
+      var key = 'acc-u-' + u.id;
+      var item = el('li', { class: 'st-item' });
+      var what = u.admin ? 'Administrator, sees everything'
+        : u.disabled ? 'Access turned off'
+        : (u.custom_sections ? 'Custom: ' : 'Default: ') + (u.sections.length ? u.sections.map(label).join(', ') : 'nothing');
+      item.appendChild(el('div', { class: 'st-item__top' },
+        el('span', { class: 'st-dot ' + (u.admin ? 'st-dot--online' : u.disabled ? 'st-dot--offline' : ''), 'aria-hidden': 'true' }),
+        el('span', { class: 'st-item__name', text: u.name || u.username }),
+        u.admin ? el('span', { class: 'st-tag st-tag--ok', text: 'Admin' }) : null,
+        u.disabled ? el('span', { class: 'st-tag', text: 'Off' }) : null,
+        el('span', { class: 'st-spacer' }),
+        u.admin ? null : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Change access', 'aria-expanded': accEditing === u.id ? 'true' : 'false',
+          onclick: function () { accEditing = accEditing === u.id ? null : u.id; clearDrafts(key); render(); } })));
+      item.appendChild(el('div', { class: 'st-item__meta', text: [u.username && u.username !== u.name ? '@' + u.username : null, u.email || 'no email on file'].filter(Boolean).join(' · ') }));
+      item.appendChild(el('div', { class: 'st-item__meta', text: what + ' · ' + (u.last_login ? 'last signed in ' + ago(u.last_login) : 'never signed in') }));
+      if (accEditing === u.id) {
+        var useDef = el('input', { type: 'radio', name: key + '-mode', value: 'default', id: key + '-def', checked: !u.custom_sections });
+        var useCustom = el('input', { type: 'radio', name: key + '-mode', value: 'custom', id: key + '-cus', checked: !!u.custom_sections });
+        var off = el('input', { type: 'checkbox', id: key + '-off', checked: u.disabled });
+        item.appendChild(el('div', { class: 'st-form' },
+          el('div', { class: 'st-wide st-row' },
+            el('label', { class: 'st-check' }, useDef, 'Default access (' + (access.default_sections.map(label).join(', ') || 'nothing') + ')'),
+            el('label', { class: 'st-check' }, useCustom, 'Custom')),
+          el('div', { class: 'st-wide', id: key + '-sbox' }, sectionChecks(key + '-s', u.custom_sections || u.sections)),
+          el('div', { class: 'st-wide' }, el('label', { class: 'st-check' }, off, 'Turn off this person’s access')),
+          el('div', { class: 'st-wide st-row' },
+            el('span', { class: 'st-spacer' }),
+            el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Cancel', onclick: function () { accEditing = null; render(); } }),
+            el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy[key] ? 'Saving…' : 'Save', disabled: busy[key],
+              onclick: function () {
+                var body = { disabled: document.getElementById(key + '-off').checked };
+                if (document.getElementById(key + '-def').checked) body.use_defaults = true;
+                else body.sections = checked(key + '-s');
+                withBusy(key, api('PUT', '/api/settings/users/' + encodeURIComponent(u.id), body).then(function () {
+                  accEditing = null; clearDrafts(key);
+                  msgs['acc-users'] = { kind: 'ok', text: 'Saved access for ' + (u.name || u.username) + '.' };
+                  return loadAccUsers(false);
+                }).catch(function (e) { setMsg(key, 'error', e.message); }));
+              } })),
+          el('div', { class: 'st-wide' }, message(key))));
+      }
+      list.appendChild(item);
+    });
+    // Custom section boxes only apply when Custom is chosen.
+    setTimeout(function () {
+      if (!accEditing) return;
+      var k = 'acc-u-' + accEditing;
+      var def = document.getElementById(k + '-def');
+      var cus = document.getElementById(k + '-cus');
+      var sync = function () {
+        document.querySelectorAll('#' + CSS.escape(k + '-sbox') + ' input').forEach(function (c) { c.disabled = def.checked; });
+      };
+      if (def && cus) { def.onchange = sync; cus.onchange = sync; sync(); }
+    }, 0);
+    if (accUsers && !accUsers.length) usersSec.appendChild(el('p', { class: 'st-note', text: accQ.trim() ? 'No one matches that search.' : 'No Plex users yet. Sign in with Plex under Plex servers, then Sync Plex users.' }));
+    else usersSec.appendChild(list);
+    pane.appendChild(usersSec);
+
+    // Local admin logins
+    var aUser = input({ placeholder: 'e.g. ops', autocomplete: 'off' }, 'acc-new-user');
+    var aPw = input({ type: 'password', autocomplete: 'new-password' }, 'acc-new-pw');
+    var aPw2 = input({ type: 'password', autocomplete: 'new-password' }, 'acc-new-pw2');
+    var admins = el('ul', { class: 'st-list' });
+    access.admins.forEach(function (a) {
+      var mine = me && me.kind === 'local' && String(me.id) === String(a.id);
+      admins.appendChild(el('li', { class: 'st-item' },
+        el('div', { class: 'st-item__top' },
+          el('span', { class: 'st-item__name', text: a.username }),
+          mine ? el('span', { class: 'st-tag', text: 'You' }) : null,
+          el('span', { class: 'st-spacer' }),
+          mine ? null : accRemoving === a.id
+            ? el('span', { class: 'st-row' }, el('span', { class: 'st-note', text: 'Delete ' + a.username + '?' }),
+                el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Keep', onclick: function () { accRemoving = null; render(); } }),
+                el('button', { type: 'button', class: 'st-btn st-btn--danger', text: busy['acc-del-' + a.id] ? 'Deleting…' : 'Delete', onclick: function () {
+                  withBusy('acc-del-' + a.id, api('DELETE', '/api/settings/admins/' + a.id).then(function () {
+                    accRemoving = null; return loadAccess();
+                  }).catch(function (e) { setMsg('acc-admins', 'error', e.message); }));
+                } }))
+            : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Delete…', onclick: function () { accRemoving = a.id; render(); } })),
+        el('div', { class: 'st-item__meta', text: 'Created ' + ago(a.created) + ' · ' + (a.last_login ? 'last signed in ' + ago(a.last_login) : 'never signed in') })));
+    });
+    var adminSec = el('section', { class: 'st-section' },
+      el('h3', { text: 'Admin logins (not Plex accounts)' }),
+      el('p', { class: 'st-note', text: 'Username and password logins with full administrator access. Use them for people who should manage the dashboard without a Plex account.' }),
+      access.admins.length ? admins : el('p', { class: 'st-note', text: 'None yet.' }),
+      el('details', { class: 'st-details', id: 'acc-add', open: !!msgs['acc-admins'] || !!drafts['acc-new-user'] },
+        el('summary', { text: 'Add an admin login' }),
+        el('div', { class: 'st-form' },
+          el('div', { class: 'st-wide' }, field('Username', aUser, 'Letters, numbers, dots, dashes, underscores or @.')),
+          field('Password', aPw, 'At least 12 characters.'), field('Repeat password', aPw2),
+          el('div', { class: 'st-wide st-row' },
+            el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['acc-add'] ? 'Adding…' : 'Add admin login', disabled: busy['acc-add'],
+              onclick: function () {
+                if (aPw.value !== aPw2.value) { setMsg('acc-admins', 'error', 'The passwords do not match.'); return; }
+                withBusy('acc-add', api('POST', '/api/settings/admins', { username: aUser.value.trim(), password: aPw.value }).then(function () {
+                  clearDrafts('acc-new');
+                  msgs['acc-admins'] = { kind: 'ok', text: 'Added ' + aUser.value.trim() + '. They can sign in under Administrator sign-in.' };
+                  return loadAccess();
+                }).catch(function (e) { setMsg('acc-admins', 'error', e.message); }));
+              } })))),
+      message('acc-admins'));
+    pane.appendChild(adminSec);
+
+    if (me && me.kind === 'local') {
+      var cur = input({ type: 'password', autocomplete: 'current-password' }, 'acc-pw-cur');
+      var nw = input({ type: 'password', autocomplete: 'new-password' }, 'acc-pw-new');
+      var nw2 = input({ type: 'password', autocomplete: 'new-password' }, 'acc-pw-new2');
+      pane.appendChild(el('section', { class: 'st-section' },
+        el('h3', { text: 'Change my password' }),
+        el('div', { class: 'st-form' },
+          el('div', { class: 'st-wide' }, field('Current password', cur)),
+          field('New password', nw, 'At least 12 characters.'), field('Repeat new password', nw2),
+          el('div', { class: 'st-wide st-row' },
+            el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['acc-pw'] ? 'Saving…' : 'Change password', disabled: busy['acc-pw'],
+              onclick: function () {
+                if (nw.value !== nw2.value) { setMsg('acc-pw', 'error', 'The new passwords do not match.'); return; }
+                withBusy('acc-pw', api('PUT', '/api/settings/admins/me/password', { current: cur.value, new: nw.value }).then(function () {
+                  clearDrafts('acc-pw');
+                  msgs['acc-pw'] = { kind: 'ok', text: 'Password changed. Other sessions for this login were signed out.' };
+                }).catch(function (e) { setMsg('acc-pw', 'error', e.message); }));
+              } }))),
+        message('acc-pw')));
+    }
+  }
+
+  // ---------- render ----------
   function render() {
     if (tab === 'display') return;
     var pane = document.getElementById('st-pane-' + tab);
     if (!pane) return;
     var active = document.activeElement && pane.contains(document.activeElement) ? document.activeElement.id : null;
     pane.querySelectorAll('input[id], select[id]').forEach(function (f) {
-      if (f.type !== 'radio') drafts[f.id] = f.value;
+      if (f.type === 'checkbox') drafts['chk:' + f.id] = f.checked;
+      else if (f.type !== 'radio') drafts[f.id] = f.value;
     });
     pane.querySelectorAll('input[type="radio"]:checked').forEach(function (f) { drafts['radio:' + f.name] = f.value; });
     pane.replaceChildren();
@@ -504,8 +738,6 @@
       pane.appendChild(msgs.load ? message('load') : el('p', { class: 'st-note', text: 'Loading…' }));
       return;
     }
-    var ro = readOnlyNote();
-    if (ro) pane.appendChild(ro);
     if (tab === 'plex') {
       pane.appendChild(renderAccount());
       var disc = renderDiscovered();
@@ -516,9 +748,12 @@
       renderNetdata(pane);
     } else if (tab === 'alerts') {
       renderAlerts(pane);
+    } else if (tab === 'access') {
+      renderAccess(pane);
     }
     pane.querySelectorAll('input[id], select[id]').forEach(function (f) {
-      if (f.type !== 'radio' && Object.prototype.hasOwnProperty.call(drafts, f.id)) f.value = drafts[f.id];
+      if (f.type === 'checkbox') { if (Object.prototype.hasOwnProperty.call(drafts, 'chk:' + f.id)) f.checked = drafts['chk:' + f.id]; }
+      else if (f.type !== 'radio' && Object.prototype.hasOwnProperty.call(drafts, f.id)) f.value = drafts[f.id];
     });
     pane.querySelectorAll('input[type="radio"]').forEach(function (f) {
       var v = drafts['radio:' + f.name];
@@ -530,7 +765,10 @@
   }
 
   function clearDrafts(prefix) {
-    Object.keys(drafts).forEach(function (k) { if (k.indexOf(prefix + '-') === 0) delete drafts[k]; });
+    Object.keys(drafts).forEach(function (k) {
+      var id = k.indexOf('chk:') === 0 ? k.slice(4) : k.indexOf('radio:') === 0 ? k.slice(6) : k;
+      if (id.indexOf(prefix + '-') === 0) delete drafts[k];
+    });
   }
 
   setTab('display');

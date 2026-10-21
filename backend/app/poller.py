@@ -10,8 +10,8 @@ import httpx
 
 from .config import AppCfg, ServerCfg
 from .netdata import NetdataClient
-from .plex import PlexClient, normalize_session
-from .store import Store
+from .plex import PlexAccount, PlexClient, normalize_session
+from .store import Directory, Store
 
 log = logging.getLogger("telemetry.poller")
 
@@ -31,6 +31,12 @@ class Poller:
         self.last_poll: float | None = None
         self._last_minute = 0
         self._wake = asyncio.Event()
+        self.directory = Directory(store)
+        self.active_plays: dict[tuple[str, str], dict] = {}
+        self.users_synced_at: float = 0.0
+        self.users_sync_error: str | None = None
+        self.client_id: str = "greystar-telemetry"
+        self.directory.close_stale_plays()
 
     # ---------- config ----------
     def reload(self) -> None:
@@ -63,7 +69,9 @@ class Poller:
                     except Exception as e:  # source details are a nice-to-have
                         log.debug("metadata failed: %s", e)
                 row = normalize_session(s, it, source)
+                row["session_key"] = str(it.get("sessionKey") or (it.get("Session") or {}).get("id") or "")
                 art = row.pop("_art", None)
+                row["_art_path"] = art
                 if art and row["rating_key"]:
                     self.art[(s.id, row["rating_key"])] = art
                     row["poster"] = f"/api/poster/{s.id}/{row['rating_key']}"
@@ -79,8 +87,103 @@ class Poller:
     async def poll_plex(self) -> None:
         servers = [s for s in self.cfg.servers if s.enabled]
         results = await asyncio.gather(*(self._poll_server(s) for s in servers))
-        self.streams = [r for rows in results for r in rows]
+        rows = [r for rs in results for r in rs]
+        online = {name for name, st in self.server_state.items() if st.get("online")}
+        try:
+            self.track_plays(rows, online)
+        except Exception:
+            log.exception("history tracking failed")
+        for r in rows:
+            r.pop("_art_path", None)
+        self.streams = rows
         self.last_poll = time.time()
+
+    def track_plays(self, rows: list[dict], online_servers: set[str]) -> None:
+        """Open, extend and close playback history rows from consecutive polls."""
+        now = int(time.time())
+        seen: set[tuple[str, str]] = set()
+        for r in rows:
+            if not r.get("session_key"):
+                continue
+            key = (r["server"], r["session_key"])
+            seen.add(key)
+            if r.get("user_id") == "1":
+                # Plex reports the server owner as local account 1, not their plex.tv id.
+                owner = self.directory.owner()
+                r["user_id"] = owner["plex_id"] if owner else None
+            if r.get("user_id"):
+                self.directory.saw_user(r["user_id"], r.get("user"), r.get("user_thumb"))
+            act = self.active_plays.get(key)
+            if act and act["rating_key"] != r.get("rating_key"):
+                self.directory.stop_play(act["id"])
+                act = None
+            if act is None:
+                existing = self.directory.open_play(r["server"], r["session_key"], r.get("rating_key", ""))
+                pid = existing["id"] if existing else self.directory.start_play(r, r.get("_art_path"), now)
+                act = {"id": pid, "rating_key": r.get("rating_key"), "last": now}
+                self.active_plays[key] = act
+                add = 0
+            else:
+                add = min(now - act["last"], 3 * self.cfg.poll_seconds) if r["state"] != "Paused" else 0
+            self.directory.touch_play(act["id"], r, now, add)
+            act["last"] = now
+        for key in list(self.active_plays):
+            # A server that failed to answer this round keeps its plays open.
+            if key not in seen and key[0] in online_servers:
+                self.directory.stop_play(self.active_plays.pop(key)["id"])
+
+    async def sync_users(self) -> int:
+        """Pull everyone the owner shares servers with from plex.tv (names and emails)."""
+        token = self.store.get_setting("plex_account_token")
+        if not token:
+            self.users_sync_error = "Sign in with Plex under Settings, Plex servers, to load your shared users."
+            return 0
+        acct = PlexAccount(self.http, self.client_id)
+        owner = await acct.user_info(token)
+        self.directory.upsert_user(owner, shared=True, is_owner=True)
+        users = await acct.shared_users(token)
+        for u in users:
+            self.directory.upsert_user(u, shared=True)
+        self.users_synced_at, self.users_sync_error = time.time(), None
+        return len(users) + 1
+
+    async def import_history(self, size: int = 1000) -> dict:
+        """Backfill playback history from each server's own watch history."""
+        added = skipped = 0
+        errors = []
+        for s in [x for x in self.cfg.servers if x.enabled]:
+            c = self.client(s)
+            try:
+                accounts = await c.accounts()
+                items = await c.history(size)
+            except Exception as e:
+                errors.append(f"{s.name}: {e}")
+                continue
+            for it in items:
+                account = str(it.get("accountID", ""))
+                name = accounts.get(account, "")
+                user = self.directory.get_user(account) if account and account != "1" else None
+                if account == "1":
+                    user = self.directory.owner()
+                if user is None and name:
+                    m = self.directory.db.execute("SELECT * FROM users WHERE username = ? COLLATE NOCASE OR title = ? COLLATE NOCASE", (name, name)).fetchone()
+                    user = dict(m) if m else None
+                typ = it.get("type")
+                if typ == "episode":
+                    title, sub = it.get("grandparentTitle") or it.get("title"), f"S{it.get('parentIndex', '?')} \u00b7 E{it.get('index', '?')} \u00b7 {it.get('title', '')}"
+                    art, kind = it.get("grandparentThumb") or it.get("thumb"), "Episode"
+                elif typ == "track":
+                    title, sub, art, kind = it.get("grandparentTitle") or it.get("title"), it.get("title"), it.get("parentThumb") or it.get("thumb"), "Audio"
+                else:
+                    title, sub, art, kind = it.get("title"), str(it.get("year") or ""), it.get("thumb"), "Movie"
+                ok = self.directory.import_play({
+                    "server": s.name, "rating_key": str(it.get("ratingKey") or it.get("key", "")), "account": account,
+                    "user_id": user["plex_id"] if user else None, "username": (user or {}).get("title") or name or None,
+                    "title": title, "subtitle": sub, "kind": kind, "art": art, "viewed_at": int(it.get("viewedAt") or 0),
+                })
+                added += int(ok)
+                skipped += int(not ok)
+        return {"added": added, "already_had": skipped, "errors": errors}
 
     async def poll_netdata(self) -> None:
         nd = NetdataClient(self.cfg, self.http)
@@ -122,6 +225,13 @@ class Poller:
         last_tel = 0.0
         while True:
             try:
+                if time.time() - self.users_synced_at > 6 * 3600 and self.store.get_setting("plex_account_token"):
+                    try:
+                        await self.sync_users()
+                    except Exception as e:
+                        self.users_sync_error = str(e)
+                        self.users_synced_at = time.time() - 5 * 3600  # retry in an hour
+                        log.warning("User sync failed: %s", e)
                 if not self.cfg.use_sample:
                     await self.poll_plex()
                     if time.time() - last_tel >= self.cfg.telemetry_seconds:

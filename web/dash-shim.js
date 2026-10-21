@@ -10,7 +10,10 @@
     bandwidth: '/api/bandwidth',
     viewing_hours: '/api/viewing?tz=' + tz
   };
+  var SECTION = { streams: 'streams', servers: 'servers', bandwidth: 'bandwidth', viewing_hours: 'viewing' };
   var REFRESH_MS = 10000;
+  var me = null;
+  var loaded = false;
   var KEEP = ['look', 'cardsize'];
   var store = {};
   var calcs = {};
@@ -28,9 +31,23 @@
     });
   }
 
+  function can(section) {
+    return !!me && (me.role === 'admin' || (me.sections || []).indexOf(section) >= 0);
+  }
+
+  function toLogin() {
+    window.location.replace('/login.html');
+  }
+
   function load(id) {
+    if (!can(SECTION[id])) {
+      // Not shared with this viewer: an empty dataset keeps the page's calculations working.
+      store[id] = { status: 'ok', data: [], sample: false, forbidden: true };
+      return Promise.resolve();
+    }
     return fetch(ENDPOINTS[id], { cache: 'no-store', credentials: 'same-origin' })
       .then(function (r) {
+        if (r.status === 401) { toLogin(); throw new Error('Signed out'); }
         if (!r.ok) throw new Error('HTTP ' + r.status);
         return r.json();
       })
@@ -46,7 +63,20 @@
   }
 
   function refresh() {
-    return Promise.all(Object.keys(ENDPOINTS).map(load)).then(fire);
+    if (!me) return Promise.resolve();
+    return Promise.all(Object.keys(ENDPOINTS).map(load)).then(function () { loaded = true; fire(); });
+  }
+
+  function loadMe() {
+    return fetch('/api/me', { cache: 'no-store', credentials: 'same-origin' }).then(function (r) {
+      if (r.status === 401) { toLogin(); throw new Error('Signed out'); }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    }).then(function (j) {
+      me = j;
+      window.gsMe = j;
+      document.dispatchEvent(new CustomEvent('gs:me', { detail: j }));
+    });
   }
 
   window.dash = {
@@ -89,8 +119,12 @@
       try { window.history.replaceState(null, '', '#' + id); } catch (e) { /* ignore */ }
     },
     refresh: function () { return refresh(); },
+    me: function () { return me; },
+    can: can,
+    isAdmin: function () { return !!me && me.role === 'admin'; },
+    loaded: function () { return loaded; },
     isSample: function () {
-      return Object.keys(ENDPOINTS).some(function (id) { return store[id] && store[id].sample; });
+      return Object.keys(ENDPOINTS).some(function (id) { return store[id] && store[id].sample && !store[id].forbidden; });
     },
     colors: []
   };
@@ -104,6 +138,6 @@
     if (!document.hidden) refresh();
   });
 
-  refresh();
+  loadMe().then(function () { fire(); return refresh(); }).catch(function (e) { console.error(e); });
   setInterval(function () { if (!document.hidden) refresh(); }, REFRESH_MS);
 })();

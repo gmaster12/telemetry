@@ -5,7 +5,9 @@ X-Plex-Token from the environment; tokens never leave the backend.
 """
 from __future__ import annotations
 
+import os
 import time
+import xml.etree.ElementTree as ET
 from typing import Any
 
 import httpx
@@ -70,6 +72,16 @@ class PlexClient:
             raise PlexError(f"{self.server.name}: image HTTP {r.status_code}")
         return r.content, r.headers.get("content-type", "image/jpeg")
 
+    async def accounts(self) -> dict[str, str]:
+        """Server-local account id -> name (used to map imported history to users)."""
+        data = await self._get("/accounts")
+        return {str(a.get("id")): a.get("name", "") for a in data.get("MediaContainer", {}).get("Account", []) or []}
+
+    async def history(self, size: int = 500) -> list[dict]:
+        """Plex's own watch history (newest first): when each item was viewed and by which account."""
+        data = await self._get("/status/sessions/history/all", {"sort": "viewedAt:desc", "X-Plex-Container-Start": 0, "X-Plex-Container-Size": size})
+        return data.get("MediaContainer", {}).get("Metadata", []) or []
+
     async def terminate(self, session_id: str, reason: str) -> None:
         """Plex Pass: stop a playback session. Not exposed unless ENABLE_ACTIONS=true."""
         await self._get("/status/sessions/terminate", {"sessionId": session_id, "reason": reason})
@@ -77,7 +89,7 @@ class PlexClient:
 
 # ---------- plex.tv account: sign in with Plex and discover servers ----------
 
-PLEX_TV = "https://plex.tv"
+PLEX_TV = os.environ.get("PLEX_TV_URL", "https://plex.tv")
 
 
 class PlexAccount:
@@ -94,7 +106,7 @@ class PlexAccount:
             raise PlexError(f"plex.tv PIN request failed: HTTP {r.status_code}")
         pin = r.json()
         auth_url = (
-            "https://app.plex.tv/auth#?"
+            os.environ.get("PLEX_AUTH_URL", "https://app.plex.tv/auth") + "#?"
             f"clientID={self.client_id}&code={pin['code']}"
             "&context%5Bdevice%5D%5Bproduct%5D=Greystar%20Telemetry"
         )
@@ -105,6 +117,28 @@ class PlexAccount:
         if r.status_code != 200:
             raise PlexError(f"plex.tv PIN check failed: HTTP {r.status_code}")
         return r.json().get("authToken") or None
+
+    async def user_info(self, token: str) -> dict:
+        """The signed-in Plex account: id, username, email, title, thumb."""
+        r = await self.http.get(f"{PLEX_TV}/api/v2/user", headers={**self.headers, "X-Plex-Token": token}, timeout=10.0)
+        if r.status_code != 200:
+            raise PlexError(f"plex.tv account lookup failed: HTTP {r.status_code}")
+        u = r.json()
+        return {"id": str(u.get("id")), "username": u.get("username") or u.get("title"), "title": u.get("title") or u.get("username"),
+                "email": (u.get("email") or "").lower() or None, "thumb": u.get("thumb")}
+
+    async def shared_users(self, owner_token: str) -> list[dict]:
+        """Everyone the owner shares servers with (plex.tv/api/users, XML)."""
+        r = await self.http.get(f"{PLEX_TV}/api/users", headers={**self.headers, "Accept": "application/xml", "X-Plex-Token": owner_token}, timeout=20.0)
+        if r.status_code != 200:
+            raise PlexError(f"plex.tv user list failed: HTTP {r.status_code}")
+        out = []
+        for u in ET.fromstring(r.text).iter("User"):
+            a = u.attrib
+            out.append({"id": str(a.get("id")), "username": a.get("username") or a.get("title"), "title": a.get("title") or a.get("username"),
+                        "email": (a.get("email") or "").lower() or None, "thumb": a.get("thumb"),
+                        "servers": [s.attrib.get("name") for s in u.iter("Server") if s.attrib.get("name")]})
+        return out
 
     async def servers(self, account_token: str) -> list[dict]:
         r = await self.http.get(
@@ -270,6 +304,8 @@ def normalize_session(server: ServerCfg, item: dict, source: dict | None = None)
         "session_id": session.get("id"),
         "rating_key": str(item.get("ratingKey", "")),
         "user": (item.get("User") or {}).get("title", "Unknown"),
+        "user_id": str((item.get("User") or {}).get("id") or ""),
+        "user_thumb": (item.get("User") or {}).get("thumb"),
         "title": title,
         "subtitle": subtitle,
         "kind": kind,

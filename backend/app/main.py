@@ -2,37 +2,36 @@
 from __future__ import annotations
 
 import asyncio
-import base64
+import json
 import logging
-import secrets as pysecrets
+import sqlite3
 import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import sample
+from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, admin_plex_email, check_password, default_sections,
+                   end_session, hash_password, new_session, password_problem, plex_principal, principal_for, record_failure,
+                   set_cookie, throttled, user_sections)
 from .config import DB_PATH, WEB_DIR, ServerCfg, env
 from .netdata import NetdataClient
 from .plex import PlexAccount, PlexClient
 from .poller import Poller
 from .secrets import SecretBox
-from .store import Store
+from .store import Directory, Store
 
 logging.basicConfig(level=env("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("telemetry")
 
-AUTH_USER = env("BASIC_AUTH_USER")
-AUTH_PASS = env("BASIC_AUTH_PASSWORD")
-ALLOW_OPEN_SETTINGS = env("ALLOW_OPEN_SETTINGS", "false").lower() == "true"
-
 box = SecretBox()
 store = Store(DB_PATH, box)
+directory = Directory(store)
 poller = Poller(store)
 
 
@@ -46,6 +45,7 @@ def client_id() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    poller.client_id = client_id()
     task = asyncio.create_task(poller.run())
     yield
     task.cancel()
@@ -55,30 +55,54 @@ app = FastAPI(title="Greystar Telemetry", lifespan=lifespan, docs_url=None, redo
 
 
 # ---------- auth ----------
+PUBLIC_PATHS = {"/healthz", "/login.html", "/login.js", "/system.css", "/manifest.webmanifest", "/favicon.ico"}
+PUBLIC_PREFIXES = ("/assets/", "/vendor/", "/api/auth/")
+
+
 @app.middleware("http")
-async def basic_auth(request: Request, call_next):
-    if request.url.path == "/healthz":
-        return await call_next(request)
-    if AUTH_USER and AUTH_PASS:
-        header = request.headers.get("authorization", "")
-        ok = False
-        if header.lower().startswith("basic "):
-            try:
-                user, _, pw = base64.b64decode(header[6:]).decode().partition(":")
-                ok = pysecrets.compare_digest(user, AUTH_USER) and pysecrets.compare_digest(pw, AUTH_PASS)
-            except Exception:
-                ok = False
-        if not ok:
-            return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="Greystar Telemetry"'})
-    if request.url.path.startswith("/api/settings") and request.method != "GET":
-        if not (AUTH_USER and AUTH_PASS) and not ALLOW_OPEN_SETTINGS:
-            return JSONResponse({"detail": "Set BASIC_AUTH_USER and BASIC_AUTH_PASSWORD before changing settings."}, status_code=403)
-        if request.headers.get("x-requested-with") != "greystar":
-            return JSONResponse({"detail": "Missing X-Requested-With header."}, status_code=403)
+async def session_auth(request: Request, call_next):
+    path = request.url.path
+    p = principal_for(request, store, directory)
+    request.state.principal = p
+    if request.method not in ("GET", "HEAD", "OPTIONS") and path.startswith("/api/") and request.headers.get("x-requested-with") != "greystar":
+        return JSONResponse({"detail": "Missing X-Requested-With header."}, status_code=403)
+    public = path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
+    if p is None and not public:
+        if path.startswith("/api/"):
+            return JSONResponse({"detail": "Sign in required."}, status_code=401)
+        return RedirectResponse("/login.html", status_code=302)
+    if p is not None and path == "/login.html":
+        return RedirectResponse("/", status_code=302)
+    if path.startswith("/api/settings") and not (p and p.is_admin):
+        return JSONResponse({"detail": "Administrators only."}, status_code=403)
     resp = await call_next(request)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "same-origin")
+    resp.headers.setdefault("X-Frame-Options", "DENY")
+    if path.startswith("/api/"):
+        resp.headers.setdefault("Cache-Control", "no-store")
     return resp
+
+
+def me(request: Request) -> Principal:
+    p = request.state.principal
+    if p is None:
+        raise HTTPException(401, "Sign in required.")
+    return p
+
+
+def need(request: Request, section: str) -> Principal:
+    p = me(request)
+    if not p.can(section):
+        raise HTTPException(403, "You do not have access to this section.")
+    return p
+
+
+def admin(request: Request) -> Principal:
+    p = me(request)
+    if not p.is_admin:
+        raise HTTPException(403, "Administrators only.")
+    return p
 
 
 @app.get("/healthz")
@@ -92,36 +116,41 @@ def wrap(rows: list, is_sample: bool) -> dict:
 
 
 @app.get("/api/streams")
-def api_streams():
+def api_streams(request: Request):
+    need(request, "streams")
     if poller.cfg.use_sample:
         return wrap(sample.streams(), True)
     return wrap(poller.streams, False)
 
 
 @app.get("/api/servers")
-def api_servers():
+def api_servers(request: Request):
+    need(request, "servers")
     if poller.cfg.use_sample:
         return wrap(sample.servers(), True)
     return wrap(poller.servers_view(), False)
 
 
 @app.get("/api/bandwidth")
-def api_bandwidth():
+def api_bandwidth(request: Request):
+    need(request, "bandwidth")
     if poller.cfg.use_sample:
         return wrap(sample.bandwidth(), True)
     return wrap(store.bandwidth_last_hour([s.name for s in poller.cfg.servers if s.enabled]), False)
 
 
 @app.get("/api/viewing")
-def api_viewing(tz: int = 0):
+def api_viewing(request: Request, tz: int = 0):
     """tz: viewer's offset from UTC in minutes (JavaScript's -getTimezoneOffset())."""
+    need(request, "viewing")
     if poller.cfg.use_sample:
         return wrap(sample.viewing(), True)
     return wrap(store.viewing_week(max(-840, min(840, tz))), False)
 
 
 @app.get("/api/status")
-def api_status():
+def api_status(request: Request):
+    admin(request)
     cfg = poller.cfg
     return {
         "sample": cfg.use_sample,
@@ -129,13 +158,15 @@ def api_status():
         "history_minutes": store.history_minutes(),
         "servers": [{"name": s.name, "enabled": s.enabled, **poller.server_state.get(s.name, {})} for s in cfg.servers],
         "netdata": {"mode": cfg.netdata.mode, "error": poller.netdata_error, "ok_at": poller.netdata_ok_at},
+        "users": {"synced_at": poller.users_synced_at or None, "error": poller.users_sync_error},
     }
 
 
 @app.get("/api/poster/{server_id}/{rating_key}")
-async def api_poster(server_id: int, rating_key: str):
-    path = poller.art.get((server_id, rating_key))
+async def api_poster(request: Request, server_id: int, rating_key: str):
+    me(request)
     s = next((x for x in poller.cfg.servers if x.id == server_id), None)
+    path = poller.art.get((server_id, rating_key)) or (directory.art_for(s.name, rating_key) if s else None)
     if not path or not s:
         raise HTTPException(404)
     try:
@@ -243,7 +274,8 @@ def get_settings():
         },
         "hot_cpu_pct": cfg.hot_cpu_pct,
         "sample": cfg.use_sample,
-        "auth_configured": bool(AUTH_USER and AUTH_PASS),
+        "auth_configured": True,
+        "users_sync": {"synced_at": poller.users_synced_at or None, "error": poller.users_sync_error},
     }
 
 
@@ -309,6 +341,8 @@ async def plex_link_check(pin_id: int):
     token = await PlexAccount(poller.http, client_id()).check_pin(pin_id)
     if token:
         store.set_setting("plex_account_token", token)
+        poller.users_synced_at = 0  # load shared users right away
+        poller.reload()
     return {"linked": bool(token)}
 
 
@@ -367,6 +401,270 @@ def put_general(body: GeneralIn):
     store.set_setting("hot_cpu_pct", str(body.hot_cpu_pct))
     poller.reload()
     return {"ok": True}
+
+
+# ---------- sign in ----------
+class LocalLogin(BaseModel):
+    username: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=256)
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "?"
+
+
+# A sign-in PIN can only be finished by the browser that started it.
+PIN_COOKIE = "gst_pin"
+_pins: dict[str, tuple[int, float]] = {}
+
+
+@app.post("/api/auth/plex/start")
+async def auth_plex_start(request: Request):
+    if throttled("plex:" + _client_ip(request), limit=30):
+        raise HTTPException(429, "Too many attempts. Wait a few minutes.")
+    pin = await PlexAccount(poller.http, client_id()).create_pin()
+    now = time.time()
+    for k, (_, t) in list(_pins.items()):
+        if now - t > 900:
+            _pins.pop(k, None)
+    nonce = uuid.uuid4().hex
+    _pins[nonce] = (int(pin["pin_id"]), now)
+    resp = JSONResponse(pin)
+    resp.set_cookie(PIN_COOKIE, nonce, max_age=900, httponly=True, samesite="lax", path="/api/auth/",
+                    secure=request.url.scheme == "https")
+    return resp
+
+
+@app.get("/api/auth/plex/check/{pin_id}")
+async def auth_plex_check(pin_id: int, request: Request):
+    bound = _pins.get(request.cookies.get(PIN_COOKIE, ""))
+    if not bound or bound[0] != pin_id:
+        raise HTTPException(400, "This sign-in expired. Start again.")
+    acct = PlexAccount(poller.http, client_id())
+    token = await acct.check_pin(pin_id)
+    if not token:
+        return {"pending": True}
+    info = await acct.user_info(token)
+    is_admin = bool(info.get("email") and info["email"] == admin_plex_email())
+    known = directory.get_user(info["id"]) or (directory.find_user_by_email(info["email"]) if info.get("email") else None)
+    if not is_admin and not known:
+        record_failure("plex:" + _client_ip(request))
+        raise HTTPException(403, "This Plex account does not have access to any Greystar server. Ask the administrator to share a library with you.")
+    if known and known["plex_id"] != info["id"]:
+        info["id"] = known["plex_id"]
+    directory.upsert_user(info, is_owner=None)
+    if is_admin and not store.get_setting("plex_account_token"):
+        store.set_setting("plex_account_token", token)  # lets Settings find servers and shared users
+        poller.users_synced_at = 0
+    user = directory.get_user(info["id"])
+    if user and user.get("disabled"):
+        raise HTTPException(403, "Your access to this dashboard has been turned off.")
+    _pins.pop(request.cookies.get(PIN_COOKIE, ""), None)
+    session = new_session(directory, "plex", info["id"])
+    resp = JSONResponse({"ok": True, "role": "admin" if is_admin else "viewer"})
+    set_cookie(resp, request, session)
+    resp.delete_cookie(PIN_COOKIE, path="/api/auth/")
+    return resp
+
+
+@app.post("/api/auth/local")
+def auth_local(body: LocalLogin, request: Request):
+    key = "local:" + _client_ip(request)
+    if throttled(key):
+        raise HTTPException(429, "Too many failed sign-ins. Wait a few minutes.")
+    a = directory.get_admin(body.username.strip())
+    if not a or not check_password(body.password, a["pw_hash"]):
+        record_failure(key)
+        raise HTTPException(401, "Wrong username or password.")
+    session = new_session(directory, "local", str(a["id"]))
+    resp = JSONResponse({"ok": True, "role": "admin"})
+    set_cookie(resp, request, session)
+    return resp
+
+
+@app.post("/api/auth/logout")
+def auth_logout(request: Request):
+    end_session(directory, request.cookies.get(SESSION_COOKIE))
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
+
+
+@app.get("/api/me")
+def api_me(request: Request):
+    return me(request).public()
+
+
+# ---------- playback history and users ----------
+def _history_rows(rows: list[dict]) -> list[dict]:
+    ids = {s.name: s.id for s in poller.cfg.servers}
+    out = []
+    for r in rows:
+        sid = ids.get(r["server"])
+        out.append({
+            "id": r["id"], "server": r["server"], "title": r["title"], "subtitle": r["subtitle"], "kind": r["kind"],
+            "device": r["device"], "player": r["player"], "location": r["location"], "method": r["method"],
+            "resolution": r["resolution"], "started_at": r["started_at"], "stopped_at": r["stopped_at"],
+            "watched_min": round((r["watched_sec"] or 0) / 60), "progress_pct": r["progress_pct"], "source": r["source"],
+            "live": r["stopped_at"] is None,
+            "poster": f"/api/poster/{sid}/{r['rating_key']}" if sid and r["rating_key"] and r["art"] else None,
+        })
+    return out
+
+
+def _user_public(u: dict, with_email: bool = True) -> dict:
+    return {
+        "id": u["plex_id"], "username": u.get("username"), "name": u.get("title") or u.get("username"),
+        "email": u.get("email") if with_email else None, "thumb": u.get("thumb"), "shared": bool(u.get("shared")),
+        "owner": bool(u.get("is_owner")), "disabled": bool(u.get("disabled")), "last_seen": u.get("last_seen"),
+        "last_login": u.get("last_login"), "custom_sections": json.loads(u["sections"]) if u.get("sections") else None,
+        "sections": user_sections(store, u), "admin": bool(u.get("email") and u["email"].lower() == admin_plex_email()),
+    }
+
+
+@app.get("/api/me/history")
+def api_my_history(request: Request, before: int | None = None, limit: int = 50):
+    p = need(request, "history")
+    if p.kind != "plex":
+        return {"user": {"name": p.name}, "stats": None, "rows": []}
+    u = directory.get_user(p.subject)
+    return {"user": _user_public(u, with_email=True), "stats": directory.user_stats(p.subject),
+            "rows": _history_rows(directory.history(p.subject, before, limit))}
+
+
+@app.get("/api/users")
+def api_users(request: Request, q: str = "", limit: int = 50):
+    admin(request)
+    rows = directory.search_users(q[:100], max(1, min(limit, 200)))
+    return {"rows": [{**_user_public(u), "plays": u["plays"], "plays_30d": u["plays_30d"], "last_play": u["last_play"]} for u in rows]}
+
+
+@app.get("/api/users/{plex_id}")
+def api_user(request: Request, plex_id: str):
+    admin(request)
+    u = directory.get_user(plex_id)
+    if not u:
+        raise HTTPException(404, "No such user.")
+    return {"user": _user_public(u), "stats": directory.user_stats(plex_id)}
+
+
+@app.get("/api/users/{plex_id}/history")
+def api_user_history(request: Request, plex_id: str, before: int | None = None, limit: int = 50):
+    admin(request)
+    if not directory.get_user(plex_id):
+        raise HTTPException(404, "No such user.")
+    return {"rows": _history_rows(directory.history(plex_id, before, limit))}
+
+
+# ---------- settings: access, admins, users, history import ----------
+class DefaultsIn(BaseModel):
+    sections: list[str]
+
+
+class UserAccessIn(BaseModel):
+    sections: list[str] | None = None
+    use_defaults: bool = False
+    disabled: bool | None = None
+
+
+class AdminIn(BaseModel):
+    username: str = Field(min_length=2, max_length=64, pattern=r"^[A-Za-z0-9._@-]+$")
+    password: str = Field(min_length=1, max_length=256)
+
+
+class PasswordIn(BaseModel):
+    current: str = Field(min_length=1, max_length=256)
+    new: str = Field(min_length=1, max_length=256)
+
+
+@app.get("/api/settings/access")
+def get_access(request: Request):
+    p = admin(request)
+    return {"sections": SECTIONS, "default_sections": default_sections(store), "admin_plex_email": admin_plex_email(),
+            "admins": directory.list_admins(), "me": p.public()}
+
+
+@app.put("/api/settings/access/defaults")
+def put_defaults(body: DefaultsIn):
+    store.set_setting("default_sections", json.dumps([s for s in body.sections if s in SECTION_KEYS]))
+    return {"ok": True}
+
+
+@app.put("/api/settings/users/{plex_id}")
+def put_user_access(plex_id: str, body: UserAccessIn):
+    u = directory.get_user(plex_id)
+    if not u:
+        raise HTTPException(404, "No such user.")
+    if body.disabled and u.get("email") and u["email"].lower() == admin_plex_email():
+        raise HTTPException(409, "The administrator Plex account cannot be turned off.")
+    sections = [s for s in body.sections if s in SECTION_KEYS] if body.sections is not None else None
+    directory.set_user_access(plex_id, sections=sections, use_defaults=body.use_defaults, disabled=body.disabled)
+    return {"ok": True}
+
+
+@app.post("/api/settings/admins")
+def add_admin(body: AdminIn):
+    problem = password_problem(body.password)
+    if problem:
+        raise HTTPException(422, problem)
+    try:
+        aid = directory.add_admin(body.username, hash_password(body.password))
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, f"An admin login named {body.username} already exists.")
+    return {"id": aid}
+
+
+@app.delete("/api/settings/admins/{admin_id}")
+def delete_admin(admin_id: int, request: Request):
+    p = admin(request)
+    if p.kind == "local" and p.subject == str(admin_id):
+        raise HTTPException(409, "You cannot delete the login you are using.")
+    if not directory.get_admin_by_id(admin_id):
+        raise HTTPException(404)
+    if len(directory.list_admins()) == 1 and not admin_plex_email():
+        raise HTTPException(409, "This is the only way to administer the dashboard. Set ADMIN_PLEX_EMAIL or add another admin first.")
+    directory.delete_admin(admin_id)
+    return {"ok": True}
+
+
+@app.put("/api/settings/admins/me/password")
+def change_password(body: PasswordIn, request: Request):
+    p = admin(request)
+    if p.kind != "local":
+        raise HTTPException(409, "Your Plex account's password is managed by Plex.")
+    a = directory.get_admin_by_id(int(p.subject))
+    if not a or not check_password(body.current, a["pw_hash"]):
+        raise HTTPException(401, "Current password is wrong.")
+    problem = password_problem(body.new)
+    if problem:
+        raise HTTPException(422, problem)
+    directory.set_admin_password(a["id"], hash_password(body.new))
+    session = new_session(directory, "local", str(a["id"]))
+    resp = JSONResponse({"ok": True})
+    set_cookie(resp, request, session)
+    return resp
+
+
+@app.post("/api/settings/users/sync")
+async def sync_users():
+    try:
+        n = await poller.sync_users()
+    except Exception as e:
+        raise HTTPException(502, f"Could not load users from plex.tv: {e}")
+    if poller.users_sync_error:
+        raise HTTPException(409, poller.users_sync_error)
+    return {"ok": True, "users": n}
+
+
+@app.post("/api/settings/history/import")
+async def import_history():
+    if poller.cfg.use_sample:
+        raise HTTPException(409, "Add a Plex server first.")
+    try:
+        await poller.sync_users()
+    except Exception:
+        pass
+    return await poller.import_history()
 
 
 # ---------- static dashboard ----------

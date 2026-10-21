@@ -11,6 +11,10 @@ A single Docker service (FastAPI + static page) that:
 - reads CPU and network per server from **Netdata Cloud** (v3 data API) or from
   each Netdata agent,
 - records one history row per server per minute in SQLite,
+- records every viewer's playback history (`plays` table) from consecutive
+  polls, and can import each server's own watch history,
+- signs people in with Plex (viewers, plus one Plex admin) or with local
+  admin logins, and limits what viewers see,
 - serves the dashboard page and its API on `127.0.0.1:8791`.
 
 Plex servers and the Netdata connection are managed from the dashboard's
@@ -30,18 +34,25 @@ files to add servers. Keep it that way.
 - Run commands that need root by asking Glenn, or with sudo only after he
   approves.
 - Do not change `SECRET_KEY` once set: it decrypts the saved tokens.
+- Only the Plex account in `ADMIN_PLEX_EMAIL` (cluster@mail.com) is a Plex
+  administrator. Never add another way for a Plex account to become admin.
+  Extra admins are local logins (Settings, Access, or `app.tools.admin`).
+- Never log or print Plex account tokens of viewers. They are not stored; only
+  the admin's token is saved (encrypted) as `plex_account_token`.
 
 ## First-time setup checklist
 
-1. `cp .env.example .env`, generate `SECRET_KEY` (see README), set
-   `BASIC_AUTH_USER` and ask Glenn to type `BASIC_AUTH_PASSWORD` himself.
-   `chmod 600 .env`.
+1. `cp .env.example .env`, generate `SECRET_KEY` (see README), keep
+   `ADMIN_PLEX_EMAIL=cluster@mail.com` and `COOKIE_SECURE=true`.
+   `chmod 600 .env`. If upgrading from the Basic auth version, remove
+   `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` from `.env` (no longer used).
 2. `mkdir -p data && sudo chown 10001 data`, then `docker compose up -d --build`.
 3. Check `curl -s http://127.0.0.1:8791/healthz`.
 4. Add the reverse proxy for the chosen subdomain from `deploy/` (ask Glenn for
    the subdomain; get a certificate with certbot if nginx).
-5. Glenn adds Plex servers and Netdata in Settings. Then verify the mappings
-   (next section).
+5. Glenn signs in with Plex, adds Plex servers and Netdata in Settings, then
+   in Settings, Access runs Sync Plex users and Import Plex watch history.
+   Then verify the mappings (next section).
 
 ## Verify against the real servers (do this, the code was written without access to them)
 
@@ -63,6 +74,14 @@ files to add servers. Keep it that way.
     dimensions). Network out should be Mbps.
 - Glenn uses Netdata Cloud (agents stream to Cloud). No servers transcode on a
   GPU. All servers have Plex Pass.
+- Users and history (untested against real plex.tv):
+  - `User.id` in `/status/sessions` should be the viewer's plex.tv account id
+    (the owner shows as `1`, mapped to the owner in `track_plays`). Check that
+    `/api/users` shows one person per viewer, not duplicates.
+  - `PlexAccount.shared_users` parses `plex.tv/api/users` XML. Confirm emails
+    come through so search by email works.
+  - `import_history` maps `accountID` from `/status/sessions/history/all`
+    through `/accounts`. Spot-check one person's imported plays.
 
 ## How the page gets data
 
@@ -81,9 +100,25 @@ Each response is `{"rows": [...], "sample": bool}`. The page derives
 `dash.params()` holds UI state (`look`, `cardsize`, filters); `look` and
 `cardsize` persist in localStorage.
 
-Settings endpoints are under `/api/settings`. Writes require the login and the
-header `X-Requested-With: greystar` (CSRF guard). Tokens are write-only: the
-API reports `has_token`, never the value.
+Before loading datasets the shim calls `GET /api/me` (401 sends the browser to
+`/login.html`) and skips datasets the person may not see, returning empty rows.
+
+| Area | Endpoints | Who |
+|---|---|---|
+| Sign in | `POST /api/auth/plex/start`, `GET /api/auth/plex/check/{pin}`, `POST /api/auth/local`, `POST /api/auth/logout` | anyone |
+| Me | `GET /api/me`, `GET /api/me/history?before=` | signed in (`history` section) |
+| Users | `GET /api/users?q=` (username, name or email), `GET /api/users/{id}`, `GET /api/users/{id}/history` | admin |
+| Settings | everything under `/api/settings`, including `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
+
+Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie
+(`gst_session`, 30 days); only their SHA-256 is stored. A Plex sign-in PIN can
+only be finished by the browser that started it. All non-GET API calls need the
+header `X-Requested-With: greystar` (CSRF guard). Tokens are write-only: the API
+reports `has_token`, never the value.
+
+Sections a viewer can be given: `streams`, `servers`, `bandwidth`, `viewing`,
+`history` (`app/auth.py`, `SECTIONS`). The page adds `gs-no-<section>` classes
+to hide what a viewer cannot see; the API enforces it independently.
 
 ## Design
 
@@ -98,7 +133,15 @@ design system). The dashboard adds its own patterns:
   and flip to show playback details.
 - Mobile (760px and below): bottom tab bar Home / Servers / Streams / Alerts,
   compact stream rows with a bottom sheet, optional poster carousel.
-- Settings screen: Display (stream card size slider), Plex servers, Netdata, Alerts.
+- Settings screen: Display (stream card size slider), Plex servers, Netdata,
+  Alerts, Access. Viewers only get Display, and only if they can see streams.
+- Logo (from Glenn's logo pack, in `web/assets/`): glow mark on a UI Navy
+  circle at the top of the nav (and the phone top bar); header lockup with a
+  "Telemetry" label, charcoal on light and glow on dark; loading splash on UI
+  Navy; "Nothing playing right now" with a faint mark watermark; favicon and
+  home-screen icons via `manifest.webmanifest`.
+- Users: admin-only Users section with search, history drawer (`people.js`),
+  viewer names on stream cards open it. Viewers get a My history section.
 - Status is always a word plus a shape, never color alone. No emoji.
 
 ## Running tests
@@ -113,4 +156,5 @@ cd backend && pip install -r requirements-dev.txt && python -m pytest -q
   and should be gated by an `ENABLE_ACTIONS=true` env flag.
 - Rebalance only suggests moves; Plex cannot move a live session between
   servers, so a real action would end the stream with a message.
-- Viewer avatars from Plex user thumbnails (currently initials).
+- Viewer avatars from Plex user thumbnails (currently initials; the thumb URL
+  is stored as `users.thumb`).
