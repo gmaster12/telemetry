@@ -1,5 +1,6 @@
-# Add to your Caddyfile, then: caddy reload
-telemetry.greystarnetworks.com {
+# Add to your Caddyfile, then: sudo systemctl reload caddy
+# Caddy gets and renews the HTTPS certificate by itself.
+streams.greystarnetworks.com {
     encode gzip
     reverse_proxy 127.0.0.1:8791
 }

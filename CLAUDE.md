@@ -53,8 +53,10 @@ files to add servers. Keep it that way.
    `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD` from `.env` (no longer used).
 2. `mkdir -p data && sudo chown 10001 data`, then `docker compose up -d --build`.
 3. Check `curl -s http://127.0.0.1:8791/healthz`.
-4. Add the reverse proxy for the chosen subdomain from `deploy/` (ask Glenn for
-   the subdomain; get a certificate with certbot if nginx).
+4. Add the reverse proxy for **streams.greystarnetworks.com** (DNS already
+   points at this server, 45.80.152.150) from `deploy/`: check whether nginx
+   or Caddy serves Glenn's other sites, add only this site's file, and with
+   nginx get the certificate with `certbot --nginx -d streams.greystarnetworks.com --redirect`.
 5. Glenn signs in with Plex (cluster@mail.com), then in Settings, Plex servers
    links the Plex account of each server ("Link another Plex account"; sign out
    at app.plex.tv between accounts or use a private window), uses "Find
