@@ -1188,7 +1188,7 @@
     if (r.subtitles !== 'None') row('Subtitles', r.subtitles);
     if (r.transcode_reason !== 'None') row('Reason', r.transcode_reason);
     if (r.method === 'Transcode') row('Transcoder', r.hw_accel, r.transcode_speed != null ? n1(r.transcode_speed) + '\u00d7 speed' : null);
-    row('Bandwidth', n1(r.bitrate_mbps) + ' Mbps');
+    row('Bandwidth', n1(r.bitrate_mbps) + ' Mbps', r.bitrate_estimated ? 'estimated, Plex reported ' + n0(r.bitrate_reported_mbps) + ' Mbps' : null);
     row('Server', r.server);
     row('Player', r.player, r.device);
     card.append(head, tags, dl);

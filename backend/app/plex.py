@@ -171,6 +171,11 @@ class PlexAccount:
 
 # ---------- normalisation ----------
 
+# Plex sometimes reports a session at 10,000 Mbps. Anything above this is treated as that bug.
+BOGUS_MBPS = 1000.0
+ESTIMATED_MBPS = 15.0
+
+
 def _res_label(value: Any) -> str:
     v = str(value or "").lower()
     if not v:
@@ -292,6 +297,11 @@ def normalize_session(server: ServerCfg, item: dict, source: dict | None = None)
 
     bandwidth_kbps = session.get("bandwidth") or out_media.get("bitrate") or 0
     bitrate_mbps = round(float(bandwidth_kbps) / 1000.0, 1)
+    reported_mbps = None
+    if bitrate_mbps > BOGUS_MBPS:
+        # Plex sometimes reports 10,000 Mbps (often on throttled transcodes). No real stream
+        # comes close, so count it as a typical stream instead of wrecking the totals.
+        reported_mbps, bitrate_mbps = bitrate_mbps, ESTIMATED_MBPS
     duration = float(item.get("duration") or 0)
     offset = float(item.get("viewOffset") or 0)
     location = str(session.get("location") or ("lan" if player.get("local") else "wan")).upper()
@@ -316,6 +326,8 @@ def normalize_session(server: ServerCfg, item: dict, source: dict | None = None)
         "resolution": out_res or src_res,
         "method": method,
         "bitrate_mbps": bitrate_mbps,
+        "bitrate_estimated": reported_mbps is not None,
+        "bitrate_reported_mbps": reported_mbps,
         "server": server.name,
         "state": STATE.get(str(player.get("state", "")).lower(), "Playing"),
         "progress_pct": round(offset / duration * 100) if duration else 0,

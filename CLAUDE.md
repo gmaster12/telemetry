@@ -84,6 +84,10 @@ files to add servers. Keep it that way.
     dimensions). Network out should be Mbps.
 - Glenn uses Netdata Cloud (agents stream to Cloud). No servers transcode on a
   GPU. All servers have Plex Pass.
+- Plex bug Glenn has seen: a session (often a throttled transcode) reports
+  10,000 Mbps. `normalize_session` counts anything above `BOGUS_MBPS` (1000)
+  as `ESTIMATED_MBPS` (15) and flags `bitrate_estimated`; the card shows
+  "estimated". Totals, server load and bandwidth history use the 15.
 - Users and history (untested against real plex.tv):
   - `User.id` in `/status/sessions` should be the viewer's plex.tv account id
     (each server's owner shows as `1`, mapped to that server's owner account

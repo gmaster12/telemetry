@@ -55,3 +55,17 @@ def test_netdata_parse_by_id_and_name():
     }
     servers = [SRV, ServerCfg(id=2, name="Orion", plex_url="http://x:32400", netdata_node="orion")]
     assert parse_json2_by_node(resp, servers) == {"Atlas": 34.2, "Orion": 91.0}
+
+
+def test_bogus_10000_mbps_counts_as_15():
+    item = episode_session(videoDecision="transcode", audioDecision="copy", container="mp4", videoCodec="h264", height=1080, speed="0.0", throttled=True)
+    item["Session"]["bandwidth"] = 10_000_000  # Plex bug: 10,000 Mbps
+    row = normalize_session(SRV, item)
+    assert row["bitrate_mbps"] == 15.0
+    assert row["bitrate_estimated"] is True and row["bitrate_reported_mbps"] == 10000.0
+    assert row["quality"].startswith("15 Mbps")
+
+
+def test_real_bandwidth_untouched():
+    row = normalize_session(SRV, episode_session())
+    assert row["bitrate_mbps"] == 24.0 and row["bitrate_estimated"] is False
