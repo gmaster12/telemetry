@@ -136,8 +136,8 @@ design system). The dashboard adds its own patterns:
 - Settings screen: Display (stream card size slider), Plex servers, Netdata,
   Alerts, Access. Viewers only get Display, and only if they can see streams.
 - Logo (from Glenn's logo pack, in `web/assets/`): glow mark on a UI Navy
-  circle at the top of the nav (and the phone top bar); header lockup with a
-  "Telemetry" label, charcoal on light and glow on dark; loading splash on UI
+  circle at the top of the nav (and the phone top bar); a small "Telemetry"
+  label above the title (Glenn removed the logo there); loading splash on UI
   Navy; "Nothing playing right now" with a faint mark watermark; favicon and
   home-screen icons via `manifest.webmanifest`.
 - Users: admin-only Users card with a find-a-person dropdown (`user-picker.js`):
