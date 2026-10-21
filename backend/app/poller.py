@@ -3,6 +3,7 @@ and one history sample per minute."""
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 
@@ -36,12 +37,26 @@ class Poller:
         self.users_synced_at: float = 0.0
         self.users_sync_error: str | None = None
         self.client_id: str = "greystar-telemetry"
+        self.owner_by_server: dict[str, str] = {}
+        self._load_owners()
         self.directory.close_stale_plays()
 
     # ---------- config ----------
+    def _load_owners(self) -> None:
+        self.owner_by_server = {s["name"]: s["owner_plex_id"] for s in self.store.list_servers() if s.get("owner_plex_id")}
+
+    def owner_for(self, server: str) -> str | None:
+        """plex.tv id of the account that owns this server (Plex reports its owner as local account 1)."""
+        oid = self.owner_by_server.get(server)
+        if oid:
+            return oid
+        only = self.directory.owner()
+        return only["plex_id"] if only else None
+
     def reload(self) -> None:
         """Called after any Settings change."""
         self.cfg = self.store.app_config()
+        self._load_owners()
         live = {s.id for s in self.cfg.servers}
         self.clients = {k: v for k, v in self.clients.items() if k in live}
         names = {s.name for s in self.cfg.servers}
@@ -109,8 +124,7 @@ class Poller:
             seen.add(key)
             if r.get("user_id") == "1":
                 # Plex reports the server owner as local account 1, not their plex.tv id.
-                owner = self.directory.owner()
-                r["user_id"] = owner["plex_id"] if owner else None
+                r["user_id"] = self.owner_for(r["server"])
             if r.get("user_id"):
                 self.directory.saw_user(r["user_id"], r.get("user"), r.get("user_thumb"))
                 self.directory.add_user_server(r["user_id"], r["server"])
@@ -133,26 +147,63 @@ class Poller:
             if key not in seen and key[0] in online_servers:
                 self.directory.stop_play(self.active_plays.pop(key)["id"])
 
-    async def sync_users(self) -> int:
-        """Pull everyone the owner shares servers with from plex.tv (names and emails)."""
+    async def migrate_legacy_account(self) -> None:
+        """Older versions kept one Plex account in the settings table; move it to plex_accounts."""
         token = self.store.get_setting("plex_account_token")
         if not token:
-            self.users_sync_error = "Sign in with Plex under Settings, Plex servers, to load your shared users."
+            return
+        if not self.store.list_accounts():
+            info = await PlexAccount(self.http, self.client_id).user_info(token)
+            self.store.save_account(info, token)
+        self.store.set_setting("plex_account_token", None)
+
+    async def sync_users(self) -> int:
+        """For every linked Plex account: which monitored servers it owns, and everyone it shares
+        them with (names and emails). One person shared by several owners gets all those servers."""
+        accounts = self.store.account_tokens()
+        if not accounts:
+            self.users_sync_error = "Link the Plex account of each server under Settings, Plex servers, to load the people they share with."
             return 0
         acct = PlexAccount(self.http, self.client_id)
-        owner = await acct.user_info(token)
         mine = self.store.list_servers()
-        by_id = {s["machine_id"]: s["name"] for s in mine if s.get("machine_id")}
-        names = {s["name"].lower(): s["name"] for s in mine}
-        self.directory.upsert_user({**owner, "servers": [s["name"] for s in mine]}, shared=True, is_owner=True)
-        users = await acct.shared_users(token)
-        for u in users:
-            # Which of the monitored servers this person is shared on: by machine id, else by name.
-            on = {by_id[m] for m in u.pop("server_ids", []) if m in by_id}
-            on |= {names[n.lower()] for n in u.pop("server_names", []) if n.lower() in names}
-            self.directory.upsert_user({**u, "servers": sorted(on)}, shared=True)
-        self.users_synced_at, self.users_sync_error = time.time(), None
-        return len(users) + 1
+        by_mid = {s["machine_id"]: s for s in mine if s.get("machine_id")}
+        by_name = {s["name"].lower(): s["name"] for s in mine}
+        people: dict[str, dict] = {}
+        owners: set[str] = set()
+        errors = []
+        for a, token in accounts:
+            try:
+                info = await acct.user_info(token)
+                self.store.update_account_info(info)
+                owned = [r for r in await acct.servers(token) if r.get("owned")]
+                owned_names = []
+                for r in owned:
+                    s = by_mid.get(r["machine_id"])
+                    if s:
+                        owned_names.append(s["name"])
+                        if s.get("owner_plex_id") != str(info["id"]):
+                            self.store.update_server(s["id"], {"owner_plex_id": str(info["id"])})
+                if owned_names:
+                    owners.add(str(info["id"]))
+                people.setdefault(str(info["id"]), {**info, "servers": set()})["servers"] |= set(owned_names)
+                for u in await acct.shared_users(token):
+                    on = {by_mid[m]["name"] for m in u.pop("server_ids", []) if m in by_mid}
+                    on |= {by_name[n.lower()] for n in u.pop("server_names", []) if n.lower() in by_name}
+                    p = people.setdefault(str(u["id"]), {**u, "servers": set()})
+                    p["servers"] |= on
+            except Exception as e:  # one account failing should not stop the others
+                errors.append(f"{a.get('email') or a.get('username') or a['plex_id']}: {e}")
+                log.warning("User sync failed for one Plex account: %s", e)
+        for pid, p in people.items():
+            if errors:  # an account did not answer: keep the servers we knew instead of dropping them
+                old = self.directory.get_user(pid)
+                if old and old.get("servers"):
+                    p["servers"] |= set(json.loads(old["servers"]))
+            self.directory.upsert_user({**p, "servers": sorted(p["servers"])}, shared=True, is_owner=(pid in owners) or None if errors else pid in owners)
+        self._load_owners()
+        self.users_synced_at = time.time()
+        self.users_sync_error = "; ".join(errors) or None
+        return len(people)
 
     async def import_history(self, size: int = 1000) -> dict:
         """Backfill playback history from each server's own watch history."""
@@ -171,7 +222,8 @@ class Poller:
                 name = accounts.get(account, "")
                 user = self.directory.get_user(account) if account and account != "1" else None
                 if account == "1":
-                    user = self.directory.owner()
+                    oid = self.owner_for(s.name)
+                    user = self.directory.get_user(oid) if oid else None
                 if user is None and name:
                     m = self.directory.db.execute("SELECT * FROM users WHERE username = ? COLLATE NOCASE OR title = ? COLLATE NOCASE", (name, name)).fetchone()
                     user = dict(m) if m else None
@@ -234,7 +286,12 @@ class Poller:
         last_tel = 0.0
         while True:
             try:
-                if time.time() - self.users_synced_at > 6 * 3600 and self.store.get_setting("plex_account_token"):
+                if self.store.get_setting("plex_account_token"):
+                    try:
+                        await self.migrate_legacy_account()
+                    except Exception as e:
+                        log.warning("Could not move the linked Plex account: %s", e)
+                if time.time() - self.users_synced_at > 6 * 3600 and self.store.list_accounts():
                     try:
                         await self.sync_users()
                     except Exception as e:

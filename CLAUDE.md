@@ -38,7 +38,12 @@ files to add servers. Keep it that way.
   administrator. Never add another way for a Plex account to become admin.
   Extra admins are local logins (Settings, Access, or `app.tools.admin`).
 - Never log or print Plex account tokens of viewers. They are not stored; only
-  the admin's token is saved (encrypted) as `plex_account_token`.
+  the linked server-owner accounts' tokens are saved (encrypted) in
+  `plex_accounts`.
+- Glenn's servers each belong to a **different Plex account**. Do not assume
+  one account owns everything: link one account per server (Settings, Plex
+  servers), and map Plex's local account `1` to the owner of *that* server
+  (`servers.owner_plex_id`, `Poller.owner_for`).
 
 ## First-time setup checklist
 
@@ -50,8 +55,11 @@ files to add servers. Keep it that way.
 3. Check `curl -s http://127.0.0.1:8791/healthz`.
 4. Add the reverse proxy for the chosen subdomain from `deploy/` (ask Glenn for
    the subdomain; get a certificate with certbot if nginx).
-5. Glenn signs in with Plex, adds Plex servers and Netdata in Settings, then
-   in Settings, Access runs Sync Plex users and Import Plex watch history.
+5. Glenn signs in with Plex (cluster@mail.com), then in Settings, Plex servers
+   links the Plex account of each server ("Link another Plex account"; sign out
+   at app.plex.tv between accounts or use a private window), uses "Find
+   servers" and "Add server" for each, sets up Netdata, then in Settings, Access
+   runs Sync Plex users and Import Plex watch history.
    Then verify the mappings (next section).
 
 ## Verify against the real servers (do this, the code was written without access to them)
@@ -76,7 +84,8 @@ files to add servers. Keep it that way.
   GPU. All servers have Plex Pass.
 - Users and history (untested against real plex.tv):
   - `User.id` in `/status/sessions` should be the viewer's plex.tv account id
-    (the owner shows as `1`, mapped to the owner in `track_plays`). Check that
+    (each server's owner shows as `1`, mapped to that server's owner account
+    in `track_plays`). Check that
     `/api/users` shows one person per viewer, not duplicates.
   - `PlexAccount.shared_users` parses `plex.tv/api/users` XML. Confirm emails
     come through so search by email works.
@@ -108,7 +117,7 @@ Before loading datasets the shim calls `GET /api/me` (401 sends the browser to
 | Sign in | `POST /api/auth/plex/start`, `GET /api/auth/plex/check/{pin}`, `POST /api/auth/local`, `POST /api/auth/logout` | anyone |
 | Me | `GET /api/me`, `GET /api/me/history?before=` | signed in (`history` section) |
 | Users | `GET /api/users?q=&server=` (username, name or email; returns each person's `servers` and the monitored server names), `GET /api/users/{id}`, `GET /api/users/{id}/history` | admin |
-| Settings | everything under `/api/settings`, including `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
+| Settings | everything under `/api/settings`, including `plex/link`, `plex/accounts/{id}` (unlink), `plex/discover?account=`, `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
 
 Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie
 (`gst_session`, 30 days); only their SHA-256 is stored. A Plex sign-in PIN can
@@ -146,8 +155,8 @@ design system). The dashboard adds its own patterns:
   stream from), with a server filter. Built for hundreds of people: nothing is
   listed until it opens. Picking someone opens the history drawer
   (`people.js`); viewer names on stream cards open it too. Viewers get a My
-  history section. Settings, Access lists at most 50 people, with search and a
-  server filter.
+  history section. Settings, Access uses the same picker (inline) to edit one
+  person at a time, plus a short "Custom access or turned off" list.
 - Status is always a word plus a shape, never color alone. No emoji.
 
 ## Running tests

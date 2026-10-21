@@ -2,7 +2,8 @@
    people grouped by the Plex server they are on, plus a server filter.
    Scales to hundreds of people: nothing is listed until the dropdown opens.
 
-   const picker = gsUserPicker({ idPrefix, onPick(person), icon(name, size) });
+   const picker = gsUserPicker({ idPrefix, onPick(person), icon(name, size), inline, placeholder });
+   inline: true lists results in place (for scrolling panels like Settings).
    picker.setData({ people: [{key, name, username, email, servers: [], plays_30d, admin, disabled, owner}], servers: ['Atlas', ...] });
    container.appendChild(picker.el); */
 (function () {
@@ -40,13 +41,13 @@
     let options = [];
 
     const input = h('input', { id: pre + '-q', type: 'text', role: 'combobox', 'aria-autocomplete': 'list', 'aria-expanded': 'false', 'aria-controls': pre + '-list',
-      autocomplete: 'off', spellcheck: 'false', placeholder: 'Search by username or email' });
+      autocomplete: 'off', spellcheck: 'false', placeholder: opts.placeholder || 'Search by username or email' });
     const toggle = h('button', { type: 'button', class: 'gu-toggle', 'aria-label': 'Show everyone', tabindex: '-1' }, icon('down', 18));
     const sel = h('select', { class: 'gu-server', id: pre + '-server', 'aria-label': 'Plex server' });
     const list = h('div', { class: 'gu-list', id: pre + '-list', role: 'listbox', 'aria-label': 'People' });
     const panel = h('div', { class: 'gu-panel', hidden: true }, list, h('div', { class: 'gu-foot', id: pre + '-foot', 'aria-live': 'polite' }));
     const field = h('div', { class: 'gu-field' }, h('span', { class: 'gu-icon', 'aria-hidden': 'true' }, icon('search', 18)), input, toggle);
-    const root = h('div', { class: 'gu' }, h('div', { class: 'gu-row' }, field, sel), panel);
+    const root = h('div', { class: 'gu' + (opts.inline ? ' gu--inline' : '') }, h('div', { class: 'gu-row' }, field, sel), panel);
 
     function matches(p, q) {
       return !q || [p.username, p.name, p.email].some((v) => String(v || '').toLowerCase().includes(q));
@@ -131,7 +132,7 @@
       if (v) {
         renderList();
         // Near the bottom of the page the list would open off screen: bring it up.
-        requestAnimationFrame(() => {
+        if (!opts.inline) requestAnimationFrame(() => {
           const r = panel.getBoundingClientRect();
           if (r.bottom > window.innerHeight - 8) {
             const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -142,6 +143,7 @@
     }
     function pick(p) {
       show(false);
+      input.blur(); // so a re-render does not refocus the box and reopen the list
       if (opts.onPick) opts.onPick(p);
     }
     input.addEventListener('focus', () => show(true));

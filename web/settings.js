@@ -10,25 +10,23 @@
   var discovered = null;
   var editingId = null;
   var removingId = null;
-  var link = null; // { pin_id, code, auth_url, timer, started }
+  var link = null; // { pin_id, code, auth_url, timer, started, before: [linked account ids] }
+  var unlinking = null;
   var msgs = {};
   var busy = {};
   var drafts = {};
   var manualOpen = false;
   var access = null;
   var accUsers = null;
-  var accQ = '';
-  var accServer = '';
   var accServers = [];
-  var accTotal = 0;
-  var accTimer = null;
+  var accPicker = null;
   var accEditing = null;
   var accRemoving = null;
   var me = null;
 
   window.stActiveTab = function () { return tab; };
   window.stOpenTab = function (t) { setTab(t); };
-  window.stFocusUser = function (q) { accQ = q || ''; accEditing = null; drafts['acc-q'] = accQ; };
+  window.stFocusUser = function (id) { accEditing = id || null; };
   function isAdmin() { return !!(me && me.role === 'admin'); }
   document.addEventListener('gs:me', function (e) { me = e.detail; });
   if (window.gsMe) me = window.gsMe;
@@ -171,7 +169,8 @@
   function startLink() {
     var win = window.open('about:blank', '_blank');
     withBusy('link', api('POST', '/api/settings/plex/link').then(function (pin) {
-      link = { pin_id: pin.pin_id, code: pin.code, auth_url: pin.auth_url, started: Date.now() };
+      link = { pin_id: pin.pin_id, code: pin.code, auth_url: pin.auth_url, started: Date.now(),
+        before: (state.plex_accounts || []).map(function (a) { return a.id; }) };
       if (win) win.location = pin.auth_url;
       pollLink();
     }).catch(function (e) {
@@ -189,9 +188,12 @@
     }
     api('GET', '/api/settings/plex/link/' + link.pin_id).then(function (r) {
       if (r.linked) {
+        var again = link.before.indexOf(r.account.id) >= 0;
         link = null;
-        msgs.plex = { kind: 'ok', text: 'Signed in to Plex. Finding your servers…' };
-        loadState().then(discover);
+        msgs.plex = again
+          ? { kind: 'error', text: (r.account.email || r.account.name) + ' was already linked. Plex signed you in with the account this browser is already using: sign out at app.plex.tv (or use a private window), then link the next account.' }
+          : { kind: 'ok', text: 'Linked ' + (r.account.email || r.account.name) + '. Finding its servers…' };
+        loadState().then(function () { if (!again) discover(r.account.id); });
       } else {
         link.timer = setTimeout(pollLink, 2000);
         render();
@@ -208,18 +210,23 @@
     render();
   }
 
-  function unlink() {
-    api('POST', '/api/settings/plex/unlink').then(function () {
-      discovered = null;
-      msgs.plex = { kind: 'ok', text: 'Signed out of Plex. Servers you already added keep their own access.' };
+  function unlink(id) {
+    api('DELETE', '/api/settings/plex/accounts/' + encodeURIComponent(id)).then(function () {
+      unlinking = null;
+      if (discovered) discovered = discovered.filter(function (d) { return d.account !== id; });
+      msgs.plex = { kind: 'ok', text: 'Unlinked. Servers you already added keep their own access.' };
       return loadState();
     }).catch(function (e) { setMsg('plex', 'error', e.message); });
   }
 
-  function discover() {
-    return withBusy('discover', api('GET', '/api/settings/plex/discover').then(function (r) {
-      discovered = r.servers || [];
-      msgs.plex = discovered.length ? null : { kind: 'error', text: 'Your Plex account has no servers.' };
+  function discover(accountId) {
+    return withBusy('discover-' + (accountId || 'all'), api('GET', '/api/settings/plex/discover' + (accountId ? '?account=' + encodeURIComponent(accountId) : '')).then(function (r) {
+      var found = r.servers || [];
+      // Keep what other accounts already found; replace this account's results.
+      discovered = (discovered || []).filter(function (d) { return accountId && d.account !== accountId; }).concat(found);
+      var errs = (r.errors || []).join('; ');
+      msgs.plex = errs ? { kind: 'error', text: 'Could not reach plex.tv for ' + errs }
+        : !found.length ? { kind: 'error', text: 'That Plex account does not own any servers.' } : null;
     }).catch(function (e) { setMsg('plex', 'error', e.message); }));
   }
 
@@ -262,22 +269,41 @@
 
   // ---------- render: Plex ----------
   function renderAccount() {
-    var sec = el('section', { class: 'st-section' }, el('h3', { text: 'Plex account' }));
+    var accounts = state.plex_accounts || [];
+    var sec = el('section', { class: 'st-section' }, el('h3', { text: 'Plex accounts' }),
+      el('p', { class: 'st-note', text: 'Each of your servers can belong to its own Plex account. Link each account here: the dashboard finds the servers it owns, their access tokens, and the people it shares them with.' }));
+    if (accounts.length) {
+      var list = el('ul', { class: 'st-list' });
+      accounts.forEach(function (a) {
+        list.appendChild(el('li', { class: 'st-item' },
+          el('div', { class: 'st-item__top' },
+            el('span', { class: 'st-dot st-dot--online', 'aria-hidden': 'true' }),
+            el('span', { class: 'st-item__name', text: a.name || a.username || 'Plex account' }),
+            el('span', { class: 'st-spacer' }),
+            el('button', { type: 'button', class: 'st-btn', text: busy['discover-' + a.id] ? 'Finding…' : 'Find servers', disabled: busy['discover-' + a.id],
+              onclick: function () { discover(a.id); } }),
+            unlinking === a.id ? null : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Unlink…', onclick: function () { unlinking = a.id; render(); } })),
+          el('div', { class: 'st-item__meta', text: (a.email || '') + (a.servers.length ? ' · owns ' + a.servers.join(', ') : ' · no monitored servers yet') }),
+          unlinking === a.id ? el('div', { class: 'st-row' },
+            el('span', { class: 'st-note', text: 'Unlink ' + (a.email || a.name) + '? Its servers keep working, but its shared users stop updating.' }),
+            el('span', { class: 'st-spacer' }),
+            el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Keep', onclick: function () { unlinking = null; render(); } }),
+            el('button', { type: 'button', class: 'st-btn st-btn--danger', text: 'Unlink', onclick: function () { unlink(a.id); } })) : null));
+      });
+      sec.appendChild(list);
+    }
     if (link) {
       sec.appendChild(el('p', { class: 'st-note' }, 'Approve access in the Plex tab that just opened. If it did not open, ',
         el('a', { href: link.auth_url, target: '_blank', rel: 'noopener', text: 'open the Plex sign-in page' }), '. Code ',
         el('span', { class: 'st-code', text: link.code })));
       sec.appendChild(el('div', { class: 'st-row' }, el('button', { type: 'button', class: 'st-btn', text: 'Cancel', onclick: cancelLink })));
-    } else if (state.plex_account_linked) {
-      sec.appendChild(el('p', { class: 'st-note', text: 'Signed in. The dashboard can list your servers and fetch their access tokens for you.' }));
-      sec.appendChild(el('div', { class: 'st-row' },
-        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy.discover ? 'Finding servers…' : 'Find my servers', disabled: busy.discover, onclick: discover }),
-        el('span', { class: 'st-spacer' }),
-        el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Sign out of Plex', onclick: unlink })));
     } else {
-      sec.appendChild(el('p', { class: 'st-note', text: 'Sign in once and the dashboard finds your Plex servers and their access tokens, so you never copy a token by hand.' }));
       sec.appendChild(el('div', { class: 'st-row' },
-        el('button', { type: 'button', class: 'st-btn st-btn--accent', text: busy.link ? 'Opening Plex…' : 'Sign in with Plex', disabled: busy.link, onclick: startLink })));
+        el('button', { type: 'button', class: 'st-btn st-btn--accent', text: busy.link ? 'Opening Plex…' : accounts.length ? 'Link another Plex account' : 'Sign in with Plex',
+          disabled: busy.link, onclick: startLink })));
+      if (accounts.length) {
+        sec.appendChild(el('p', { class: 'st-note', text: 'Plex signs in with whatever account this browser is already using. To link a different one, sign out at app.plex.tv first, or do this in a private window.' }));
+      }
     }
     sec.appendChild(message('plex'));
     return sec;
@@ -292,7 +318,7 @@
       item.appendChild(el('div', { class: 'st-item__top' },
         el('span', { class: 'st-item__name', text: d.name }),
         el('span', { class: 'st-tag', text: 'Plex ' + (d.version || '?') }),
-        d.owned ? null : el('span', { class: 'st-tag', text: 'Shared with you' }),
+        d.account_name ? el('span', { class: 'st-tag', text: d.account_name }) : null,
         el('span', { class: 'st-spacer' }),
         d.added ? el('span', { class: 'st-tag st-tag--ok', text: 'Added' }) : null));
       if (!d.added) {
@@ -328,7 +354,7 @@
       }
       list.appendChild(item);
     });
-    return el('section', { class: 'st-section' }, el('h3', { text: 'Servers on your Plex account' }),
+    return el('section', { class: 'st-section' }, el('h3', { text: 'Servers found on your Plex accounts' }),
       el('p', { class: 'st-note', text: 'Pick the address this dashboard should use. A local or private address is fastest.' }), list);
   }
 
@@ -406,7 +432,7 @@
     var key = 'manual';
     var name = input({ placeholder: 'Atlas' }, key + '-name');
     var url = input({ placeholder: 'http://10.0.0.11:32400', class: 'st-input is-mono' }, key + '-url');
-    var token = input({ type: 'password', placeholder: state.plex_account_linked ? 'Optional: uses your Plex sign-in' : 'X-Plex-Token', autocomplete: 'new-password' }, key + '-token');
+    var token = input({ type: 'password', placeholder: (state.plex_accounts || []).length === 1 ? 'Optional: uses your linked Plex account' : 'X-Plex-Token', autocomplete: 'new-password' }, key + '-token');
     var max = input({ type: 'number', min: 1, max: 200, value: 8 }, key + '-max');
     var cap = input({ type: 'number', min: 1, value: 1000 }, key + '-cap');
     var node = nodeInput(null, key + '-node');
@@ -508,11 +534,15 @@
     }).then(render).catch(function (e) { setMsg('load', 'error', e.message); });
   }
 
+  // Everyone, once: the picker searches and groups them in the browser (fine for thousands).
   function loadAccUsers(quiet) {
-    return api('GET', '/api/users?limit=51&q=' + encodeURIComponent(accQ.trim()) + '&server=' + encodeURIComponent(accServer)).then(function (r) {
-      accUsers = (r.rows || []).slice(0, 50);
-      accTotal = (r.rows || []).length;
+    return api('GET', '/api/users?limit=5000').then(function (r) {
+      accUsers = r.rows || [];
       accServers = r.servers || [];
+      if (accPicker) accPicker.setData({ servers: accServers, people: accUsers.map(function (u) {
+        return { key: u.id, name: u.name || u.username || 'Plex user', username: u.username, email: u.email, servers: u.servers || [],
+          plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner };
+      }) });
       if (!quiet) render();
     }).catch(function (e) { setMsg('acc-users', 'error', e.message); });
   }
@@ -537,6 +567,46 @@
     if (!ts) return 'never';
     var d = new Date(ts * 1000);
     return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function accessEditor(u, describe) {
+    var key = 'acc-u';
+    var label = function (k) { var x = access.sections.find(function (s) { return s.key === k; }); return x ? x.label : k; };
+    var head = el('div', { class: 'st-editor__head' },
+      el('div', null, el('b', { text: u.name || u.username }),
+        el('span', { text: [u.username && u.username !== u.name ? '@' + u.username : null, u.email || 'no email on file',
+          u.servers && u.servers.length ? 'on ' + u.servers.join(', ') : 'not on a monitored server'].filter(Boolean).join(' · ') }),
+        el('span', { text: describe(u) + ' · ' + (u.last_login ? 'last signed in ' + ago(u.last_login) : 'never signed in') })));
+    var close = el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: u.admin ? 'Close' : 'Cancel', onclick: function () { accEditing = null; render(); } });
+    if (u.admin) {
+      return el('div', { class: 'st-editor' }, head, el('p', { class: 'st-note', text: 'The administrator Plex account always sees everything and cannot be turned off.' }),
+        el('div', { class: 'st-row' }, el('span', { class: 'st-spacer' }), close));
+    }
+    var useDef = el('input', { type: 'radio', name: key + '-mode', value: 'default', id: key + '-def', checked: !u.custom_sections });
+    var useCustom = el('input', { type: 'radio', name: key + '-mode', value: 'custom', id: key + '-cus', checked: !!u.custom_sections });
+    var off = el('input', { type: 'checkbox', id: key + '-off', checked: u.disabled });
+    var box = el('div', { id: key + '-sbox' }, sectionChecks(key + '-s', u.custom_sections || u.sections));
+    setTimeout(function () {
+      var sync = function () { box.querySelectorAll('input').forEach(function (c) { c.disabled = useDef.checked; }); };
+      useDef.onchange = sync; useCustom.onchange = sync; sync();
+    }, 0);
+    return el('div', { class: 'st-editor' }, head,
+      el('div', { class: 'st-row' },
+        el('label', { class: 'st-check' }, useDef, 'Default access (' + (access.default_sections.map(label).join(', ') || 'nothing') + ')'),
+        el('label', { class: 'st-check' }, useCustom, 'Custom')),
+      box,
+      el('label', { class: 'st-check' }, off, 'Turn off this person’s access'),
+      el('div', { class: 'st-row' }, el('span', { class: 'st-spacer' }), close,
+        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy[key] ? 'Saving…' : 'Save', disabled: busy[key],
+          onclick: function () {
+            var body = { disabled: off.checked };
+            if (useDef.checked) body.use_defaults = true; else body.sections = checked(key + '-s');
+            withBusy(key, api('PUT', '/api/settings/users/' + encodeURIComponent(u.id), body).then(function () {
+              accEditing = null; clearDrafts(key);
+              msgs['acc-users'] = { kind: 'ok', text: 'Saved access for ' + (u.name || u.username) + '.' };
+              return loadAccUsers(false);
+            }).catch(function (e) { setMsg('acc-users', 'error', e.message); }));
+          } })));
   }
 
   function renderAccess(pane) {
@@ -568,27 +638,36 @@
           } })),
       message('acc-def')));
 
-    // Plex users
+    // People: find one person at a time, plus a short list of everyone not on the defaults.
     var sync = state && state.users_sync || {};
-    var q = input({ type: 'search', placeholder: 'Search by username or email', value: accQ }, 'acc-q');
-    q.addEventListener('input', function () {
-      accQ = q.value;
-      clearTimeout(accTimer);
-      accTimer = setTimeout(function () { loadAccUsers(false); }, 220);
-    });
-    var serverSel = el('select', { class: 'st-select', id: 'acc-server' }, el('option', { value: '', text: 'All servers' }),
-      accServers.map(function (n) { return el('option', { value: n, text: n }); }));
-    serverSel.value = accServer;
-    serverSel.addEventListener('change', function () { accServer = serverSel.value; drafts['acc-server'] = accServer; loadAccUsers(false); });
-    var usersSec = el('section', { class: 'st-section' },
-      el('h3', { text: 'Plex users' }),
+    if (!accPicker) {
+      accPicker = window.gsUserPicker({ idPrefix: 'acc', inline: true, placeholder: 'Find someone to change their access',
+        icon: window.sdIcon, onPick: function (p) {
+          accEditing = p.key; render();
+          var first = document.querySelector('#st-pane-access .st-editor input, #st-pane-access .st-editor button');
+          if (first) first.focus();
+        } });
+      loadAccUsers(true);
+    }
+    var editing = accEditing ? (accUsers || []).find(function (u) { return u.id === accEditing; }) : null;
+    var changed = (accUsers || []).filter(function (u) { return !u.admin && (u.custom_sections || u.disabled); });
+    var describe = function (u) {
+      return u.admin ? 'Administrator, sees everything' : u.disabled ? 'Access turned off'
+        : (u.custom_sections ? 'Custom: ' : 'Default: ') + (u.sections.length ? u.sections.map(label).join(', ') : 'nothing');
+    };
+    pane.appendChild(el('section', { class: 'st-section' },
+      el('h3', { text: 'People' }),
+      el('p', { class: 'st-note', text: 'Find anyone by username or email to change what they can see. Results group by Plex server.' }),
+      accPicker.el,
+      editing ? accessEditor(editing, describe) : null,
+      message('acc-users'),
       el('p', { class: 'st-note', text: sync.synced_at ? 'Shared users last loaded from Plex ' + ago(sync.synced_at) + '.' : 'Load the people you share servers with from your Plex account.' }),
       sync.error ? el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), sync.error) : null,
       el('div', { class: 'st-row' },
         el('button', { type: 'button', class: 'st-btn', text: busy['acc-sync'] ? 'Loading users…' : 'Sync Plex users', disabled: busy['acc-sync'],
           onclick: function () {
             withBusy('acc-sync', api('POST', '/api/settings/users/sync').then(function (r) {
-              msgs['acc-users'] = { kind: 'ok', text: 'Loaded ' + r.users + ' Plex accounts.' };
+              msgs['acc-users'] = { kind: 'ok', text: 'Loaded ' + r.users + ' people from your linked Plex accounts.' };
               return loadAccess();
             }).catch(function (e) { setMsg('acc-users', 'error', e.message); }));
           } }),
@@ -601,71 +680,20 @@
               msgs['acc-users'] = { kind: r.errors && r.errors.length ? 'error' : 'ok', text: t };
               return loadAccUsers(false);
             }).catch(function (e) { setMsg('acc-users', 'error', e.message); }));
-          } })),
-      message('acc-users'),
-      el('div', { class: 'st-toolbar' }, field('Find a user', q), field('Plex server', serverSel)));
-    var list = el('ul', { class: 'st-list' });
-    (accUsers || []).forEach(function (u) {
-      var key = 'acc-u-' + u.id;
-      var item = el('li', { class: 'st-item' });
-      var what = u.admin ? 'Administrator, sees everything'
-        : u.disabled ? 'Access turned off'
-        : (u.custom_sections ? 'Custom: ' : 'Default: ') + (u.sections.length ? u.sections.map(label).join(', ') : 'nothing');
-      item.appendChild(el('div', { class: 'st-item__top' },
-        el('span', { class: 'st-dot ' + (u.admin ? 'st-dot--online' : u.disabled ? 'st-dot--offline' : ''), 'aria-hidden': 'true' }),
-        el('span', { class: 'st-item__name', text: u.name || u.username }),
-        u.admin ? el('span', { class: 'st-tag st-tag--ok', text: 'Admin' }) : null,
-        u.disabled ? el('span', { class: 'st-tag', text: 'Off' }) : null,
-        el('span', { class: 'st-spacer' }),
-        u.admin ? null : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Change access', 'aria-expanded': accEditing === u.id ? 'true' : 'false',
-          onclick: function () { accEditing = accEditing === u.id ? null : u.id; clearDrafts(key); render(); } })));
-      item.appendChild(el('div', { class: 'st-item__meta', text: [u.username && u.username !== u.name ? '@' + u.username : null, u.email || 'no email on file'].filter(Boolean).join(' · ') }));
-      item.appendChild(el('div', { class: 'st-item__meta', text: what + ' · ' + (u.last_login ? 'last signed in ' + ago(u.last_login) : 'never signed in') }));
-      if (accEditing === u.id) {
-        var useDef = el('input', { type: 'radio', name: key + '-mode', value: 'default', id: key + '-def', checked: !u.custom_sections });
-        var useCustom = el('input', { type: 'radio', name: key + '-mode', value: 'custom', id: key + '-cus', checked: !!u.custom_sections });
-        var off = el('input', { type: 'checkbox', id: key + '-off', checked: u.disabled });
-        item.appendChild(el('div', { class: 'st-form' },
-          el('div', { class: 'st-wide st-row' },
-            el('label', { class: 'st-check' }, useDef, 'Default access (' + (access.default_sections.map(label).join(', ') || 'nothing') + ')'),
-            el('label', { class: 'st-check' }, useCustom, 'Custom')),
-          el('div', { class: 'st-wide', id: key + '-sbox' }, sectionChecks(key + '-s', u.custom_sections || u.sections)),
-          el('div', { class: 'st-wide' }, el('label', { class: 'st-check' }, off, 'Turn off this person’s access')),
-          el('div', { class: 'st-wide st-row' },
-            el('span', { class: 'st-spacer' }),
-            el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Cancel', onclick: function () { accEditing = null; render(); } }),
-            el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy[key] ? 'Saving…' : 'Save', disabled: busy[key],
-              onclick: function () {
-                var body = { disabled: document.getElementById(key + '-off').checked };
-                if (document.getElementById(key + '-def').checked) body.use_defaults = true;
-                else body.sections = checked(key + '-s');
-                withBusy(key, api('PUT', '/api/settings/users/' + encodeURIComponent(u.id), body).then(function () {
-                  accEditing = null; clearDrafts(key);
-                  msgs['acc-users'] = { kind: 'ok', text: 'Saved access for ' + (u.name || u.username) + '.' };
-                  return loadAccUsers(false);
-                }).catch(function (e) { setMsg(key, 'error', e.message); }));
-              } })),
-          el('div', { class: 'st-wide' }, message(key))));
-      }
-      list.appendChild(item);
+          } }))));
+    var cl = el('ul', { class: 'st-list' });
+    changed.forEach(function (u) {
+      cl.appendChild(el('li', { class: 'st-item' },
+        el('div', { class: 'st-item__top' },
+          el('span', { class: 'st-dot ' + (u.disabled ? 'st-dot--offline' : ''), 'aria-hidden': 'true' }),
+          el('span', { class: 'st-item__name', text: u.name || u.username }),
+          el('span', { class: 'st-spacer' }),
+          el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Change', onclick: function () { accEditing = u.id; render(); } })),
+        el('div', { class: 'st-item__meta', text: describe(u) })));
     });
-    // Custom section boxes only apply when Custom is chosen.
-    setTimeout(function () {
-      if (!accEditing) return;
-      var k = 'acc-u-' + accEditing;
-      var def = document.getElementById(k + '-def');
-      var cus = document.getElementById(k + '-cus');
-      var sync = function () {
-        document.querySelectorAll('#' + CSS.escape(k + '-sbox') + ' input').forEach(function (c) { c.disabled = def.checked; });
-      };
-      if (def && cus) { def.onchange = sync; cus.onchange = sync; sync(); }
-    }, 0);
-    if (accUsers && !accUsers.length) usersSec.appendChild(el('p', { class: 'st-note', text: accQ.trim() || accServer ? 'No one matches that search.' : 'No Plex users yet. Sign in with Plex under Plex servers, then Sync Plex users.' }));
-    else {
-      usersSec.appendChild(list);
-      if (accTotal > 50) usersSec.appendChild(el('p', { class: 'st-note', text: 'Showing the first 50. Search or pick a server to find someone else.' }));
-    }
-    pane.appendChild(usersSec);
+    pane.appendChild(el('details', { class: 'st-section st-details', id: 'acc-changed' },
+      el('summary', { text: 'Custom access or turned off (' + changed.length + ')' }),
+      changed.length ? cl : el('p', { class: 'st-note', text: 'Everyone uses the default access.' })));
 
     // Local admin logins
     var aUser = input({ placeholder: 'e.g. ops', autocomplete: 'off' }, 'acc-new-user');
@@ -690,8 +718,8 @@
             : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Delete…', onclick: function () { accRemoving = a.id; render(); } })),
         el('div', { class: 'st-item__meta', text: 'Created ' + ago(a.created) + ' · ' + (a.last_login ? 'last signed in ' + ago(a.last_login) : 'never signed in') })));
     });
-    var adminSec = el('section', { class: 'st-section' },
-      el('h3', { text: 'Admin logins (not Plex accounts)' }),
+    var adminSec = el('details', { class: 'st-section st-details', id: 'acc-admins-box', open: !!msgs['acc-admins'] || !!drafts['acc-new-user'] },
+      el('summary', { text: 'Admin logins, not Plex accounts (' + access.admins.length + ')' }),
       el('p', { class: 'st-note', text: 'Username and password logins with full administrator access. Use them for people who should manage the dashboard without a Plex account.' }),
       access.admins.length ? admins : el('p', { class: 'st-note', text: 'None yet.' }),
       el('details', { class: 'st-details', id: 'acc-add', open: !!msgs['acc-admins'] || !!drafts['acc-new-user'] },

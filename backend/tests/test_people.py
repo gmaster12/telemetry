@@ -153,3 +153,36 @@ def test_old_users_table_gets_servers_column(tmp_path, monkeypatch):
     d = Directory(Store(str(db), SecretBox()))
     d.upsert_user({"id": "1", "username": "x", "servers": ["Atlas"]})
     assert json.loads(d.get_user("1")["servers"]) == ["Atlas"]
+
+
+def test_sync_users_across_owner_accounts(env, monkeypatch):
+    """Each server belongs to its own Plex account: owners and shares are merged per person."""
+    import asyncio
+    store, d = env
+    from app import plex as plexmod
+    from app.poller import Poller
+    store.add_server({"name": "Atlas", "plex_url": "http://a:32400", "machine_id": "m-atlas", "enabled": 1}, "t1")
+    store.add_server({"name": "Orion", "plex_url": "http://o:32400", "machine_id": "m-orion", "enabled": 1}, "t2")
+    store.save_account({"id": "9001", "username": "glenn", "email": "cluster@mail.com"}, "tok-a")
+    store.save_account({"id": "9002", "username": "orion_owner", "email": "o@example.com"}, "tok-b")
+    infos = {"tok-a": {"id": "9001", "username": "glenn", "title": "Glenn", "email": "cluster@mail.com"},
+             "tok-b": {"id": "9002", "username": "orion_owner", "title": "Orion Owner", "email": "o@example.com"}}
+    owned = {"tok-a": "m-atlas", "tok-b": "m-orion"}
+    shares = {"tok-a": [{"id": "2001", "username": "sable", "email": "s@example.com", "server_ids": ["m-atlas"], "server_names": []}],
+              "tok-b": [{"id": "2001", "username": "sable", "email": "s@example.com", "server_ids": ["m-orion"], "server_names": []},
+                        {"id": "2002", "username": "quill", "email": "q@example.com", "server_ids": ["m-orion"], "server_names": []}]}
+
+    async def user_info(self, t): return dict(infos[t])
+    async def servers(self, t): return [{"machine_id": owned[t], "owned": True, "token": "x"}]
+    async def shared_users(self, t): return [dict(u) for u in shares[t]]
+    monkeypatch.setattr(plexmod.PlexAccount, "user_info", user_info)
+    monkeypatch.setattr(plexmod.PlexAccount, "servers", servers)
+    monkeypatch.setattr(plexmod.PlexAccount, "shared_users", shared_users)
+    p = Poller(store)
+    assert asyncio.run(p.sync_users()) == 4  # two owners, two shared people
+    assert json.loads(d.get_user("2001")["servers"]) == ["Atlas", "Orion"]
+    assert json.loads(d.get_user("2002")["servers"]) == ["Orion"]
+    assert d.get_user("9002")["is_owner"] == 1
+    assert {s["name"]: s["owner_plex_id"] for s in store.list_servers()} == {"Atlas": "9001", "Orion": "9002"}
+    # each server's local account 1 is that server's owner
+    assert p.owner_for("Atlas") == "9001" and p.owner_for("Orion") == "9002"

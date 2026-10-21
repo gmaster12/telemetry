@@ -35,6 +35,15 @@ CREATE TABLE IF NOT EXISTS servers (
   netdata_agent_url TEXT,
   machine_id TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
+  created INTEGER NOT NULL,
+  owner_plex_id TEXT
+);
+CREATE TABLE IF NOT EXISTS plex_accounts (
+  plex_id TEXT PRIMARY KEY,
+  username TEXT,
+  title TEXT,
+  email TEXT,
+  token_enc TEXT NOT NULL,
   created INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS settings (
@@ -102,7 +111,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 """
 
 SECRET_SETTINGS = {"netdata_token", "plex_account_token"}
-SERVER_FIELDS = ("name", "plex_url", "max_streams", "capacity_mbps", "netdata_node", "netdata_agent_url", "machine_id", "enabled")
+SERVER_FIELDS = ("name", "plex_url", "max_streams", "capacity_mbps", "netdata_node", "netdata_agent_url", "machine_id", "enabled", "owner_plex_id")
 
 
 class Store:
@@ -115,8 +124,44 @@ class Store:
         if "servers" not in cols:  # added after the first users release
             self.db.execute("ALTER TABLE users ADD COLUMN servers TEXT")
             self.db.commit()
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(servers)")}
+        if "owner_plex_id" not in cols:  # one Plex account per server
+            self.db.execute("ALTER TABLE servers ADD COLUMN owner_plex_id TEXT")
+            self.db.commit()
         self.box = box
         self.lock = threading.Lock()
+
+    # ---------- linked Plex accounts (each owns one or more servers) ----------
+    def list_accounts(self) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT plex_id, username, title, email, created FROM plex_accounts ORDER BY created")]
+
+    def account_tokens(self) -> list[tuple[dict, str]]:
+        out = []
+        for r in self.db.execute("SELECT * FROM plex_accounts ORDER BY created"):
+            tok = self.box.open(r["token_enc"])
+            if tok:
+                out.append(({k: r[k] for k in ("plex_id", "username", "title", "email")}, tok))
+        return out
+
+    def save_account(self, info: dict, token: str) -> None:
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO plex_accounts (plex_id, username, title, email, token_enc, created) VALUES (?,?,?,?,?,?) "
+                "ON CONFLICT(plex_id) DO UPDATE SET username = excluded.username, title = excluded.title, email = excluded.email, token_enc = excluded.token_enc",
+                (str(info["id"]), info.get("username"), info.get("title"), info.get("email"), self.box.seal(token), int(time.time())),
+            )
+            self.db.commit()
+
+    def update_account_info(self, info: dict) -> None:
+        with self.lock:
+            self.db.execute("UPDATE plex_accounts SET username = ?, title = ?, email = ? WHERE plex_id = ?",
+                            (info.get("username"), info.get("title"), info.get("email"), str(info["id"])))
+            self.db.commit()
+
+    def delete_account(self, plex_id: str) -> None:
+        with self.lock:
+            self.db.execute("DELETE FROM plex_accounts WHERE plex_id = ?", (plex_id,))
+            self.db.commit()
 
     # ---------- settings ----------
     def get_setting(self, key: str, default: str | None = None) -> str | None:
@@ -313,8 +358,9 @@ class Directory:
         return dict(r) if r else None
 
     def owner(self) -> dict | None:
-        r = self.db.execute("SELECT * FROM users WHERE is_owner = 1 ORDER BY last_seen DESC LIMIT 1").fetchone()
-        return dict(r) if r else None
+        """The server owner, only when there is exactly one (several servers can have different owners)."""
+        rs = self.db.execute("SELECT * FROM users WHERE is_owner = 1 LIMIT 2").fetchall()
+        return dict(rs[0]) if len(rs) == 1 else None
 
     def find_user_by_email(self, email: str) -> dict | None:
         r = self.db.execute("SELECT * FROM users WHERE lower(email) = lower(?)", (email,)).fetchone()

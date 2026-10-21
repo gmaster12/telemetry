@@ -55,8 +55,12 @@ HTTPS: see `deploy/nginx-telemetry.conf` or `deploy/Caddyfile.telemetry`.
 Open the dashboard and choose **Sign in with Plex** with the admin Plex account.
 Then open **Settings** (the sliders button in the top bar):
 
-1. **Plex servers**: **Sign in with Plex**, approve in the Plex tab that opens,
-   then **Find my servers** and **Add server** for each one. Pick a local or
+1. **Plex servers**: each of your servers can belong to its own Plex account.
+   For each one, **Link another Plex account** (the first time it says **Sign
+   in with Plex**), approve with that server's Plex account, then **Find
+   servers** and **Add server**. Plex signs in with whatever account the
+   browser is already using, so sign out at app.plex.tv between accounts, or
+   use a private window. Pick a local or
    private address (for example a ZeroTier IP) when it is offered. You can also
    add a server by address and token.
 2. **Netdata**: choose **Netdata Cloud**, enter the Space ID, Room ID and an API

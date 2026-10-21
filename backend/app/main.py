@@ -228,17 +228,20 @@ def _clean_url(url: str) -> str:
     return url
 
 
-async def _account_token_for(machine_id: str | None) -> str | None:
-    """Per-server access token from the linked Plex account, resolved server-side."""
-    acct = store.get_setting("plex_account_token")
-    if not acct:
-        return None
+async def _account_token_for(machine_id: str | None) -> tuple[str | None, str | None]:
+    """(server access token, owner plex id) from whichever linked Plex account owns the server."""
+    accounts = store.account_tokens()
     if not machine_id:
-        return acct
-    for srv in await PlexAccount(poller.http, client_id()).servers(acct):
-        if srv["machine_id"] == machine_id:
-            return srv["token"] or acct
-    return acct
+        return (accounts[0][1], accounts[0][0]["plex_id"]) if len(accounts) == 1 else (None, None)
+    acct = PlexAccount(poller.http, client_id())
+    for a, tok in accounts:
+        try:
+            for srv in await acct.servers(tok):
+                if srv["machine_id"] == machine_id:
+                    return srv["token"] or tok, a["plex_id"] if srv.get("owned") else None
+        except Exception:
+            continue
+    return None, None
 
 
 async def _test_plex(url: str, token: str | None) -> dict:
@@ -265,7 +268,9 @@ def get_settings():
             "netdata_agent_url": r["netdata_agent_url"], "enabled": bool(r["enabled"]), "machine_id": r["machine_id"],
             "state": poller.server_state.get(r["name"], {}),
         } for r in rows],
-        "plex_account_linked": bool(store.get_setting("plex_account_token")),
+        "plex_accounts": [{"id": a["plex_id"], "username": a["username"], "name": a["title"] or a["username"], "email": a["email"],
+                           "servers": [r["name"] for r in rows if r.get("owner_plex_id") == a["plex_id"]]} for a in store.list_accounts()],
+        "plex_account_linked": bool(store.list_accounts()),
         "netdata": {
             "mode": cfg.netdata.mode, "space_id": cfg.netdata.space_id, "room_id": cfg.netdata.room_id,
             "has_token": bool(cfg.netdata.token), "cpu_context": cfg.netdata.cpu_context,
@@ -286,20 +291,26 @@ async def test_server(body: TestIn):
         s = next((x for x in poller.cfg.servers if x.id == body.server_id), None)
         token = s.token if s else None
     if not token:
-        token = await _account_token_for(body.machine_id)
+        token, _ = await _account_token_for(body.machine_id)
     return await _test_plex(_clean_url(body.plex_url), token)
 
 
 @app.post("/api/settings/servers")
 async def add_server(body: ServerIn):
     url = _clean_url(body.plex_url)
-    token = body.token or await _account_token_for(body.machine_id)
+    owner = None
+    token = body.token
+    if not token:
+        token, owner = await _account_token_for(body.machine_id)
     info = await _test_plex(url, token)
     if any(r["name"].lower() == body.name.strip().lower() for r in store.list_servers()):
         raise HTTPException(409, f"A server named {body.name} already exists.")
     data = body.model_dump(exclude={"token"})
     data.update(name=body.name.strip(), plex_url=url, machine_id=body.machine_id or info.get("machine_id"), enabled=int(body.enabled))
+    if owner:
+        data["owner_plex_id"] = owner
     sid = store.add_server(data, token)
+    poller.users_synced_at = 0  # learn the owner and who it is shared with
     poller.reload()
     return {"id": sid, **info}
 
@@ -338,28 +349,43 @@ async def plex_link_start():
 
 @app.get("/api/settings/plex/link/{pin_id}")
 async def plex_link_check(pin_id: int):
-    token = await PlexAccount(poller.http, client_id()).check_pin(pin_id)
-    if token:
-        store.set_setting("plex_account_token", token)
-        poller.users_synced_at = 0  # load shared users right away
-        poller.reload()
-    return {"linked": bool(token)}
+    """Link one more Plex account (each server can belong to a different account)."""
+    acct = PlexAccount(poller.http, client_id())
+    token = await acct.check_pin(pin_id)
+    if not token:
+        return {"linked": False}
+    info = await acct.user_info(token)
+    store.save_account(info, token)
+    poller.users_synced_at = 0  # load shared users right away
+    poller.reload()
+    return {"linked": True, "account": {"id": str(info["id"]), "name": info.get("title") or info.get("username"), "email": info.get("email")}}
 
 
-@app.post("/api/settings/plex/unlink")
-def plex_unlink():
-    store.set_setting("plex_account_token", None)
+@app.delete("/api/settings/plex/accounts/{plex_id}")
+def plex_unlink(plex_id: str):
+    """Unlink a Plex account. Its servers keep working with the tokens saved for them."""
+    store.delete_account(plex_id)
     return {"ok": True}
 
 
 @app.get("/api/settings/plex/discover")
-async def plex_discover():
-    acct = store.get_setting("plex_account_token")
-    if not acct:
-        raise HTTPException(409, "Sign in with Plex first.")
-    found = await PlexAccount(poller.http, client_id()).servers(acct)
+async def plex_discover(account: str = ""):
+    """Servers owned by the linked Plex accounts (or one of them)."""
+    accounts = [x for x in store.account_tokens() if not account or x[0]["plex_id"] == account]
+    if not accounts:
+        raise HTTPException(409, "Link a Plex account first.")
     added = {r["machine_id"] for r in store.list_servers() if r["machine_id"]}
-    return {"servers": [{k: v for k, v in s.items() if k != "token"} | {"added": s["machine_id"] in added} for s in found]}
+    out, errors = [], []
+    acct = PlexAccount(poller.http, client_id())
+    for a, tok in accounts:
+        try:
+            for s in await acct.servers(tok):
+                if s.get("owned"):
+                    out.append({k: v for k, v in s.items() if k != "token"} | {"added": s["machine_id"] in added,
+                               "account": a["plex_id"], "account_name": a["title"] or a["username"] or a["email"]})
+        except Exception as e:
+            errors.append(f"{a.get('email') or a['plex_id']}: {e}")
+    return {"servers": out, "errors": errors}
 
 
 @app.put("/api/settings/netdata")
@@ -453,8 +479,8 @@ async def auth_plex_check(pin_id: int, request: Request):
     if known and known["plex_id"] != info["id"]:
         info["id"] = known["plex_id"]
     directory.upsert_user(info, is_owner=None)
-    if is_admin and not store.get_setting("plex_account_token"):
-        store.set_setting("plex_account_token", token)  # lets Settings find servers and shared users
+    if is_admin and not store.list_accounts():
+        store.save_account(info, token)  # first run: lets Settings find this account's servers
         poller.users_synced_at = 0
     user = directory.get_user(info["id"])
     if user and user.get("disabled"):

@@ -270,7 +270,7 @@
         body.appendChild(el('div', { class: 'gp-access' },
           el('span', null, el('span', { class: 'gp-label', text: 'Can see' }), ' ' + (u.disabled ? 'Nothing, access is off' : access.length ? access.join(', ') : 'Nothing yet')),
           el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Change access', onclick: function () {
-            closeHistory(); if (window.stFocusUser) window.stFocusUser(u.username || u.email || u.name); openSettingsTab('access');
+            closeHistory(); if (window.stFocusUser) window.stFocusUser(u.id); openSettingsTab('access');
           } })));
       }
       var first = isSelf ? r.rows : null;
