@@ -1,0 +1,48 @@
+/* Settings screen: tabs, Plex servers, Netdata and alerts. Uses the design system tokens. */
+.st-tabs { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-4); }
+.st-pane { display: flex; flex-direction: column; gap: var(--space-3); }
+.st-section { display: flex; flex-direction: column; gap: var(--space-3); padding: 16px; border-radius: 20px; background: var(--surface-card); }
+.st-section h3 { margin: 0; font-size: 15px; line-height: 20px; font-weight: 600; }
+.st-note { margin: 0; font-size: 13px; line-height: 18px; color: var(--ink-muted); }
+.st-note a { color: var(--teal); }
+.st-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.st-spacer { flex: 1; }
+.st-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 40px; padding: 0 18px; border: 0; border-radius: var(--radius-pill); background: var(--surface-raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--border-strong); font-family: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.st-btn--primary { background: var(--action); color: var(--on-action); box-shadow: none; }
+.st-btn--accent { background: var(--volt); color: var(--on-fill); box-shadow: none; }
+.st-btn--danger { background: var(--danger); color: var(--on-danger); box-shadow: none; }
+.st-btn--quiet { background: transparent; box-shadow: none; padding: 0 10px; }
+.st-btn:disabled { opacity: 0.45; cursor: default; }
+.st-btn:focus-visible, .st-input:focus-visible, .st-select:focus-visible, .st-check input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.st-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.st-form .st-wide { grid-column: 1 / -1; }
+.st-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.st-field label { font-size: 13px; font-weight: 500; }
+.st-field small { font-size: 12px; color: var(--ink-muted); }
+.st-input, .st-select { box-sizing: border-box; width: 100%; height: 42px; padding: 0 14px; border: 0; border-radius: 14px; background: var(--surface-raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--border-strong); font-family: inherit; font-size: 14px; }
+.st-input.is-mono { font-family: var(--font-mono); font-size: 13px; }
+.st-check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.st-msg { margin: 0; padding: 10px 14px; border-radius: 14px; font-size: 13px; line-height: 18px; }
+.st-msg--ok { background: rgba(184, 252, 100, 0.25); color: var(--ink); }
+.st-msg--error { background: var(--surface-raised); color: var(--danger); box-shadow: inset 0 0 0 1px var(--danger); }
+.st-msg b { font-weight: 600; }
+.st-list { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.st-item { display: flex; flex-direction: column; gap: var(--space-2); padding: 12px 14px; border-radius: 16px; background: var(--surface-raised); }
+.st-item__top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.st-item__name { font-size: 15px; font-weight: 600; }
+.st-item__meta { font-size: 12px; color: var(--ink-muted); overflow-wrap: anywhere; }
+.st-item__meta.is-mono { font-family: var(--font-mono); }
+.st-dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--border-strong); }
+.st-dot--online { background: var(--lime); box-shadow: 0 0 0 1px var(--ink); }
+.st-dot--offline { background: var(--danger); }
+.st-conn { display: flex; flex-direction: column; gap: 6px; }
+.st-conn label { display: flex; align-items: center; gap: 8px; font-size: 12px; overflow-wrap: anywhere; }
+.st-conn code { font-family: var(--font-mono); font-size: 12px; }
+.st-tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface-page); color: var(--ink-muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.st-tag--ok { background: var(--lime); color: var(--on-fill); }
+.st-details summary { cursor: pointer; font-size: 13px; font-weight: 500; }
+.st-details[open] summary { margin-bottom: var(--space-3); }
+.st-code { display: inline-block; padding: 2px 8px; border-radius: 8px; background: var(--surface-raised); font-family: var(--font-mono); font-size: 18px; letter-spacing: 0.1em; }
+@media (max-width: 560px) {
+  .st-form { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,0 +1,14 @@
+services:
+  telemetry:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: greystar-telemetry:latest
+    container_name: greystar-telemetry
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      # Only reachable from this host. Put nginx or Caddy in front for HTTPS.
+      - "127.0.0.1:8791:8791"
+    volumes:
+      - ./data:/data

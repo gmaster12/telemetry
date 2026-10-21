@@ -1,0 +1,50 @@
+[
+ {
+  "server": "Atlas",
+  "capacity_mbps": 1000,
+  "cpu_pct": 34,
+  "status": "Healthy",
+  "max_streams": 8,
+  "hot_for_min": 0
+ },
+ {
+  "server": "Basestar",
+  "capacity_mbps": 500,
+  "cpu_pct": 21,
+  "status": "Healthy",
+  "max_streams": 8,
+  "hot_for_min": 0
+ },
+ {
+  "server": "Beta",
+  "capacity_mbps": 250,
+  "cpu_pct": 58,
+  "status": "Healthy",
+  "max_streams": 8,
+  "hot_for_min": 0
+ },
+ {
+  "server": "Orion",
+  "capacity_mbps": 500,
+  "cpu_pct": 91,
+  "status": "Degraded",
+  "max_streams": 8,
+  "hot_for_min": 12
+ },
+ {
+  "server": "Red",
+  "capacity_mbps": 250,
+  "cpu_pct": 0,
+  "status": "Offline",
+  "max_streams": 8,
+  "hot_for_min": 0
+ },
+ {
+  "server": "Olympus",
+  "capacity_mbps": 1000,
+  "cpu_pct": 27,
+  "status": "Healthy",
+  "max_streams": 8,
+  "hot_for_min": 0
+ }
+]
