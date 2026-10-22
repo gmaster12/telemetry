@@ -127,8 +127,8 @@ small `dash` API. `web/dash-shim.js` implements that API against the backend:
 
 Each response is `{"rows": [...], "sample": bool}`. The page derives
 `kpis`, `server_load` and `viewing_summary` with `dash.calc` in the browser.
-`dash.params()` holds UI state (`look`, `cardsize`, filters); `look` and
-`cardsize` persist in localStorage.
+`dash.params()` holds UI state (`look`, `cardsize`, `artlight`, filters); `look`,
+`cardsize` and `artlight` persist in localStorage.
 
 Before loading datasets the shim calls `GET /api/me` (401 sends the browser to
 `/login.html`) and skips datasets the person may not see, returning empty rows.
@@ -163,8 +163,9 @@ design system). The dashboard adds its own patterns:
   and flip to show playback details.
 - Mobile (760px and below): bottom tab bar Home / Servers / Streams / Alerts,
   compact stream rows with a bottom sheet, optional poster carousel.
-- Settings screen: Display (stream card size slider), Plex servers, Netdata,
-  Alerts, Access. Viewers only get Display, and only if they can see streams.
+- Settings screen: Display (stream card size slider, cover art brightness
+  slider: `artlight` 0 to 100, default 30, drives `--art-shade` on the poster
+  overlay), Plex servers, Netdata, Alerts, Access, Billing. Viewers only get Display, and only if they can see streams.
 - Logo (from Glenn's logo pack, in `web/assets/`): glow mark on a UI Navy
   circle at the top of the nav (and the phone top bar); a small "Telemetry"
   label above the title (Glenn removed the logo there); loading splash on UI

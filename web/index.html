@@ -196,6 +196,7 @@
   .sd-settings__close { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: var(--surface-card); color: var(--ink); cursor: pointer; }
   .sd-settings__close:focus-visible, .sd-settings__reset:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
   .sd-field { padding: 16px; border-radius: 20px; background: var(--surface-card); }
+  .sd-field + .sd-field { margin-top: 12px; }
   .sd-field__row { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
   .sd-field__row label { font-size: 15px; font-weight: 600; }
   .sd-field__row output { font-size: 24px; font-weight: 300; font-variant-numeric: tabular-nums; }
@@ -272,13 +273,17 @@
   .sd-prog { display: inline-block; width: 64px; height: 6px; margin-right: var(--space-2); border-radius: 3px; background: var(--surface-page); vertical-align: middle; overflow: hidden; }
   .sd-prog i { display: block; height: 100%; background: var(--ink); }
   /* Stream cards filled with dimmed cover art */
-  .sd-scard--art { background: linear-gradient(180deg, rgba(8, 8, 10, 0.5) 0%, rgba(8, 8, 10, 0.66) 45%, rgba(8, 8, 10, 0.9) 100%), var(--art) center 30% / cover no-repeat, #1a1a1e; color: #f6f6f4; }
+  /* --art-shade: 1 is the original dim look, lower is brighter (Settings, Display, Cover art brightness).
+     The bottom never gets lighter than 0.6 so the progress line stays readable. */
+  .sd-scard--art { --s: var(--art-shade, 1); background: linear-gradient(180deg, rgba(8, 8, 10, calc(0.5 * var(--s))) 0%, rgba(8, 8, 10, calc(0.66 * var(--s))) 45%, rgba(8, 8, 10, max(0.6, calc(0.9 * var(--s)))) 100%), var(--art) center 30% / cover no-repeat, #1a1a1e; color: #f6f6f4;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, calc(0.9 - 0.9 * var(--s))), 0 0 14px rgba(0, 0, 0, calc(0.6 - 0.6 * var(--s))); }
   .sd-scard--art .sd-scard__title, .sd-scard--art .sd-micro, .sd-scard--art .sd-progress { color: #d4d4d6; }
-  .sd-scard--art .sd-tag { background: rgba(255, 255, 255, 0.16); color: #f6f6f4; backdrop-filter: blur(6px); }
+  .sd-scard--art .gs-badge:not(.gs-badge--neutral), .sd-scard--art .sd-newchip { text-shadow: none; }
+  .sd-scard--art .sd-tag { background: linear-gradient(rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.16)), rgba(10, 10, 12, calc(0.6 - 0.6 * var(--s))); color: #f6f6f4; backdrop-filter: blur(6px); }
   .sd-scard--art .sd-prog { background: rgba(255, 255, 255, 0.22); }
   .sd-scard--art .sd-prog i { background: var(--volt); }
   .sd-scard--art .sd-avatar { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18); }
-  .sd-scard--art .gs-badge--neutral { background: rgba(255, 255, 255, 0.18); color: #f6f6f4; }
+  .sd-scard--art .gs-badge--neutral { background: linear-gradient(rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.18)), rgba(10, 10, 12, calc(0.6 - 0.6 * var(--s))); color: #f6f6f4; }
   .sd-art-note { font-size: 12px; color: var(--ink-muted); }
   /* Flip cards */
   .sd-flip { min-width: 0; perspective: 1600px; }
@@ -460,6 +465,12 @@
             <input class="sd-range" type="range" id="card-size" min="60" max="100" step="5" value="100">
             <div class="sd-field__ticks"><span>Smaller</span><span>Default</span></div>
             <p class="sd-field__hint">Resizes the poster cards in Live streams as you drag. List and table views stay the same.</p>
+          </div>
+          <div class="sd-field">
+            <div class="sd-field__row"><label for="art-light">Cover art brightness</label><output id="art-light-out" for="art-light">30%</output></div>
+            <input class="sd-range" type="range" id="art-light" min="0" max="100" step="5" value="30">
+            <div class="sd-field__ticks"><span>Darker</span><span>Brighter</span></div>
+            <p class="sd-field__hint">How much of the poster shows through on stream cards. Text keeps a shadow so it stays readable.</p>
           </div>
           <button type="button" class="sd-settings__reset" id="card-size-reset" disabled>Reset to default</button>
         </div>
@@ -1681,12 +1692,27 @@
   const gear = document.getElementById('gear');
   gear.appendChild(icon('sliders', 22));
   document.getElementById('set-close').appendChild(icon('close', 18));
+  // Cover art brightness: 0 is the original dim look, 100 the brightest; 30 by default.
+  const ART_DEFAULT = 30;
+  const lightInput = document.getElementById('art-light');
+  const lightOut = document.getElementById('art-light-out');
+  const artLight = () => { const v = Number(dash.params().artlight); return Number.isFinite(v) && dash.params().artlight != null ? Math.max(0, Math.min(100, v)) : ART_DEFAULT; };
+  function syncReset() {
+    document.getElementById('card-size-reset').disabled = Number(sizeInput.value) === 100 && Number(lightInput.value) === ART_DEFAULT;
+  }
   function applySize(v) {
     root.style.setProperty('--card-scale', String(v / 100));
     sizeInput.value = v;
     sizeInput.style.setProperty('--fill', ((v - 60) / 40) * 100 + '%');
     sizeOut.textContent = v + '%';
-    document.getElementById('card-size-reset').disabled = v === 100;
+    syncReset();
+  }
+  function applyLight(v) {
+    root.style.setProperty('--art-shade', String(1 - 0.6 * (v / 100)));
+    lightInput.value = v;
+    lightInput.style.setProperty('--fill', v + '%');
+    lightOut.textContent = v + '%';
+    syncReset();
   }
   function openSettings(open) {
     dock.hidden = !open;
@@ -1703,7 +1729,9 @@
   document.getElementById('settings').addEventListener('keydown', (e) => { if (e.key === 'Escape') openSettings(false); });
   sizeInput.addEventListener('input', () => applySize(Number(sizeInput.value)));
   sizeInput.addEventListener('change', () => dash.setParams({ cardsize: Number(sizeInput.value) }));
-  document.getElementById('card-size-reset').addEventListener('click', () => { applySize(100); dash.setParams({ cardsize: 100 }); });
+  lightInput.addEventListener('input', () => applyLight(Number(lightInput.value)));
+  lightInput.addEventListener('change', () => dash.setParams({ artlight: Number(lightInput.value) }));
+  document.getElementById('card-size-reset').addEventListener('click', () => { applySize(100); applyLight(ART_DEFAULT); dash.setParams({ cardsize: 100, artlight: ART_DEFAULT }); });
 
   function renderAll() {
     const tabs = okTabs();
@@ -1712,6 +1740,7 @@
     renderNav();
     document.getElementById('sample-badge').hidden = !(dash.isSample && dash.isSample());
     applySize(Number(dash.params().cardsize) || 100);
+    applyLight(artLight());
     renderLook();
     renderKpis();
     renderNewest();
