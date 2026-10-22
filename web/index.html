@@ -605,6 +605,7 @@
       </div>
     </section>
 
+    <div class="sd-sr" id="stream-announcer" aria-live="polite"></div>
     <section class="sd-section" id="people-card" aria-labelledby="people-title" hidden></section>
 
     <section class="sd-section" id="alerts" aria-labelledby="al-title">
@@ -1197,6 +1198,68 @@
     if (flipped.has(id)) flipped.delete(id); else flipped.add(id);
     if (inner) { inner.classList.toggle('is-flipped', flipped.has(id)); inner.setAttribute('aria-pressed', flipped.has(id) ? 'true' : 'false'); }
   }
+  /* Lime pulse: a stream that just started gets a lime ring (twice) and a "New" tag for a few
+     seconds; one that just ended stays a moment, greyed with an "Ended" stamp, then leaves. */
+  const NEW_MS = 6000, ENDED_MS = 1700;
+  let seenIds = null;              // ids in the last streams load; null until the first load
+  let lastData = null;
+  let lastRows = new Map();
+  let lastOrder = [];              // ids in the order last drawn, to put an ended card back where it was
+  const firstSeen = new Map();     // id -> when it appeared (only after the first load)
+  const pulsed = new Set();        // ids whose ring already played
+  const ended = new Map();         // id -> { row, at }
+  function trackStreams() {
+    const d = dash.data('streams');
+    if (d.status !== 'ok' || d.data === lastData) return;
+    lastData = d.data;
+    const now = Date.now();
+    const ids = new Set(d.data.map((r) => r.id));
+    const said = [];
+    if (seenIds !== null) {
+      d.data.forEach((r) => { if (!seenIds.has(r.id)) { firstSeen.set(r.id, now); ended.delete(r.id); said.push(r.user + ' started ' + r.title + ' on ' + r.server); } });
+      seenIds.forEach((id) => {
+        if (!ids.has(id) && lastRows.has(id)) { const r = lastRows.get(id); ended.set(id, { row: r, at: now }); said.push(r.user + ' stopped ' + r.title); }
+      });
+      if (said.length) {
+        document.getElementById('stream-announcer').textContent = said.join('. ') + '.';
+        setTimeout(renderStreams, ENDED_MS + 50);   // let ended cards go
+        setTimeout(renderStreams, NEW_MS + 50);     // drop the "New" tags
+      }
+    }
+    seenIds = ids;
+    lastRows = new Map(d.data.map((r) => [r.id, r]));
+  }
+  // Rows to draw: the visible ones plus recently ended ones, back in their old places.
+  function withEnded(rows) {
+    const now = Date.now();
+    const out = rows.slice();
+    ended.forEach((e, id) => {
+      if (now - e.at > ENDED_MS) { ended.delete(id); return; }
+      const at = Math.max(0, Math.min(out.length, lastOrder.indexOf(id) < 0 ? out.length : lastOrder.indexOf(id)));
+      out.splice(at, 0, Object.assign({}, e.row, { _ended: e.at }));
+    });
+    return out;
+  }
+  function pulseMarks(node, r, front) {
+    if (r._ended) {
+      node.classList.add('is-ended');
+      node.inert = true;
+      const left = Math.max(0, ENDED_MS - (Date.now() - r._ended));
+      node.style.setProperty('--leave-delay', Math.max(0, left - 300) + 'ms');
+      const stamp = el('span', 'sd-endstamp'); stamp.appendChild(el('span', null, 'Ended'));
+      if (front) front.appendChild(el('span', 'sd-enddim'));
+      (front || node).appendChild(stamp);
+      return;
+    }
+    const t = firstSeen.get(r.id);
+    if (!t || Date.now() - t > NEW_MS) return;
+    (front || node).appendChild(el('span', 'sd-newchip', 'New'));
+    if (!pulsed.has(r.id)) {
+      pulsed.add(r.id);
+      node.classList.add('is-new');
+      (front || node).appendChild(el('span', 'sd-pulse'));
+    }
+  }
   function streamCard(r) {
     const wrap = el('div', 'sd-flip');
     const inner = el('div', 'sd-flip__inner' + (flipped.has(r.id) ? ' is-flipped' : ''));
@@ -1206,8 +1269,10 @@
     inner.setAttribute('aria-label', r.user + ', ' + r.title + '. Show playback details');
     inner.addEventListener('click', () => toggleFlip(r.id, inner));
     inner.addEventListener('keydown', (e) => { if (e.target === inner && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleFlip(r.id, inner); } });
-    inner.append(streamFront(r), streamBack(r));
+    const front = streamFront(r);
+    inner.append(front, streamBack(r));
     wrap.appendChild(inner);
+    pulseMarks(wrap, r, front);
     return wrap;
   }
   function idleState() {
@@ -1255,9 +1320,12 @@
     renderActive();
     if (failed(d)) { (view === 'rows' ? list : view === 'carousel' ? car : cards).appendChild(el('p', 'sd-empty', 'Failed to load')); renderSheet(); return; }
     if (d.status !== 'ok') return;
-    const rows = visibleRows();
+    trackStreams();
+    const live = visibleRows();
+    const rows = view === 'table' ? live : withEnded(live);
+    lastOrder = rows.map((r) => r.id);
     const none = 'No streams match' + (p.server ? ' on ' + p.server : '') + ' right now.';
-    if (!d.data.length && view !== 'table') {
+    if (!d.data.length && view !== 'table' && !rows.length) {
       const box = view === 'rows' ? list : view === 'carousel' ? car : cards;
       box.appendChild(idleState());
       hint.hidden = true;
@@ -1273,7 +1341,7 @@
     if (view === 'carousel') {
       if (!rows.length) car.appendChild(el('p', 'sd-empty', none));
       rows.forEach((r) => car.appendChild(streamCard(r)));
-      rows.forEach((_, i) => dots.appendChild(el('i', i === 0 ? 'on' : null)));
+      live.forEach((_, i) => dots.appendChild(el('i', i === 0 ? 'on' : null)));
       car.scrollLeft = keepLeft;
       car.onscroll = () => {
         const first = car.firstElementChild;
@@ -1335,8 +1403,9 @@
     const bar = el('span', 'sd-prog'); bar.setAttribute('aria-hidden', 'true');
     const fill = el('i'); fill.style.width = Math.min(100, r.progress_pct) + '%'; bar.appendChild(fill);
     main.appendChild(bar);
-    b.append(th, main, badge(STATE_TONE[r.state] || 'neutral', r.state));
-    b.addEventListener('click', () => { sheetId = sheetId === r.id ? null : r.id; renderStreams(); });
+    b.append(th, main, r._ended ? el('span', 'sd-row__ended', 'Ended') : badge(STATE_TONE[r.state] || 'neutral', r.state));
+    if (!r._ended) b.addEventListener('click', () => { sheetId = sheetId === r.id ? null : r.id; renderStreams(); });
+    pulseMarks(b, r, null);
     return b;
   }
   function renderSheet() {

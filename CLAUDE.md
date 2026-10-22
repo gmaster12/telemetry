@@ -183,6 +183,12 @@ design system). The dashboard adds its own patterns:
   signed-in Plex user (hidden for an admin with no subscription, and when
   Stripe is not connected). Admin sees it in the history drawer; the people
   picker flags Past due, Unpaid, Canceled.
+- Streams starting and stopping use "Lime pulse" (Glenn's pick from six options;
+  `trackStreams`, `withEnded`, `pulseMarks` in `index.html`, styles in
+  `people.css`): a new stream fades in with a lime ring that pulses twice and a
+  "New" tag for 6 s; an ended one stays 1.7 s dimmed with an "Ended" stamp in its
+  old place, then fades out. Cards, carousel and phone rows (not the table).
+  Changes are announced in a polite live region. Reduced motion: no movement.
 - The Servers online summary card was removed at Glenn's request (Transcoding,
   Buffering, Paused remain).
 - Status is always a word plus a shape, never color alone. No emoji.
