@@ -193,8 +193,12 @@ design system). The dashboard adds its own patterns:
   first load). The ring and tag are timed from when the stream appeared, so page
   redraws do not cut them short. Preview: open the page with `?demo=pulse` to
   treat every current stream as new.
-- The Servers online summary card was removed at Glenn's request (Transcoding,
-  Buffering, Paused remain).
+- The Servers online summary card was removed at Glenn's request. Transcoding,
+  Buffering and Paused are a row of pills (`.sd-pills`, Glenn's pick "C. Pill
+  row"): count, label, detail tag and a black arrow. A pill filters the stream
+  list and shows pressed while its filter is on; pressing it again clears the
+  filter. On phones the pills are three equal tiles (count over label);
+  Buffering turns amber with a warning shape when anything is buffering.
 - Status is always a word plus a shape, never color alone. No emoji.
 
 ## Running tests

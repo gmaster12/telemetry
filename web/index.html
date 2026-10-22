@@ -89,12 +89,26 @@
   .sd-card-note b { font-weight: 600; color: var(--ink); }
   .sd-card--ink .sd-card-note { color: var(--on-ink-muted); }
 
-  .sd-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: var(--space-4); }
-  .sd-kpi { display: flex; flex-direction: column; justify-content: space-between; gap: var(--space-5); min-height: 176px; }
-  .sd-kpi__label { font-size: 15px; line-height: 20px; font-weight: 500; }
-  .sd-kpi__row { display: flex; align-items: center; gap: var(--space-3); }
-  .sd-kpi__value { font-size: 56px; line-height: 56px; font-weight: 300; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
-  .sd-kpi__unit { font-size: 15px; line-height: 20px; color: var(--ink-muted); }
+  /* Summary: a row of pills (Transcoding, Buffering, Paused). Each one filters the stream list. */
+  .sd-pills { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  .sd-pill { position: relative; display: inline-flex; align-items: center; gap: var(--space-3); height: 56px; padding: 0 8px 0 22px; border: 0; border-radius: var(--radius-pill); background: var(--surface-card); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: background-color 0.15s ease, transform 0.1s ease; }
+  .sd-pill:hover { background: var(--surface-raised); }
+  .sd-pill:active { transform: scale(0.97); }
+  .sd-pill:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+  .sd-pill__num { min-width: 0.6em; font-size: 32px; line-height: 32px; font-weight: 300; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+  .sd-pill__label { font-size: 15px; line-height: 20px; font-weight: 500; }
+  .sd-pill__tag { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: var(--radius-pill); background: var(--surface-page); color: var(--ink-muted); font-size: 12px; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .sd-pill__tag b { margin-right: 4px; font-weight: 600; color: var(--ink); }
+  .sd-pill__badge { display: inline-flex; }
+  .sd-pill__badge:empty { display: none; }
+  .sd-pill__badge .gs-badge { height: 26px; padding: 0 10px; font-size: 12px; font-weight: 600; }
+  .sd-pill__go { display: grid; place-items: center; width: 40px; height: 40px; flex: none; border-radius: 50%; background: var(--action); color: var(--on-action); }
+  .sd-pill__warn { display: none; }
+  .sd-pill[aria-pressed="true"] { background: var(--surface-ink); color: var(--on-ink); }
+  .sd-pill[aria-pressed="true"] .sd-pill__tag { background: rgba(255, 255, 255, 0.12); color: var(--on-ink-muted); }
+  .sd-pill[aria-pressed="true"] .sd-pill__tag b { color: var(--on-ink); }
+  .sd-pill[aria-pressed="true"] .sd-pill__go { background: var(--volt); color: var(--on-fill); }
+  @media (prefers-reduced-motion: reduce) { .sd-pill { transition: none; } .sd-pill:active { transform: none; } }
   .sd-tag { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: var(--surface-page); color: var(--ink-muted); font-size: 13px; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .sd-tag b { margin-right: 4px; font-weight: 600; color: var(--ink); }
 
@@ -383,15 +397,13 @@
     .sd-bignums { gap: var(--space-4); }
     .sd-big { font-size: 28px; line-height: 32px; }
     .sd-big-l { font-size: 14px; }
-    .sd-kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
-    .sd-kpis > .sd-kpi:last-child:nth-child(odd) { grid-column: 1 / -1; }
-    .sd-kpi { --n: 52px; --rn: 22px; --f: 14px; --notch-w: 88px; --notch-h: 88px; --notch-path: polygon(0 0, 100% 0, 100% 100%); min-height: 120px; padding: 14px; gap: 8px; border-radius: 24px; }
-    .sd-kpi .sd-go { top: 6px; right: 6px; width: 36px; height: 36px; }
-    .sd-kpi .sd-go svg { width: 16px; height: 16px; }
-    .sd-kpi__label { font-size: 13px; }
-    .sd-kpi__value { font-size: 36px; line-height: 36px; }
-    .sd-kpi #buf-badge { display: none; }
-    .sd-kpi .sd-tag { height: 24px; padding: 0 10px; font-size: 11px; }
+    .sd-pills { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    .sd-pill { flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; height: auto; min-height: 64px; padding: 10px 14px; border-radius: 22px; }
+    .sd-pill__num { font-size: 26px; line-height: 28px; }
+    .sd-pill__label { font-size: 12px; line-height: 16px; }
+    .sd-pill__tag, .sd-pill__badge, .sd-pill__go { display: none; }
+    .sd-pill.is-warn:not([aria-pressed="true"]) { background: var(--amber); color: var(--on-fill); }
+    .sd-pill.is-warn .sd-pill__warn { display: block; position: absolute; top: 12px; right: 12px; }
     .sd-card__head { min-height: 36px; }
     .sd-card-title { font-size: 24px; line-height: 30px; }
     .sd-chart { min-height: 170px; }
@@ -494,25 +506,26 @@
 
     <button type="button" class="sd-alertbar" id="alertbar" data-source="streams server_load" hidden></button>
 
-    <section class="sd-kpis" id="summary" aria-label="Summary">
-      <article class="sd-card sd-kpi">
-        <span class="sd-notch" aria-hidden="true"></span><button type="button" class="sd-go" data-go="transcode" aria-label="Show transcoding streams"></button>
-        <div class="sd-card__head"><p class="sd-kpi__label">Transcoding</p></div>
-        <div class="sd-kpi__row"><span class="sd-kpi__value" data-source="kpis" data-field="transcodes" data-row="0">—</span></div>
-        <div class="sd-tags"><span class="sd-tag"><b data-source="kpis" data-field="transcode_pct" data-row="0">—</b>% of streams</span></div>
-      </article>
-      <article class="sd-card sd-kpi">
-        <span class="sd-notch" aria-hidden="true"></span><button type="button" class="sd-go" data-go="buffering" aria-label="Show buffering streams"></button>
-        <div class="sd-card__head"><p class="sd-kpi__label">Buffering</p></div>
-        <div class="sd-kpi__row"><span class="sd-kpi__value" data-source="kpis" data-field="buffering" data-row="0">—</span><span id="buf-badge"></span></div>
-        <div class="sd-tags"><span class="sd-tag">Waiting on data</span></div>
-      </article>
-      <article class="sd-card sd-kpi">
-        <span class="sd-notch" aria-hidden="true"></span><button type="button" class="sd-go" data-go="paused" aria-label="Show paused streams"></button>
-        <div class="sd-card__head"><p class="sd-kpi__label">Paused</p></div>
-        <div class="sd-kpi__row"><span class="sd-kpi__value" data-source="kpis" data-field="paused" data-row="0">—</span></div>
-        <div class="sd-tags"><span class="sd-tag"><b data-source="kpis" data-field="playing" data-row="0">—</b>playing</span></div>
-      </article>
+    <section class="sd-pills" id="summary" aria-label="Summary">
+      <button type="button" class="sd-pill" data-go="transcode">
+        <span class="sd-pill__num" data-source="kpis" data-field="transcodes" data-row="0">—</span>
+        <span class="sd-pill__label">Transcoding</span>
+        <span class="sd-pill__tag"><b data-source="kpis" data-field="transcode_pct" data-row="0">—</b>% of streams</span>
+        <span class="sd-pill__go" aria-hidden="true"></span><span class="sd-sr">, show these streams</span>
+      </button>
+      <button type="button" class="sd-pill" data-go="buffering">
+        <span class="sd-pill__num" data-source="kpis" data-field="buffering" data-row="0">—</span>
+        <span class="sd-pill__label">Buffering</span>
+        <span class="sd-pill__badge" id="buf-badge"></span>
+        <svg class="sd-pill__warn" width="10" height="10" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true"><path d="M5 1 9.2 8.5H.8Z"/></svg>
+        <span class="sd-pill__go" aria-hidden="true"></span><span class="sd-sr">, show these streams</span>
+      </button>
+      <button type="button" class="sd-pill" data-go="paused">
+        <span class="sd-pill__num" data-source="kpis" data-field="paused" data-row="0">—</span>
+        <span class="sd-pill__label">Paused</span>
+        <span class="sd-pill__tag"><b data-source="kpis" data-field="playing" data-row="0">—</b>playing</span>
+        <span class="sd-pill__go" aria-hidden="true"></span><span class="sd-sr">, show these streams</span>
+      </button>
     </section>
 
     <div class="sd-main">
@@ -838,6 +851,15 @@
     top: () => goTo('top')
   };
   root.querySelectorAll('.sd-go[data-go]').forEach((b) => { b.appendChild(icon('arrow')); b.addEventListener('click', ACTIONS[b.dataset.go]); });
+  // Summary pills filter the stream list; pressing the active one again clears its filter.
+  const PILL_FILTER = { transcode: (p) => p.method === 'Transcode', buffering: (p) => p.state === 'Buffering', paused: (p) => p.state === 'Paused' };
+  root.querySelectorAll('.sd-pill[data-go]').forEach((b) => {
+    b.querySelector('.sd-pill__go').appendChild(icon('arrow', 16));
+    b.addEventListener('click', () => {
+      if (PILL_FILTER[b.dataset.go](dash.params())) dash.setParams({ state: null, method: null });
+      else ACTIONS[b.dataset.go]();
+    });
+  });
   document.getElementById('clock-icon').appendChild(icon('clock', 18));
   document.getElementById('search-icon').appendChild(icon('search', 18));
   document.getElementById('view-cards').appendChild(icon('grid', 20));
@@ -872,6 +894,9 @@
     const slot = document.getElementById('buf-badge');
     slot.replaceChildren();
     if (row) slot.appendChild(row.buffering > 0 ? badge('warning', 'Needs attention') : badge('success', 'Clear'));
+    const params = dash.params();
+    root.querySelectorAll('.sd-pill[data-go]').forEach((b) => b.setAttribute('aria-pressed', PILL_FILTER[b.dataset.go](params) ? 'true' : 'false'));
+    root.querySelector('.sd-pill[data-go="buffering"]').classList.toggle('is-warn', !!row && row.buffering > 0);
     const bw = dash.data('bandwidth');
     if (bw.status === 'ok' && bw.data.length) {
       const last = bw.data.reduce((a, r) => (new Date(r.minute) > new Date(a.minute) ? r : a));
