@@ -489,7 +489,13 @@
           var v = r.values[k];
           return k + ': ' + (v.cpu_pct != null ? v.cpu_pct + '% CPU' : 'no CPU data') + (v.net_out_mbps != null ? ', ' + v.net_out_mbps + ' Mbps out' : '');
         });
-        setMsg('netdata', 'ok', 'Connected' + (r.nodes ? ' to ' + r.nodes + ' nodes' : '') + '. ' + (parts.join(' · ') || 'Link servers to nodes under Plex servers.'));
+        var head = 'Connected' + (r.nodes ? ' to ' + r.nodes + ' nodes' + (r.node_names && r.node_names.length ? ' (' + r.node_names.join(', ') + ')' : '') : '') + '. ';
+        ndContexts = r.contexts || {};
+        if (!r.ok) setMsg('netdata', 'error', head + 'Reading metrics failed: ' + r.error);
+        else {
+          var none = Object.keys(r.values || {}).every(function (k) { return r.values[k].cpu_pct == null && r.values[k].net_out_mbps == null; });
+          setMsg('netdata', 'ok', head + (parts.join(' · ') || '') + (none ? ' Next: in Plex servers, Edit each server and pick its Netdata node.' : ''));
+        }
       }).catch(function (e) { setMsg('netdata', 'error', e.message); }));
     };
     pane.appendChild(el('section', { class: 'st-section' },
@@ -503,7 +509,27 @@
         el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['nd-save'] ? 'Saving…' : 'Save', disabled: busy['nd-save'], onclick: save }),
         el('button', { type: 'button', class: 'st-btn', text: busy['nd-test'] ? 'Testing…' : 'Test connection', disabled: busy['nd-test'] || nd.mode === 'off', onclick: test })),
       nd.error ? el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), 'Last poll failed: ' + nd.error) : null,
-      message('netdata')));
+      message('netdata'),
+      contextHints(cpu, net)));
+  }
+
+  // After Test connection: the CPU and network metric names this Netdata room really has.
+  var ndContexts = null;
+  function contextHints(cpuInput, netInput) {
+    if (!ndContexts || (!(ndContexts.cpu || []).length && !(ndContexts.net || []).length)) return document.createDocumentFragment();
+    var pick = function (list, target, label) {
+      if (!list || !list.length) return null;
+      return el('div', { class: 'st-field' }, el('span', { class: 'st-note', text: label }),
+        el('div', { class: 'st-row' }, list.map(function (c) {
+          return el('button', { type: 'button', class: 'st-btn st-btn--quiet is-mono', text: c, title: 'Use ' + c, onclick: function () {
+            target.value = c; drafts[target.id] = c;
+            var adv = document.querySelector('#st-pane-netdata details'); if (adv) adv.open = true;
+          } });
+        })));
+    };
+    return el('div', { class: 'st-hintbox' }, el('h3', { text: 'Metric names found in your Netdata room' }),
+      el('p', { class: 'st-note', text: 'Click one to use it under Advanced, then Save and Test again. Windows servers often name CPU and network metrics differently.' }),
+      pick(ndContexts.cpu, cpuInput, 'CPU'), pick(ndContexts.net, netInput, 'Network'));
   }
 
   // ---------- render: Alerts ----------

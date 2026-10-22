@@ -84,7 +84,13 @@ files to add servers. Keep it that way.
 - `docker compose exec telemetry python -m app.tools.probe netdata` prints the
   raw Netdata Cloud response. Things to confirm:
   - The `labels` in a `group_by: node` response are node names or node IDs;
-    `parse_json2_by_node` matches either against each server's Netdata node.
+    `parse_json2_by_node` matches either (via `summary.nodes` and
+    `view.dimensions.ids`) against each server's Netdata node.
+  - `scope.nodes` in a v3 data query accepts **node UUIDs only**; a `*` or a
+    hostname there makes Netdata Cloud answer HTTP 400 (Glenn hit this).
+    `NetdataClient.build_body` only sets it when every linked node is a UUID.
+    Settings, Netdata, Test connection lists the CPU and network metric names
+    the room really has (`/contexts`), to pick the Windows ones.
   - The Plex servers are **Windows Server**. Netdata's context names for CPU
     and network on Windows may differ from `system.cpu` / `system.net` and the
     `sent` dimension. If so, set the right ones in Settings, Netdata,

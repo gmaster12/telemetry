@@ -223,6 +223,7 @@ class Store:
             for r in self.list_servers()
         ]
         nd = NetdataCfg(
+            base_url=env("NETDATA_CLOUD_URL", "https://app.netdata.cloud"),
             mode=self.get_setting("netdata_mode", env("NETDATA_MODE", "off")),
             token=self.get_setting("netdata_token", env("NETDATA_TOKEN")),
             space_id=self.get_setting("netdata_space_id", env("NETDATA_SPACE_ID")),

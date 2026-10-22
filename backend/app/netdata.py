@@ -4,9 +4,12 @@ Returns per-server values keyed by the server name from servers.yaml.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import httpx
+
+UUID = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 from .config import AppCfg, ServerCfg
 
@@ -32,19 +35,26 @@ def parse_json2_by_node(resp: dict, servers: list[ServerCfg]) -> dict[str, float
     server's `netdata_node` (and its name as a fallback), case-insensitively.
     """
     result = resp.get("result") or resp
-    labels = result.get("labels") or []
+    labels = list(result.get("labels") or [])
     rows = result.get("data") or []
     if not labels or not rows:
         return {}
     # Use the most recent row that has values.
-    row = rows[-1]
+    row = next((r for r in reversed(rows) if any(_point_value(c) is not None for c in r[1:])), rows[-1])
+    # Node ids (nd), machine GUIDs (mg) -> hostnames (nm), from summary.nodes (v3) or nodes (older).
     id_to_name: dict[str, str] = {}
-    for n in resp.get("nodes") or []:
+    for n in ((resp.get("summary") or {}).get("nodes") or []) + list(resp.get("nodes") or []):
         if isinstance(n, dict):
-            nid = str(n.get("nd") or n.get("id") or "")
-            nm = str(n.get("nm") or n.get("name") or "")
-            if nid:
-                id_to_name[nid.lower()] = nm.lower()
+            nm = str(n.get("nm") or n.get("name") or "").lower()
+            for k in ("nd", "mg", "id"):
+                if n.get(k) and nm:
+                    id_to_name[str(n[k]).lower()] = nm
+    # Column ids can be node ids while labels are names (or the other way round): match either.
+    ids = list(((resp.get("view") or {}).get("dimensions") or {}).get("ids") or [])
+    if len(ids) == len(labels) - 1:
+        ids = ["time"] + ids
+    else:
+        ids = labels
     wanted = {}
     for s in servers:
         keys = {s.name.lower()}
@@ -57,10 +67,10 @@ def parse_json2_by_node(resp: dict, servers: list[ServerCfg]) -> dict[str, float
     for idx, label in enumerate(labels):
         if idx == 0 or idx >= len(row):
             continue  # first column is time
-        lab = str(label).lower()
-        lab_name = id_to_name.get(lab, lab)
+        cands = {str(label).lower(), str(ids[idx]).lower()}
+        cands |= {id_to_name[c] for c in list(cands) if c in id_to_name}
         for name, keys in wanted.items():
-            if lab in keys or lab_name in keys:
+            if cands & keys:
                 v = _point_value(row[idx])
                 if v is not None:
                     out[name] = out.get(name, 0.0) + v
@@ -77,24 +87,63 @@ class NetdataClient:
     def enabled(self) -> bool:
         return self.nd.mode in ("cloud", "agent")
 
-    async def _cloud_query(self, context: str, dimensions: list[str] | None) -> dict:
+    def _cloud_url(self, what: str) -> str:
         if not (self.nd.token and self.nd.space_id and self.nd.room_id):
-            raise NetdataError("Netdata Cloud needs NETDATA_TOKEN, space_id and room_id")
-        nodes = [s.netdata_node for s in self.cfg.servers if s.netdata_node and s.enabled] or ["*"]
-        body = {
-            "format": "json2",
-            "options": ["jsonwrap", "minify", "unaligned"],
-            "scope": {"contexts": [context], "nodes": nodes},
-            "selectors": {"nodes": ["*"], "contexts": ["*"], "instances": ["*"], "dimensions": dimensions or ["*"], "labels": ["*"], "alerts": ["*"]},
-            "aggregations": {"metrics": [{"group_by": ["node"], "aggregation": "sum"}], "time": {"time_group": "average"}},
+            raise NetdataError("Netdata Cloud needs an API token, a space ID and a room ID")
+        return f"{self.nd.base_url.rstrip('/')}/api/v3/spaces/{self.nd.space_id.strip()}/rooms/{self.nd.room_id.strip()}/{what}"
+
+    async def _cloud_post(self, what: str, body: dict, label: str) -> dict:
+        r = await self.http.post(self._cloud_url(what), json=body, timeout=30.0,
+                                 headers={"Authorization": f"Bearer {self.nd.token.strip()}", "Accept": "application/json"})
+        if r.status_code != 200:
+            detail = ""
+            try:
+                j = r.json()
+                detail = j.get("errorMsg") or j.get("message") or j.get("error") or j.get("detail") or ""
+            except ValueError:
+                detail = r.text[:200]
+            hint = {401: " (the API token is wrong or expired)", 403: " (the token has no access to this space or room)",
+                    404: " (check the space ID and room ID)"}.get(r.status_code, "")
+            raise NetdataError(f"Netdata Cloud HTTP {r.status_code} for {label}{hint}" + (f": {str(detail)[:200]}" if detail else ""))
+        return r.json()
+
+    @staticmethod
+    def build_body(context: str, dimensions: list[str] | None, node_ids: list[str]) -> dict:
+        """v3 data query: one column per node, last minute averaged into one point.
+
+        scope.nodes only accepts Netdata node UUIDs (no hostnames, no wildcards), so it is set only
+        when every linked node is a UUID; otherwise all nodes in the room are queried and matched by name.
+        """
+        scope: dict = {"contexts": [context]}
+        if dimensions:
+            scope["dimensions"] = dimensions
+        if node_ids and all(UUID.match(n) for n in node_ids):
+            scope["nodes"] = node_ids
+        return {
+            "scope": scope,
+            "selectors": {"nodes": ["*"], "contexts": ["*"], "instances": ["*"],
+                          # CPU: everything except idle (idle is a hidden dimension on some agents)
+                          "dimensions": ["*"] if dimensions else ["!idle", "*"], "labels": ["*"], "alerts": ["*"]},
             "window": {"after": -60, "before": 0, "points": 1},
+            "aggregations": {"metrics": [{"group_by": ["node"], "aggregation": "sum"}], "time": {"time_group": "average"}},
+            "format": "json2",
+            "options": ["jsonwrap", "minify", "unaligned", "abs"],
             "timeout": 20000,
         }
-        url = f"{self.nd.base_url.rstrip('/')}/api/v3/spaces/{self.nd.space_id}/rooms/{self.nd.room_id}/data"
-        r = await self.http.post(url, json=body, headers={"Authorization": f"Bearer {self.nd.token}", "Accept": "application/json"}, timeout=25.0)
-        if r.status_code != 200:
-            raise NetdataError(f"Netdata Cloud HTTP {r.status_code} for {context}")
-        return r.json()
+
+    async def _cloud_query(self, context: str, dimensions: list[str] | None) -> dict:
+        nodes = [s.netdata_node.strip() for s in self.cfg.servers if s.netdata_node and s.enabled]
+        return await self._cloud_post("data", self.build_body(context, dimensions, nodes), context)
+
+    async def list_contexts(self, pattern: str) -> list[str]:
+        """Metric names in the room matching a pattern (e.g. *cpu*), to help pick the right ones."""
+        data = await self._cloud_post("contexts", {"scope": {"contexts": [pattern]}, "selectors": {"nodes": ["*"], "contexts": ["*"]}}, pattern)
+        ctx = data.get("contexts") if isinstance(data, dict) else None
+        if isinstance(ctx, dict):
+            return sorted(ctx.keys())
+        if isinstance(ctx, list):
+            return sorted(str(c.get("id") if isinstance(c, dict) else c) for c in ctx)
+        return []
 
     async def _agent_value(self, server: ServerCfg, context: str, dimensions: list[str] | None) -> float | None:
         if not server.netdata_agent_url:
@@ -116,11 +165,7 @@ class NetdataClient:
             return []
         if not (self.nd.token and self.nd.space_id and self.nd.room_id):
             raise NetdataError("Netdata Cloud needs a token, space ID and room ID")
-        url = f"{self.nd.base_url.rstrip('/')}/api/v3/spaces/{self.nd.space_id}/rooms/{self.nd.room_id}/nodes"
-        r = await self.http.post(url, json={}, headers={"Authorization": f"Bearer {self.nd.token}", "Accept": "application/json"}, timeout=20.0)
-        if r.status_code != 200:
-            raise NetdataError(f"Netdata Cloud HTTP {r.status_code} listing nodes")
-        data = r.json()
+        data = await self._cloud_post("nodes", {}, "the node list")
         items = data.get("nodes", data) if isinstance(data, dict) else data
         out = []
         for n in items or []:

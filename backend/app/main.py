@@ -409,10 +409,21 @@ async def test_netdata():
         raise HTTPException(422, "Netdata is turned off.")
     try:
         nodes = await nd.list_nodes() if poller.cfg.netdata.mode == "cloud" else []
-        snap = await nd.snapshot()
     except Exception as e:
         raise HTTPException(502, str(e))
-    return {"ok": True, "nodes": len(nodes), "values": snap}
+    out = {"ok": True, "nodes": len(nodes), "node_names": [n["name"] for n in nodes][:20], "values": {}, "error": None, "contexts": {}}
+    try:
+        out["values"] = await nd.snapshot()
+    except Exception as e:
+        out["ok"], out["error"] = False, str(e)
+    if poller.cfg.netdata.mode == "cloud":
+        # Show which CPU and network metric names this room really has (Windows agents may differ).
+        for key, pattern in (("cpu", "*cpu*"), ("net", "*net*")):
+            try:
+                out["contexts"][key] = (await nd.list_contexts(pattern))[:40]
+            except Exception:
+                out["contexts"][key] = []
+    return out
 
 
 @app.get("/api/settings/netdata/nodes")

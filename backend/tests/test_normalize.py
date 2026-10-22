@@ -69,3 +69,27 @@ def test_bogus_10000_mbps_counts_as_15():
 def test_real_bandwidth_untouched():
     row = normalize_session(SRV, episode_session())
     assert row["bitrate_mbps"] == 24.0 and row["bitrate_estimated"] is False
+
+
+def test_netdata_body_never_sends_wildcard_or_hostname_as_node_scope():
+    from app.netdata import NetdataClient
+    b = NetdataClient.build_body("system.cpu", None, [])
+    assert "nodes" not in b["scope"] and b["scope"]["contexts"] == ["system.cpu"]
+    assert b["selectors"]["dimensions"] == ["!idle", "*"]
+    assert "nodes" not in NetdataClient.build_body("system.cpu", None, ["ATLAS-WIN"])["scope"]  # hostname: not allowed in scope
+    uid = "3f1c2a9e-1b2c-4d5e-8f90-123456789abc"
+    nb = NetdataClient.build_body("system.net", ["sent"], [uid])
+    assert nb["scope"]["nodes"] == [uid] and nb["scope"]["dimensions"] == ["sent"]
+
+
+def test_parse_v3_summary_nodes():
+    from app.config import ServerCfg
+    resp = {
+        "summary": {"nodes": [{"ni": 0, "nd": "uuid-a", "mg": "mg-a", "nm": "ATLAS-WIN"}, {"ni": 1, "nd": "uuid-b", "mg": "mg-b", "nm": "orion"}]},
+        "view": {"dimensions": {"ids": ["uuid-a", "uuid-b"], "names": ["ATLAS-WIN", "orion"]}},
+        "result": {"labels": ["time", "ATLAS-WIN", "orion"], "point": {"value": 0, "arp": 1, "pa": 2},
+                   "data": [[1700000060, [37.5, 0, 0], [12.25, 0, 0]]]},
+    }
+    servers = [ServerCfg(id=1, name="Atlas", plex_url="x", token="t", netdata_node="uuid-a"),
+               ServerCfg(id=2, name="Orion", plex_url="x", token="t", netdata_node="orion")]
+    assert parse_json2_by_node(resp, servers) == {"Atlas": 37.5, "Orion": 12.25}
