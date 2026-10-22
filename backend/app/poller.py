@@ -9,6 +9,7 @@ import time
 
 import httpx
 
+from .billing import Billing, StripeClient
 from .config import AppCfg, ServerCfg
 from .netdata import NetdataClient
 from .plex import PlexAccount, PlexClient, normalize_session
@@ -38,6 +39,10 @@ class Poller:
         self.users_sync_error: str | None = None
         self.client_id: str = "greystar-telemetry"
         self.owner_by_server: dict[str, str] = {}
+        self.billing = Billing(store)
+        self.billing_synced_at: float = 0.0
+        self.billing_error: str | None = None
+        self.billing_counts: dict = {}
         self._load_owners()
         self.directory.close_stale_plays()
 
@@ -146,6 +151,24 @@ class Poller:
             # A server that failed to answer this round keeps its plays open.
             if key not in seen and key[0] in online_servers:
                 self.directory.stop_play(self.active_plays.pop(key)["id"])
+
+    async def sync_billing(self) -> dict:
+        """Copy Stripe customers, subscriptions and recent payments (read-only key from Settings, Billing)."""
+        key = self.store.get_setting("stripe_key")
+        if not key:
+            self.billing_error = None
+            return {}
+        try:
+            snap = await StripeClient(key, self.http).snapshot()
+            self.billing_counts = self.billing.save_snapshot(snap)
+            self.billing_error = None
+        except Exception as e:
+            self.billing_error = str(e)
+            log.warning("Stripe sync failed: %s", e)
+            raise
+        finally:
+            self.billing_synced_at = time.time()
+        return self.billing_counts
 
     async def migrate_legacy_account(self) -> None:
         """Older versions kept one Plex account in the settings table; move it to plex_accounts."""
@@ -298,6 +321,11 @@ class Poller:
                         self.users_sync_error = str(e)
                         self.users_synced_at = time.time() - 5 * 3600  # retry in an hour
                         log.warning("User sync failed: %s", e)
+                if time.time() - self.billing_synced_at > 15 * 60 and self.store.get_setting("stripe_key"):
+                    try:
+                        await self.sync_billing()
+                    except Exception:
+                        pass  # recorded in billing_error, shown in Settings
                 if not self.cfg.use_sample:
                     await self.poll_plex()
                     if time.time() - last_tel >= self.cfg.telemetry_seconds:

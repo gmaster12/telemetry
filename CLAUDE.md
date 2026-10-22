@@ -15,6 +15,9 @@ A single Docker service (FastAPI + static page) that:
   polls, and can import each server's own watch history,
 - signs people in with Plex (viewers, plus one Plex admin) or with local
   admin logins, and limits what viewers see,
+- shows each person their Stripe subscription (`app/billing.py`): a read-only
+  restricted key saved in Settings, Billing; customers, subscriptions,
+  products and the last 400 days of charges are copied every 15 minutes,
 - serves the dashboard page and its API on `127.0.0.1:8791`.
 
 Plex servers and the Netdata connection are managed from the dashboard's
@@ -34,6 +37,12 @@ files to add servers. Keep it that way.
 - Run commands that need root by asking Glenn, or with sudo only after he
   approves.
 - Do not change `SECRET_KEY` once set: it decrypts the saved tokens.
+- Stripe: only ever use a **restricted, read-only** key (Read on Customers,
+  Subscriptions, Products, Charges). Never add code that writes to Stripe or
+  shows one person's billing to another viewer. Matching: a manual link in
+  `billing_links` (Stripe email -> Plex id, permanent, set in Settings,
+  Billing) wins; otherwise the Stripe email equals the Plex email
+  (case-insensitive). PayPal is not built yet (Glenn will configure it later).
 - Only the Plex account in `ADMIN_PLEX_EMAIL` (cluster@mail.com) is a Plex
   administrator. Never add another way for a Plex account to become admin.
   Extra admins are local logins (Settings, Access, or `app.tools.admin`).
@@ -121,9 +130,9 @@ Before loading datasets the shim calls `GET /api/me` (401 sends the browser to
 | Area | Endpoints | Who |
 |---|---|---|
 | Sign in | `POST /api/auth/plex/start`, `GET /api/auth/plex/check/{pin}`, `POST /api/auth/local`, `POST /api/auth/logout` | anyone |
-| Me | `GET /api/me`, `GET /api/me/history?before=` | signed in (`history` section) |
+| Me | `GET /api/me`, `GET /api/me/history?before=` (`history` section), `GET /api/me/subscription` (always, own only) | signed in |
 | Users | `GET /api/users?q=&server=` (username, name or email; returns each person's `servers` and the monitored server names), `GET /api/users/{id}`, `GET /api/users/{id}/history` | admin |
-| Settings | everything under `/api/settings`, including `plex/link`, `plex/accounts/{id}` (unlink), `plex/discover?account=`, `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
+| Settings | everything under `/api/settings`, including `billing` (key, `sync`, `unmatched`, `links`), `plex/link`, `plex/accounts/{id}` (unlink), `plex/discover?account=`, `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
 
 Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie
 (`gst_session`, 30 days); only their SHA-256 is stored. A Plex sign-in PIN can
@@ -163,6 +172,13 @@ design system). The dashboard adds its own patterns:
   (`people.js`); viewer names on stream cards open it too. Viewers get a My
   history section. Settings, Access uses the same picker (inline) to edit one
   person at a time, plus a short "Custom access or turned off" list.
+- Subscription card ("Your subscription", `#sub-card`, `people.js`): plan,
+  price, status badge, renewal or end date, last payment. Shown to every
+  signed-in Plex user (hidden for an admin with no subscription, and when
+  Stripe is not connected). Admin sees it in the history drawer; the people
+  picker flags Past due, Unpaid, Canceled.
+- The Servers online summary card was removed at Glenn's request (Transcoding,
+  Buffering, Paused remain).
 - Status is always a word plus a shape, never color alone. No emoji.
 
 ## Running tests

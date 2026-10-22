@@ -145,11 +145,12 @@
       b.classList.toggle('gs-chip--selected', on);
       b.tabIndex = on ? 0 : -1;
     });
-    ['display', 'plex', 'netdata', 'alerts', 'access'].forEach(function (p) {
+    ['display', 'plex', 'netdata', 'alerts', 'access', 'billing'].forEach(function (p) {
       var pane = document.getElementById('st-pane-' + p);
       if (pane) pane.hidden = p !== t;
     });
     if (t === 'access') loadAccess();
+    else if (t === 'billing') loadBilling();
     else if (t !== 'display' && isAdmin()) loadState();
   }
 
@@ -541,7 +542,7 @@
       accServers = r.servers || [];
       if (accPicker) accPicker.setData({ servers: accServers, people: accUsers.map(function (u) {
         return { key: u.id, name: u.name || u.username || 'Plex user', username: u.username, email: u.email, servers: u.servers || [],
-          plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner };
+          plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner, billing: u.billing_status };
       }) });
       if (!quiet) render();
     }).catch(function (e) { setMsg('acc-users', 'error', e.message); });
@@ -762,6 +763,170 @@
     }
   }
 
+  // ---------- Billing: Stripe subscriptions (PayPal later) ----------
+  var billing = null;
+  var unmatched = null;
+  var unmatchedQ = '';
+  var unmatchedTimer = null;
+  var linking = null; // { email } while picking the Plex user for a Stripe email
+  var linkPicker = null;
+  var unlinkingEmail = null;
+  var editingKey = false;
+
+  function loadBilling() {
+    if (!isAdmin()) return Promise.resolve();
+    return Promise.all([api('GET', '/api/settings/billing'), api('GET', '/api/settings'), loadUnmatched(true), accUsers ? null : loadAccUsers(true)]).then(function (r) {
+      billing = r[0];
+      state = r[1];
+    }).then(render).catch(function (e) { setMsg('load', 'error', e.message); });
+  }
+
+  function loadUnmatched(quiet) {
+    return api('GET', '/api/settings/billing/unmatched?q=' + encodeURIComponent(unmatchedQ.trim())).then(function (r) {
+      unmatched = r.rows || [];
+      if (!quiet) render();
+    }).catch(function (e) { setMsg('billing', 'error', e.message); });
+  }
+
+  function peopleForPicker() {
+    return (accUsers || []).map(function (u) {
+      return { key: u.id, name: u.name || u.username || 'Plex user', username: u.username, email: u.email, servers: u.servers || [],
+        plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner, billing: u.billing_status };
+    });
+  }
+
+  function renderBilling(pane) {
+    if (!billing) { pane.appendChild(el('p', { class: 'st-note', text: 'Loading…' })); return; }
+    var c = billing.counts || {};
+    // Stripe connection
+    var key = input({ type: 'password', placeholder: 'rk_live_…', autocomplete: 'new-password', class: 'st-input is-mono' }, 'bl-key');
+    var keyForm = el('div', { class: 'st-form' },
+      el('div', { class: 'st-wide' }, field('Restricted API key', key, 'In Stripe: Developers, API keys, Create restricted key. Give it Read access to Customers, Subscriptions, Products and Charges, and nothing else.')),
+      el('div', { class: 'st-wide st-row' },
+        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['bl-save'] ? 'Checking…' : 'Save key', disabled: busy['bl-save'],
+          onclick: function () {
+            withBusy('bl-save', api('PUT', '/api/settings/billing', { key: key.value.trim() }).then(function (r) {
+              clearDrafts('bl'); editingKey = false;
+              msgs.billing = r.missing && r.missing.length
+                ? { kind: 'error', text: 'Saved, but the key cannot read ' + r.missing.join(', ') + '. Add Read access for those in Stripe.' }
+                : { kind: 'ok', text: 'Saved. Loading customers and subscriptions from Stripe now.' };
+              setTimeout(loadBilling, 4000);
+              return loadBilling();
+            }).catch(function (e) { setMsg('billing', 'error', e.message); }));
+          } }),
+        billing.has_key ? el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Cancel', onclick: function () { editingKey = false; render(); } }) : null));
+    var stripeSec = el('section', { class: 'st-section' }, el('h3', { text: 'Stripe' }));
+    if (billing.has_key && !editingKey) {
+      stripeSec.append(
+        el('p', { class: 'st-note', text: billing.synced_at ? 'Connected. Last loaded from Stripe ' + ago(billing.synced_at) + '; it refreshes every 15 minutes.' : 'Connected. Loading from Stripe…' }),
+        el('p', { class: 'st-note', text: (c.customers || 0) + ' Stripe customers · ' + (c.matched || 0) + ' matched to a Plex user · ' + (c.unmatched || 0) + ' not matched · ' + (c.links || 0) + ' linked by hand' }),
+        billing.error ? el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), 'Last sync failed: ' + billing.error) : document.createDocumentFragment(),
+        el('div', { class: 'st-row' },
+          el('button', { type: 'button', class: 'st-btn', text: busy['bl-sync'] ? 'Syncing…' : 'Sync now', disabled: busy['bl-sync'], onclick: function () {
+            withBusy('bl-sync', api('POST', '/api/settings/billing/sync').then(function (r) {
+              msgs.billing = { kind: 'ok', text: 'Loaded ' + r.customers + ' customers, ' + r.subscriptions + ' subscriptions and ' + r.charges + ' recent payments.' };
+              return Promise.all([loadBilling(), loadAccUsers(true)]);
+            }).catch(function (e) { setMsg('billing', 'error', e.message); }));
+          } }),
+          el('span', { class: 'st-spacer' }),
+          el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Replace key', onclick: function () { editingKey = true; render(); } }),
+          el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Disconnect', onclick: function () {
+            api('DELETE', '/api/settings/billing').then(function () { msgs.billing = { kind: 'ok', text: 'Disconnected. Saved data stays until you connect again.' }; return loadBilling(); })
+              .catch(function (e) { setMsg('billing', 'error', e.message); });
+          } })));
+    } else {
+      stripeSec.append(el('p', { class: 'st-note', text: 'Connect Stripe to show each person their subscription. Customers match Plex users by email; you can link the rest by hand below.' }), keyForm);
+    }
+    stripeSec.appendChild(message('billing'));
+    pane.appendChild(stripeSec);
+
+    // Linking a Stripe email to a Plex user
+    if (linking) {
+      if (!linkPicker) {
+        linkPicker = window.gsUserPicker({ idPrefix: 'blp', inline: true, placeholder: 'Find the Plex user this payer is', icon: window.sdIcon,
+          onPick: function (p) {
+            var email = linking.email;
+            withBusy('bl-link', api('POST', '/api/settings/billing/links', { email: email, plex_id: p.key }).then(function () {
+              linking = null;
+              msgs['bl-links'] = { kind: 'ok', text: email + ' is now linked to ' + p.name + '. Their subscription card updates right away.' };
+              return Promise.all([loadBilling(), loadAccUsers(true)]);
+            }).catch(function (e) { setMsg('bl-links', 'error', e.message); }));
+          } });
+      }
+      linkPicker.setData({ servers: accServers, people: peopleForPicker() });
+    }
+    var linkBox = linking ? el('div', { class: 'st-editor' },
+      el('div', { class: 'st-editor__head' }, el('div', null, el('b', { text: 'Link ' + linking.email }),
+        el('span', { text: 'Pick the Plex account this Stripe customer watches with. The link is permanent until you remove it.' }))),
+      linkPicker.el,
+      el('div', { class: 'st-row' }, el('span', { class: 'st-spacer' }),
+        el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Cancel', onclick: function () { linking = null; render(); } }))) : null;
+
+    var q = input({ type: 'search', placeholder: 'Search Stripe email or name', value: unmatchedQ }, 'bl-q');
+    q.addEventListener('input', function () {
+      unmatchedQ = q.value;
+      clearTimeout(unmatchedTimer);
+      unmatchedTimer = setTimeout(function () { loadUnmatched(false); }, 220);
+    });
+    var list = el('ul', { class: 'st-list' });
+    (unmatched || []).slice(0, 50).forEach(function (u) {
+      list.appendChild(el('li', { class: 'st-item' },
+        el('div', { class: 'st-item__top' },
+          el('span', { class: 'st-item__name', text: u.email }),
+          u.status ? el('span', { class: 'st-tag', text: statusLabel(u.status) }) : null,
+          el('span', { class: 'st-spacer' }),
+          el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Link to a Plex user', onclick: function () { linking = { email: u.email }; render(); } })),
+        el('div', { class: 'st-item__meta', text: [u.name, u.plan, 'customer since ' + ago(u.created)].filter(Boolean).join(' · ') })));
+    });
+    var manualEmail = input({ type: 'email', placeholder: 'payer@example.com' }, 'bl-manual');
+    pane.appendChild(el('section', { class: 'st-section' },
+      el('h3', { text: 'Not matched to a Plex user (' + (c.unmatched || 0) + ')' }),
+      el('p', { class: 'st-note', text: 'These Stripe customers pay with an email no Plex account uses. Link each one to the right Plex user.' }),
+      linkBox,
+      field('Search', q),
+      unmatched && !unmatched.length ? el('p', { class: 'st-note', text: unmatchedQ.trim() ? 'No unmatched customer matches that.' : 'Every Stripe customer is matched. Nice.' }) : list,
+      unmatched && unmatched.length > 50 ? el('p', { class: 'st-note', text: 'Showing 50. Search to find someone else.' }) : null,
+      el('details', { class: 'st-details' }, el('summary', { text: 'Link any Stripe email by hand' }),
+        el('div', { class: 'st-row' }, el('div', { style: 'flex: 1 1 240px' }, field('Stripe email', manualEmail)),
+          el('button', { type: 'button', class: 'st-btn', text: 'Choose Plex user', onclick: function () {
+            var v = manualEmail.value.trim();
+            if (!/^[^@\s]+@[^@\s]+$/.test(v)) { setMsg('bl-links', 'error', 'Enter the email address the person pays Stripe with.'); return; }
+            linking = { email: v.toLowerCase() }; clearDrafts('bl-manual'); render();
+          } }))),
+      message('bl-links')));
+
+    // Manual links
+    var links = el('ul', { class: 'st-list' });
+    (billing.links || []).forEach(function (l) {
+      links.appendChild(el('li', { class: 'st-item' },
+        el('div', { class: 'st-item__top' },
+          el('span', { class: 'st-item__name', text: l.email }),
+          el('span', { class: 'st-note', text: 'linked to ' + (l.title || l.username || l.plex_id) }),
+          el('span', { class: 'st-spacer' }),
+          unlinkingEmail === l.email
+            ? el('span', { class: 'st-row' },
+                el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Keep', onclick: function () { unlinkingEmail = null; render(); } }),
+                el('button', { type: 'button', class: 'st-btn st-btn--danger', text: 'Remove link', onclick: function () {
+                  api('DELETE', '/api/settings/billing/links/' + encodeURIComponent(l.email)).then(function () {
+                    unlinkingEmail = null; return Promise.all([loadBilling(), loadUnmatched(true), loadAccUsers(true)]);
+                  }).catch(function (e) { setMsg('bl-links', 'error', e.message); });
+                } }))
+            : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Remove…', onclick: function () { unlinkingEmail = l.email; render(); } })),
+        el('div', { class: 'st-item__meta', text: (l.plex_email ? 'Plex email ' + l.plex_email + ' · ' : '') + 'linked ' + ago(l.created) })));
+    });
+    pane.appendChild(el('details', { class: 'st-section st-details', open: !!unlinkingEmail },
+      el('summary', { text: 'Linked by hand (' + (billing.links || []).length + ')' }),
+      (billing.links || []).length ? links : el('p', { class: 'st-note', text: 'No manual links yet.' })));
+
+    pane.appendChild(el('section', { class: 'st-section' }, el('h3', { text: 'PayPal' }),
+      el('p', { class: 'st-note', text: 'Not connected yet. PayPal subscriptions will show on the same card once it is set up.' })));
+  }
+
+  function statusLabel(st) {
+    return { active: 'Active', trialing: 'Trial', past_due: 'Past due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Incomplete',
+      incomplete_expired: 'Expired', paused: 'Paused' }[st] || st;
+  }
+
   // ---------- render ----------
   function render() {
     if (tab === 'display') return;
@@ -788,6 +953,8 @@
       renderNetdata(pane);
     } else if (tab === 'alerts') {
       renderAlerts(pane);
+    } else if (tab === 'billing') {
+      renderBilling(pane);
     } else if (tab === 'access') {
       renderAccess(pane);
     }

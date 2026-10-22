@@ -4,7 +4,7 @@
 
    const picker = gsUserPicker({ idPrefix, onPick(person), icon(name, size), inline, placeholder });
    inline: true lists results in place (for scrolling panels like Settings).
-   picker.setData({ people: [{key, name, username, email, servers: [], plays_30d, admin, disabled, owner}], servers: ['Atlas', ...] });
+   picker.setData({ people: [{key, name, username, email, servers: [], plays_30d, admin, disabled, owner, billing}], servers: ['Atlas', ...] });
    container.appendChild(picker.el); */
 (function () {
   'use strict';
@@ -29,6 +29,8 @@
     return h('span', { class: 'sd-avatar sd-avatar--sm sd-avatar--' + hash, 'aria-hidden': 'true', text: (s.replace(/[^A-Za-z0-9]/g, '')[0] || '?').toUpperCase() });
   }
   const NONE = 'Not on a monitored server';
+  // Stripe subscription states worth flagging (from people[].billing).
+  const LAPSED = { past_due: 'Past due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Payment incomplete', paused: 'Paused' };
 
   window.gsUserPicker = function (opts) {
     const pre = opts.idPrefix || 'up';
@@ -94,6 +96,7 @@
             h('span', { class: 'gu-opt__side' },
               p.admin ? h('span', { class: 'gp-tag gp-tag--admin', text: 'Admin' }) : null,
               p.disabled && !p.admin ? h('span', { class: 'gp-tag gp-tag--off', text: 'Access off' }) : null,
+              LAPSED[p.billing] ? h('span', { class: 'gp-tag gp-tag--warn', text: LAPSED[p.billing] }) : null,
               h('span', { class: 'gu-opt__num', text: (p.plays_30d || 0) + (p.plays_30d === 1 ? ' play' : ' plays') + ', 30 d' })));
           options.push({ el: opt, person: p });
           grp.appendChild(opt);

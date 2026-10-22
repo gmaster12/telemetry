@@ -224,6 +224,85 @@
     return page();
   }
 
+  // ---------- subscription (Stripe) ----------
+  var ZERO_DECIMAL = ['bif', 'clp', 'djf', 'gnf', 'jpy', 'kmf', 'krw', 'mga', 'pyg', 'rwf', 'ugx', 'vnd', 'vuv', 'xaf', 'xof', 'xpf'];
+  function money(amount, currency) {
+    var cur = (currency || 'usd').toUpperCase();
+    var v = ZERO_DECIMAL.indexOf((currency || '').toLowerCase()) >= 0 ? amount : amount / 100;
+    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur }).format(v); } catch (e) { return v.toFixed(2) + ' ' + cur; }
+  }
+  function day(ts) { return ts ? new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : null; }
+  var SUB_STATUS = {
+    active: ['Active', 'ok'], trialing: ['Trial', 'ok'], past_due: ['Past due', 'warn'], unpaid: ['Unpaid', 'warn'],
+    incomplete: ['Payment incomplete', 'warn'], paused: ['Paused', 'off'], canceled: ['Canceled', 'off'], incomplete_expired: ['Expired', 'off']
+  };
+  function subBadge(status) {
+    var st = SUB_STATUS[status] || [status, 'off'];
+    return el('span', { class: 'gp-subbadge gp-subbadge--' + st[1] }, el('i', { 'aria-hidden': 'true' }), st[0]);
+  }
+  function period(sub) {
+    var every = sub.interval_count > 1 ? 'every ' + sub.interval_count + ' ' + sub.interval + 's' : sub.interval ? 'a ' + sub.interval : '';
+    return money(sub.amount, sub.currency) + (every ? ' ' + every : '');
+  }
+  function whenLine(sub) {
+    if (sub.status === 'canceled') return 'Ended ' + (day(sub.ended_at || sub.canceled_at) || '');
+    if (sub.cancel_at_period_end || sub.cancel_at) return 'Ends ' + day(sub.cancel_at || sub.current_period_end) + ', will not renew';
+    if (sub.status === 'trialing' && sub.trial_end) return 'Trial ends ' + day(sub.trial_end);
+    if (sub.status === 'past_due' || sub.status === 'unpaid') return 'Payment is overdue' + (sub.current_period_end ? ' since ' + day(sub.current_period_end) : '');
+    if (sub.current_period_end) return 'Renews ' + day(sub.current_period_end);
+    return null;
+  }
+  function paymentLine(p) {
+    if (!p) return null;
+    var what = { succeeded: 'Paid', failed: 'Failed', pending: 'Pending', refunded: 'Refunded' }[p.status] || p.status;
+    return el('p', { class: 'gp-sub__pay' + (p.status === 'failed' ? ' is-failed' : '') },
+      el('span', { class: 'gp-label', text: 'Last payment' }), ' ' + money(p.amount, p.currency) + ' on ' + day(p.created) + ' · ', el('b', { text: what }));
+  }
+  // summary: from /api/me/subscription or /api/users/{id}. who: 'self' or 'admin'.
+  function subscriptionCard(summary, who) {
+    var self = who === 'self';
+    var card = el('div', { class: 'gp-sub' + (self ? '' : ' gp-sub--light') });
+    card.appendChild(el('p', { class: 'gp-eyebrow gp-sub__eyebrow', text: self ? 'Your subscription' : 'Subscription' }));
+    var subs = (summary && summary.subscriptions) || [];
+    if (!subs.length) {
+      card.append(el('b', { class: 'gp-sub__plan', text: 'No subscription found' }),
+        el('p', { class: 'gp-sub__note', text: self
+          ? 'We could not find a subscription for ' + ((summary && summary.emails && summary.emails[0]) || 'your Plex email') + '. If you pay with a different email address, ask the administrator to link it.'
+          : 'No Stripe customer matched ' + ((summary && summary.emails && summary.emails.join(', ')) || 'this person (no email on file)') + '. Link their Stripe email in Settings, Billing.' }));
+      var pay0 = paymentLine(summary && summary.last_payment);
+      if (pay0) card.appendChild(pay0);
+      return card;
+    }
+    var main = subs[0];
+    card.append(
+      el('div', { class: 'gp-sub__top' }, el('b', { class: 'gp-sub__plan', text: main.plan }), subBadge(main.status)),
+      el('p', { class: 'gp-sub__price', text: period(main) }));
+    if (whenLine(main)) card.appendChild(el('p', { class: 'gp-sub__when', text: whenLine(main) }));
+    subs.slice(1).forEach(function (sub) {
+      card.appendChild(el('div', { class: 'gp-sub__more' }, el('span', { text: sub.plan + ' · ' + period(sub) }), subBadge(sub.status)));
+    });
+    var pay = paymentLine(summary.last_payment);
+    if (pay) card.appendChild(pay);
+    if (!self) {
+      card.appendChild(el('p', { class: 'gp-sub__note', text: (summary.linked ? 'Linked by hand to ' : 'Matched by email ') + (summary.emails || []).join(', ') }));
+    }
+    return card;
+  }
+  var mySub = null;
+  function loadMySubscription() {
+    if (!me || me.kind !== 'plex') return;
+    api('GET', '/api/me/subscription').then(function (r) { mySub = r; renderMySub(); }).catch(function () {});
+  }
+  function renderMySub() {
+    var box = document.getElementById('sub-card');
+    if (!box) return;
+    box.replaceChildren();
+    // Admin without a subscription, or Stripe not connected: nothing to show.
+    var show = mySub && mySub.configured && !(me.role === 'admin' && mySub.status === 'none');
+    box.hidden = !show;
+    if (show) box.appendChild(subscriptionCard(mySub, 'self'));
+  }
+
   // ---------- history drawer ----------
   var drawer = document.getElementById('hist');
   var lastFocus = null;
@@ -265,6 +344,9 @@
       if (tags.childNodes.length) who.appendChild(tags);
       var s = statsBlock(r.stats);
       if (s) body.appendChild(s);
+      if (!isSelf && me.role === 'admin' && r.billing && (r.billing.status !== 'none' || r.billing.emails.length)) {
+        body.appendChild(subscriptionCard(r.billing, 'admin'));
+      }
       if (!isSelf && me.role === 'admin' && !u.admin) {
         var access = (u.sections || []).map(function (k) { return SECTION_LABEL[k] || k; });
         body.appendChild(el('div', { class: 'gp-access' },
@@ -329,7 +411,11 @@
   let usersLoadedAt = 0;
   function renderUsers(card) {
     card.hidden = false;
-    if (!picker) picker = window.gsUserPicker({ idPrefix: 'people', icon: icon, onPick: function (p) { openHistory(p.key, p.name); } });
+    if (!picker) {
+      picker = window.gsUserPicker({ idPrefix: 'people', icon: icon, onPick: function (p) { openHistory(p.key, p.name); } });
+      // Opening the search with a list older than a minute fetches a fresh one.
+      picker.el.addEventListener('focusin', function () { if (Date.now() - usersLoadedAt > 60000) loadUsers(); });
+    }
     var sub = el('span', { class: 'gp-finder__sub', id: 'people-sub' });
     card.replaceChildren(el('div', { class: 'gp-finder', 'aria-labelledby': 'people-title' },
       el('div', { class: 'gp-finder__head' }, el('h2', { class: 'sd-sec-title', id: 'people-title', text: 'Users' }), sub),
@@ -344,7 +430,7 @@
         servers: r.servers || [],
         people: (r.rows || []).map(function (u) {
           return { key: u.id, name: u.name || u.username || 'Plex user', username: u.username, email: u.email, servers: u.servers || [],
-            plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner };
+            plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner, billing: u.billing_status };
         })
       });
       var sub = document.getElementById('people-sub');
@@ -380,6 +466,8 @@
     applyRole();
     renderUser();
     renderPeople();
+    loadMySubscription();
+    setInterval(function () { if (!document.hidden) loadMySubscription(); }, 5 * 60000);
   }
   if (window.gsMe) start(window.gsMe);
   else document.addEventListener('gs:me', function (e) { start(e.detail); }, { once: true });

@@ -384,6 +384,7 @@
     .sd-big { font-size: 28px; line-height: 32px; }
     .sd-big-l { font-size: 14px; }
     .sd-kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .sd-kpis > .sd-kpi:last-child:nth-child(odd) { grid-column: 1 / -1; }
     .sd-kpi { --n: 52px; --rn: 22px; --f: 14px; --notch-w: 88px; --notch-h: 88px; --notch-path: polygon(0 0, 100% 0, 100% 100%); min-height: 120px; padding: 14px; gap: 8px; border-radius: 24px; }
     .sd-kpi .sd-go { top: 6px; right: 6px; width: 36px; height: 36px; }
     .sd-kpi .sd-go svg { width: 16px; height: 16px; }
@@ -439,6 +440,7 @@
           <button type="button" class="gs-chip" role="tab" id="st-tab-netdata" aria-selected="false" aria-controls="st-pane-netdata" data-tab="netdata" data-admin hidden>Netdata</button>
           <button type="button" class="gs-chip" role="tab" id="st-tab-alerts" aria-selected="false" aria-controls="st-pane-alerts" data-tab="alerts" data-admin hidden>Alerts</button>
           <button type="button" class="gs-chip" role="tab" id="st-tab-access" aria-selected="false" aria-controls="st-pane-access" data-tab="access" data-admin hidden>Access</button>
+          <button type="button" class="gs-chip" role="tab" id="st-tab-billing" aria-selected="false" aria-controls="st-pane-billing" data-tab="billing" data-admin hidden>Billing</button>
         </div>
         <div class="st-pane" id="st-pane-display" role="tabpanel" aria-labelledby="st-tab-display">
           <div class="sd-field">
@@ -453,6 +455,7 @@
         <div class="st-pane" id="st-pane-netdata" role="tabpanel" aria-labelledby="st-tab-netdata" hidden></div>
         <div class="st-pane" id="st-pane-alerts" role="tabpanel" aria-labelledby="st-tab-alerts" hidden></div>
         <div class="st-pane" id="st-pane-access" role="tabpanel" aria-labelledby="st-tab-access" hidden></div>
+        <div class="st-pane" id="st-pane-billing" role="tabpanel" aria-labelledby="st-tab-billing" hidden></div>
       </section>
     </div>
     <div class="sd-top">
@@ -470,6 +473,8 @@
     <div class="sd-lockup">
       <span class="sd-lockup__label">Telemetry</span>
     </div>
+
+    <section class="gp-subsec" id="sub-card" aria-label="Your subscription" hidden></section>
 
     <header class="sd-head">
       <div>
@@ -507,12 +512,6 @@
         <div class="sd-card__head"><p class="sd-kpi__label">Paused</p></div>
         <div class="sd-kpi__row"><span class="sd-kpi__value" data-source="kpis" data-field="paused" data-row="0">—</span></div>
         <div class="sd-tags"><span class="sd-tag"><b data-source="kpis" data-field="playing" data-row="0">—</b>playing</span></div>
-      </article>
-      <article class="sd-card sd-kpi">
-        <span class="sd-notch" aria-hidden="true"></span><button type="button" class="sd-go" data-go="servers" aria-label="Go to servers"></button>
-        <div class="sd-card__head"><p class="sd-kpi__label">Servers online</p></div>
-        <div class="sd-kpi__row"><span class="sd-kpi__value" data-source="kpis" data-field="servers_online" data-row="0">—</span><span class="sd-kpi__unit">of <span data-source="kpis" data-field="servers_total" data-row="0">—</span></span></div>
-        <div class="sd-tags"><span class="sd-tag">Dallas, DA11</span></div>
       </article>
     </section>
 

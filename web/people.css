@@ -246,3 +246,42 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .st-editor__head { display: flex; align-items: center; gap: 12px; }
 .st-editor__head b { font-size: 15px; font-weight: 600; }
 .st-editor__head span { display: block; font-size: 12px; color: var(--ink-muted); overflow-wrap: anywhere; }
+.gp-tag--warn { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--amber); }
+.gp-tag--warn::before { content: ""; width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-bottom: 7px solid var(--amber); }
+
+/* ---------- subscription card ---------- */
+.gp-subsec[hidden] { display: none; }
+.gp-sub { display: flex; flex-direction: column; gap: 6px; padding: 24px 26px; border-radius: 32px; background: var(--surface-ink); color: var(--on-ink);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
+.gp-sub--light { padding: 16px 18px; border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: none; }
+.gp-sub__eyebrow { color: var(--volt); }
+.gp-sub--light .gp-sub__eyebrow { color: var(--ink-muted); }
+.gp-sub__top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.gp-sub__plan { font-size: 32px; line-height: 38px; font-weight: 300; letter-spacing: -0.02em; }
+.gp-sub--light .gp-sub__plan { font-size: 22px; line-height: 28px; }
+.gp-sub__price { margin: 0; font-size: 17px; font-variant-numeric: tabular-nums; }
+.gp-sub__when { margin: 0; font-size: 14px; color: var(--on-ink-muted); }
+.gp-sub--light .gp-sub__when, .gp-sub--light .gp-sub__note { color: var(--ink-muted); }
+.gp-sub__note { margin: 4px 0 0; font-size: 13px; line-height: 18px; color: var(--on-ink-muted); max-width: 640px; }
+.gp-sub__pay { margin: 6px 0 0; padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.12); font-size: 14px; font-variant-numeric: tabular-nums; }
+.gp-sub--light .gp-sub__pay { border-top-color: var(--hairline); }
+.gp-sub__pay .gp-label { color: inherit; opacity: 0.7; }
+.gp-sub__pay b { font-weight: 600; }
+.gp-sub__pay.is-failed b { color: var(--amber); }
+.gp-sub--light .gp-sub__pay.is-failed b { color: var(--danger); }
+.gp-sub__more { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; font-size: 14px; }
+.gp-subbadge { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.gp-subbadge i { width: 8px; height: 8px; }
+.gp-subbadge--ok { background: var(--volt); color: var(--on-fill); }
+.gp-subbadge--ok i { border-radius: 50%; background: currentColor; }
+.gp-subbadge--warn { background: var(--amber); color: var(--on-fill); }
+.gp-subbadge--warn i { width: 0; height: 0; border-left: 4.5px solid transparent; border-right: 4.5px solid transparent; border-bottom: 8px solid currentColor; }
+.gp-subbadge--off { background: rgba(255, 255, 255, 0.14); color: inherit; }
+.gp-sub--light .gp-subbadge--off { background: var(--surface-page); }
+.gp-subbadge--off i { border-radius: 2px; background: currentColor; }
+@media (max-width: 760px) {
+  .gp-sub { padding: 18px; border-radius: 24px; }
+  .gp-sub__plan { font-size: 26px; line-height: 32px; }
+  .gs-app:not([data-mtab="home"]):not([data-mtab="people"]) #sub-card { display: none; }
+}
+.gs-only-history .sd-main, .gs-only-history .sd-insights { display: none; }

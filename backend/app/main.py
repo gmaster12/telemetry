@@ -20,6 +20,7 @@ from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, admin_plex
                    end_session, hash_password, new_session, password_problem, plex_principal, principal_for, record_failure,
                    set_cookie, throttled, user_sections)
 from .config import DB_PATH, WEB_DIR, ServerCfg, env
+from .billing import StripeClient
 from .netdata import NetdataClient
 from .plex import PlexAccount, PlexClient
 from .poller import Poller
@@ -564,7 +565,9 @@ def api_users(request: Request, q: str = "", server: str = "", limit: int = 50):
     """Search people by username, display name or email. server: only people on that server."""
     admin(request)
     rows = directory.search_users(q[:100], max(1, min(limit, 5000)) if not server else 5000)
-    out = [{**_user_public(u), "plays": u["plays"], "plays_30d": u["plays_30d"], "last_play": u["last_play"]} for u in rows]
+    billing = poller.billing.status_map()
+    out = [{**_user_public(u), "plays": u["plays"], "plays_30d": u["plays_30d"], "last_play": u["last_play"],
+            "billing_status": billing.get(u["plex_id"], "none")} for u in rows]
     if server:
         out = [u for u in out if server in u["servers"]][: max(1, min(limit, 5000))]
     return {"rows": out, "servers": [s.name for s in poller.cfg.servers]}
@@ -576,7 +579,7 @@ def api_user(request: Request, plex_id: str):
     u = directory.get_user(plex_id)
     if not u:
         raise HTTPException(404, "No such user.")
-    return {"user": _user_public(u), "stats": directory.user_stats(plex_id)}
+    return {"user": _user_public(u), "stats": directory.user_stats(plex_id), "billing": poller.billing.summary(plex_id)}
 
 
 @app.get("/api/users/{plex_id}/history")
@@ -585,6 +588,82 @@ def api_user_history(request: Request, plex_id: str, before: int | None = None, 
     if not directory.get_user(plex_id):
         raise HTTPException(404, "No such user.")
     return {"rows": _history_rows(directory.history(plex_id, before, limit))}
+
+
+@app.get("/api/me/subscription")
+def api_my_subscription(request: Request):
+    """The signed-in person's own Stripe subscription. Everyone may see their own."""
+    p = me(request)
+    if p.kind != "plex":
+        return {"status": "none", "subscriptions": [], "last_payment": None, "configured": bool(store.get_setting("stripe_key"))}
+    return {**poller.billing.summary(p.subject), "configured": bool(store.get_setting("stripe_key"))}
+
+
+# ---------- settings: billing (Stripe; PayPal later) ----------
+class StripeKeyIn(BaseModel):
+    key: str = Field(min_length=10, max_length=300)
+
+
+class BillingLinkIn(BaseModel):
+    email: str = Field(min_length=3, max_length=254, pattern=r"^[^@\s]+@[^@\s]+$")
+    plex_id: str = Field(min_length=1, max_length=64)
+
+
+@app.get("/api/settings/billing")
+def get_billing():
+    return {"has_key": bool(store.get_setting("stripe_key")), "synced_at": poller.billing_synced_at or None,
+            "error": poller.billing_error, "counts": poller.billing.counts(), "links": poller.billing.links()}
+
+
+@app.put("/api/settings/billing")
+async def put_billing(body: StripeKeyIn):
+    key = body.key.strip()
+    if not key.startswith(("rk_", "sk_")):
+        raise HTTPException(422, "That does not look like a Stripe key. Use a restricted key (rk_live_...).")
+    check = await StripeClient(key, poller.http).check()
+    missing = [k for k, v in check.items() if v is not True]
+    if "customers" in missing:
+        raise HTTPException(422, f"Stripe refused the key: {check['customers']}")
+    store.set_setting("stripe_key", key)
+    poller.billing_synced_at = 0  # sync right away
+    poller._wake.set()
+    return {"ok": True, "missing": missing}
+
+
+@app.delete("/api/settings/billing")
+def delete_billing():
+    store.set_setting("stripe_key", None)
+    return {"ok": True}
+
+
+@app.post("/api/settings/billing/sync")
+async def sync_billing():
+    if not store.get_setting("stripe_key"):
+        raise HTTPException(409, "Add a Stripe key first.")
+    try:
+        counts = await poller.sync_billing()
+    except Exception as e:
+        raise HTTPException(502, f"Stripe sync failed: {e}")
+    return {"ok": True, **counts, **poller.billing.counts()}
+
+
+@app.get("/api/settings/billing/unmatched")
+def billing_unmatched(q: str = "", limit: int = 100):
+    return {"rows": poller.billing.unmatched(q[:100], max(1, min(limit, 500)))}
+
+
+@app.post("/api/settings/billing/links")
+def billing_link(body: BillingLinkIn):
+    if not directory.get_user(body.plex_id):
+        raise HTTPException(404, "No such Plex user.")
+    poller.billing.link(body.email, body.plex_id)
+    return {"ok": True, "summary": poller.billing.summary(body.plex_id)}
+
+
+@app.delete("/api/settings/billing/links/{email}")
+def billing_unlink(email: str):
+    poller.billing.unlink(email)
+    return {"ok": True}
 
 
 # ---------- settings: access, admins, users, history import ----------

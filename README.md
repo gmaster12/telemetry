@@ -77,6 +77,13 @@ Then open **Settings** (the sliders button in the top bar):
      person can get custom access or be turned off.
    - **Admin logins** adds username and password logins with full admin rights.
 
+5. **Billing**: connect Stripe with a **restricted** key (Stripe: Developers,
+   API keys, Create restricted key; Read access to Customers, Subscriptions,
+   Products and Charges). Customers match Plex users by email. For anyone who
+   pays with a different email, use **Link to a Plex user** under "Not matched
+   to a Plex user"; those links are permanent. Everyone then sees a "Your
+   subscription" card when they sign in. PayPal comes later.
+
 ## Sign-in and roles
 
 | Who | How they sign in | What they see |
