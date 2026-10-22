@@ -189,6 +189,10 @@ design system). The dashboard adds its own patterns:
   "New" tag for 6 s; an ended one stays 1.7 s dimmed with an "Ended" stamp in its
   old place, then fades out. Cards, carousel and phone rows (not the table).
   Changes are announced in a polite live region. Reduced motion: no movement.
+  It only plays for streams that start or stop while the page is open (nothing on
+  first load). The ring and tag are timed from when the stream appeared, so page
+  redraws do not cut them short. Preview: open the page with `?demo=pulse` to
+  treat every current stream as new.
 - The Servers online summary card was removed at Glenn's request (Transcoding,
   Buffering, Paused remain).
 - Status is always a word plus a shape, never color alone. No emoji.

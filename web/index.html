@@ -1200,8 +1200,9 @@
   }
   /* Lime pulse: a stream that just started gets a lime ring (twice) and a "New" tag for a few
      seconds; one that just ended stays a moment, greyed with an "Ended" stamp, then leaves. */
-  const NEW_MS = 6000, ENDED_MS = 1700;
-  let seenIds = null;              // ids in the last streams load; null until the first load
+  const NEW_MS = 6000, ENDED_MS = 1700, PULSE_DELAY = 250, PULSE_MS = 2050; // ring: 0.25 s wait + 1.8 s (people.css)
+  // ids in the last streams load; null until the first load. ?demo=pulse treats the first load as new (preview).
+  let seenIds = /[?&]demo=pulse(&|$)/.test(location.search) ? new Set() : null;
   let lastData = null;
   let lastRows = new Map();
   let lastOrder = [];              // ids in the order last drawn, to put an ended card back where it was
@@ -1252,12 +1253,18 @@
       return;
     }
     const t = firstSeen.get(r.id);
-    if (!t || Date.now() - t > NEW_MS) return;
-    (front || node).appendChild(el('span', 'sd-newchip', 'New'));
-    if (!pulsed.has(r.id)) {
-      pulsed.add(r.id);
-      node.classList.add('is-new');
-      (front || node).appendChild(el('span', 'sd-pulse'));
+    const age = t ? Date.now() - t : Infinity;
+    if (age > NEW_MS) return;
+    // The page redraws often (every poll, resize, flip), so the ring and chip pick up
+    // where they were by time instead of restarting or vanishing.
+    const chip = el('span', 'sd-newchip', 'New');
+    if (pulsed.has(r.id)) chip.style.animation = 'none';
+    (front || node).appendChild(chip);
+    if (!pulsed.has(r.id)) { pulsed.add(r.id); node.classList.add('is-new'); }
+    if (age < PULSE_MS) {
+      const ring = el('span', 'sd-pulse');
+      ring.style.animationDelay = (PULSE_DELAY - age) + 'ms';
+      (front || node).appendChild(ring);
     }
   }
   function streamCard(r) {
