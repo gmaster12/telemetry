@@ -82,6 +82,10 @@ async def session_auth(request: Request, call_next):
     resp.headers.setdefault("X-Frame-Options", "DENY")
     if path.startswith("/api/"):
         resp.headers.setdefault("Cache-Control", "no-store")
+    elif path == "/" or path.endswith((".html", ".js", ".css", ".webmanifest")):
+        # Always revalidate the page and its code, so an update shows up on the next load
+        # instead of mixing a new page with old cached scripts.
+        resp.headers["Cache-Control"] = "no-cache"
     return resp
 
 

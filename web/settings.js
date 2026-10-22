@@ -145,10 +145,7 @@
       b.classList.toggle('gs-chip--selected', on);
       b.tabIndex = on ? 0 : -1;
     });
-    ['display', 'plex', 'netdata', 'alerts', 'access', 'billing'].forEach(function (p) {
-      var pane = document.getElementById('st-pane-' + p);
-      if (pane) pane.hidden = p !== t;
-    });
+    document.querySelectorAll('.st-pane').forEach(function (pane) { pane.hidden = pane.id !== 'st-pane-' + t; });
     if (t === 'access') loadAccess();
     else if (t === 'billing') loadBilling();
     else if (t !== 'display' && isAdmin()) loadState();
