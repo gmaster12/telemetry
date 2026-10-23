@@ -123,6 +123,18 @@ run times are saved in settings (`users_synced_at`, `billing_synced_at`) so a
 restart does not redo them. Settings changes call `poller.kick()` to sync now.
 Source metadata for transcodes is fetched in parallel and cached per title.
 
+Moving clips (`app/clips.py`): the first time a show or movie plays, the poller
+queues it; `Clips.worker` (one at a time) asks that title's Plex server for its
+file (`/library/metadata/{ratingKey}`, `Part.key` under `/library/parts/`) and
+runs ffmpeg in this container to cut 8 silent seconds starting 10% in (Glenn's
+choice), 240p H.264, about 100 KB, saved as `data/clips/<serverId>_<ratingKey>.mp4`
+and served by `GET /api/clip/{server}/{ratingKey}` (byte ranges; Safari needs
+them). The Plex token goes to ffmpeg as a request header, never in a URL. ffmpeg
+seeks with byte-range requests, so a clip reads about its own size from Plex, not
+the whole file. Failed titles wait 6 hours; clips unplayed for 14 days are
+deleted and the folder stays under 500 MB. Stream rows carry `clip` (URL or
+null). `/api/status` reports `clips` (available, count, queued, last error).
+
 ## How the page gets data
 
 `web/index.html` was designed inside a hosted dashboard runtime and calls a
@@ -238,6 +250,16 @@ design system). The dashboard adds its own patterns:
   bandwidth line draws (`.sd-bwline`, `.gs-intro-draw`). Plays once per page
   load, never on the 10-second refreshes; skipped for reduced motion. The
   classes are removed when each animation ends.
+- Moving clips in stream cards (Settings, Display, `clips` on/off, default on,
+  saved per browser): up to 6 cards with a ready clip, picked at random and kept
+  while they last, play it muted on a loop under the card's shade and text
+  (`pickClips`, `attachClip`, `.sd-clip`, `.has-clip`). Each card keeps its
+  `<video>` across redraws, so the loop never restarts on the 10-second refresh.
+  A clip plays only while that stream is Playing, on screen and in a visible tab.
+  Cards and carousel only (not rows or the table). Off for reduced motion and for
+  browsers asking to save data. Placement per style: Classic over the poster with
+  the same shade, Poster beside and Poster on top in the poster area, Banner on
+  the right with a fade, Tiles full tile with the bottom shade.
 - Status is always a word plus a shape, never color alone. No emoji.
 
 ## Running tests

@@ -5,11 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
+from pathlib import Path
 
 import httpx
 
 from .billing import Billing, StripeClient
+from .clips import VIDEO_KINDS, Clips
 from .config import AppCfg, ServerCfg
 from .netdata import NetdataClient
 from .plex import PlexAccount, PlexClient, normalize_session
@@ -36,6 +39,8 @@ class Poller:
         self._tel_wake = asyncio.Event()     # refresh Netdata now
         self._upkeep_wake = asyncio.Event()  # run the account syncs now
         self._source_cache: dict[tuple[int, str], dict] = {}  # (server id, ratingKey) -> source metadata
+        # Looping card clips, cut from each title's own file (app/clips.py); kept next to the database.
+        self.clips = Clips(os.environ.get("CLIPS_DIR") or Path(getattr(store, "path", "data/x.db")).parent / "clips")
         self.directory = Directory(store)
         self.active_plays: dict[tuple[str, str], dict] = {}
         # Remembered across restarts, so a restart does not redo a full plex.tv and Stripe copy.
@@ -121,6 +126,12 @@ class Poller:
                 if art and row["rating_key"]:
                     self.art[(s.id, row["rating_key"])] = art
                     row["poster"] = f"/api/poster/{s.id}/{row['rating_key']}"
+                row["clip"] = None
+                if row.get("kind") in VIDEO_KINDS and row.get("rating_key"):
+                    if self.clips.ready(s.id, row["rating_key"]):
+                        row["clip"] = self.clips.url(s.id, row["rating_key"])
+                    else:
+                        self.clips.want(s.id, row["rating_key"])  # made in the background; shows from the next poll
                 rows.append(row)
             self.server_state[s.name] = {"online": True, "error": None, "ok_at": time.time()}
             return rows
@@ -336,7 +347,9 @@ class Poller:
     async def run(self) -> None:
         """Live streams every poll_seconds. Netdata and the slow account syncs (plex.tv users,
         Stripe) run in loops of their own, so neither can hold up the streams, at startup or later."""
-        side = [asyncio.create_task(self._telemetry_loop()), asyncio.create_task(self._upkeep_loop())]
+        self.clips.prune()
+        side = [asyncio.create_task(self._telemetry_loop()), asyncio.create_task(self._upkeep_loop()),
+                asyncio.create_task(self.clips.worker(self._clip_source))]
         try:
             while True:
                 try:
@@ -379,6 +392,20 @@ class Poller:
                 await asyncio.wait_for(self._upkeep_wake.wait(), timeout=60)
             except asyncio.TimeoutError:
                 pass
+
+    async def _clip_source(self, server_id: int, rating_key: str) -> tuple[str, str, float] | None:
+        """Where a title's file lives on its Plex server, for the clip maker: (file url, token, duration in seconds)."""
+        s = next((x for x in self.cfg.servers if x.id == server_id and x.enabled), None)
+        if not s or not s.token:
+            return None
+        meta = await self.client(s).metadata(str(rating_key))
+        media = (meta.get("Media") or [{}])[0]
+        part = (media.get("Part") or [{}])[0]
+        key = str(part.get("key") or "")
+        if not key.startswith("/library/parts/"):
+            return None
+        duration = float(meta.get("duration") or media.get("duration") or part.get("duration") or 0) / 1000
+        return s.plex_url.rstrip("/") + key, s.token, duration
 
     async def upkeep(self) -> None:
         """Account syncs that only need to run now and then: plex.tv users every 6 hours, Stripe every 15 minutes."""

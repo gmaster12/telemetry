@@ -116,6 +116,7 @@ SERVER_FIELDS = ("name", "plex_url", "max_streams", "capacity_mbps", "netdata_no
 
 class Store:
     def __init__(self, path: str, box: SecretBox):
+        self.path = path
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row

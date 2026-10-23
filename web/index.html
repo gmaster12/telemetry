@@ -467,6 +467,17 @@
   .sd-scard--tile .sd-scard__title { font-size: 12px; line-height: 16px; color: #e4e4e4; }
   .sd-scard--tile .sd-prog { display: block; width: 100%; height: 4px; margin: 0; background: rgba(255, 255, 255, 0.25); }
   .sd-scard--tile .sd-scard__name, .sd-scard--tile .sd-scard__title, .sd-scard--tile .sd-scard__meta { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+  /* Moving clips (Settings, Display): a looping silent clip under the card's shade and text */
+  .has-clip { position: relative; isolation: isolate; }
+  .sd-clip { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; opacity: 0; transition: opacity 0.6s ease; pointer-events: none; }
+  .sd-clip.is-ready { opacity: 1; }
+  .sd-clip__shade { position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none; }
+  .sd-scard--art > .sd-clip__shade { background: linear-gradient(180deg, rgba(8, 8, 10, calc(0.5 * var(--s))) 0%, rgba(8, 8, 10, calc(0.66 * var(--s))) 45%, rgba(8, 8, 10, max(0.6, calc(0.9 * var(--s)))) 100%); }
+  .sd-scard--top .sd-scard__poster > .sd-clip__shade { background: linear-gradient(180deg, rgba(8, 8, 10, 0.28) 0%, rgba(8, 8, 10, 0) 38%, rgba(8, 8, 10, 0) 70%, rgba(20, 20, 22, 0.85) 100%); }
+  .sd-scard--tile > .sd-clip__shade { background: linear-gradient(180deg, rgba(8, 8, 10, 0) 45%, rgba(8, 8, 10, 0.86) 100%); }
+  .sd-scard--banner > .sd-clip { left: auto; width: 64%; border-radius: 0 30px 30px 0; -webkit-mask-image: linear-gradient(90deg, transparent, #000 45%); mask-image: linear-gradient(90deg, transparent, #000 45%); }
+  .sd-flip__inner.is-flipped .sd-clip { visibility: hidden; }
+  @media (prefers-reduced-motion: reduce) { .sd-clip { display: none; } }
   /* Settings: card style picker */
   .sd-cstyle { margin: 0; border: 0; }
   .sd-cstyle legend { float: left; width: 100%; margin-bottom: 12px; padding: 0; font-size: 15px; font-weight: 600; }
@@ -593,6 +604,14 @@
               <label class="gs-chip"><input type="radio" name="cstyle" value="tiles">Tiles</label>
             </div>
             <p class="sd-field__hint">Classic is the original card. Poster beside and Banner fit two per row, Tiles fit the most. Select a card to flip it in any style.</p>
+          </fieldset>
+          <fieldset class="sd-field sd-cstyle" id="clip-mode">
+            <legend>Moving clips in stream cards</legend>
+            <div class="sd-cstyle__opts">
+              <label class="gs-chip"><input type="radio" name="clips" value="on">On</label>
+              <label class="gs-chip"><input type="radio" name="clips" value="off">Off</label>
+            </div>
+            <p class="sd-field__hint">Up to 6 cards, picked at random, play a silent 8-second loop from 10% into the show or movie, and pause when the viewer pauses. A new title's clip shows up within a minute or so. Turn this off to save data on a phone.</p>
           </fieldset>
           <div class="sd-field" id="art-light-field">
             <div class="sd-field__row"><label for="art-light">Cover art brightness</label><output id="art-light-out" for="art-light">30%</output></div>
@@ -1352,6 +1371,54 @@
     g.putImageData(img, 0, 0);
     return (artCache[r.title] = cv.toDataURL('image/jpeg', 0.75));
   }
+  // Moving clips (Settings, Display): up to 6 cards, picked at random, play a short silent loop cut 10% into what
+  // is playing (made once per title on the server, app/clips.py). Each card keeps its <video> across redraws,
+  // so the loop never restarts on the 10-second refresh. A clip pauses when the stream does, off screen and in a
+  // hidden tab. Not for reduced motion or a browser asking to save data.
+  const MAX_CLIPS = 6;
+  const clipPicks = new Set();
+  const clipVideos = new Map();   // stream id -> <video>
+  const clipMode = () => (dash.params().clips === 'off' ? 'off' : 'on');
+  const clipsOn = () => clipMode() === 'on' && !(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) &&
+    !(navigator.connection && navigator.connection.saveData);
+  const clipObserver = 'IntersectionObserver' in window
+    ? new IntersectionObserver((es) => es.forEach((e) => { e.target._seen = e.isIntersecting; clipPlay(e.target); }), { threshold: 0.2 }) : null;
+  function clipPlay(v) {
+    if (v._want && v._seen !== false && !document.hidden && v.isConnected) { const p = v.play(); if (p) p.catch(() => {}); } else v.pause();
+  }
+  document.addEventListener('visibilitychange', () => clipVideos.forEach(clipPlay));
+  function pickClips(rows, cardView) {
+    const ok = new Set(cardView && clipsOn() ? rows.filter((r) => r.clip && !r._ended).map((r) => r.id) : []);
+    clipPicks.forEach((id) => { if (!ok.has(id)) clipPicks.delete(id); });
+    const rest = Array.from(ok).filter((id) => !clipPicks.has(id));
+    while (clipPicks.size < MAX_CLIPS && rest.length) clipPicks.add(rest.splice(Math.floor(Math.random() * rest.length), 1)[0]);
+    clipVideos.forEach((v, id) => {
+      if (clipPicks.has(id)) return;
+      v.pause(); v.removeAttribute('src'); v.load();
+      if (clipObserver) clipObserver.unobserve(v);
+      clipVideos.delete(id);
+    });
+  }
+  function attachClip(host, r) {
+    if (!r.clip || r._ended || !clipPicks.has(r.id)) return;
+    let v = clipVideos.get(r.id);
+    if (!v) {
+      v = document.createElement('video');
+      v.className = 'sd-clip';
+      v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto'; v.disablePictureInPicture = true; v.tabIndex = -1;
+      ['muted', 'playsinline'].forEach((a) => v.setAttribute(a, ''));
+      v.setAttribute('aria-hidden', 'true');
+      v.addEventListener('canplay', () => v.classList.add('is-ready'));
+      clipVideos.set(r.id, v);
+      if (clipObserver) clipObserver.observe(v);
+    }
+    if (v.getAttribute('src') !== r.clip) v.src = r.clip;
+    v._want = r.state === 'Playing';
+    host.classList.add('has-clip');
+    const shade = el('span', 'sd-clip__shade'); shade.setAttribute('aria-hidden', 'true');
+    host.prepend(v, shade);   // under the shade, and both under the card's text
+    requestAnimationFrame(() => clipPlay(v));
+  }
   // Stream card style (Settings, Display): classic (the original) or one of four poster layouts.
   const CARD_STYLES = ['classic', 'side', 'top', 'banner', 'tiles'];
   let cardStyle = 'classic';
@@ -1393,22 +1460,26 @@
       const body = el('div', 'sd-scard__body');
       body.append(whoEl(r), tagsEl(r), statusEl(r), progressEl(r, true));
       card.append(poster, body);
+      attachClip(poster, r);
     } else if (style === 'top') {
       const poster = el('div', 'sd-scard__poster'); poster.style.setProperty('--art', art);
       poster.append(avatar(r.user), stateBadge(r));
       const body = el('div', 'sd-scard__body');
       body.append(whoEl(r), tagsEl(r, true), progressEl(r, true));
       card.append(poster, body);
+      attachClip(poster, r);
     } else if (style === 'banner') {
       card.style.setProperty('--art', art);
       const row = el('div', 'sd-scard__whorow');
       row.append(avatar(r.user), whoEl(r));
       card.append(row, tagsEl(r), statusEl(r), progressEl(r, true));
+      attachClip(card, r);
     } else {
       card.style.setProperty('--art', art);
       const bottom = el('div');
       bottom.append(whoEl(r), el('p', 'sd-scard__meta', [r.server, r.resolution, r.method].filter(Boolean).join(' · ')), progressEl(r, false));
       card.append(stateBadge(r), bottom);
+      attachClip(card, r);
     }
     return card;
   }
@@ -1438,6 +1509,7 @@
     prog.append(bar, el('span', null, n0(r.progress_pct) + '% · ' + n0(r.elapsed_min) + ' min in'));
     card.style.setProperty('--art', 'url(' + artFor(r) + ')');
     card.append(head, who, foot, prog);
+    attachClip(card, r);
     return card;
   }
 
@@ -1650,6 +1722,7 @@
     const live = visibleRows();
     const rows = view === 'table' ? live : withEnded(live);
     lastOrder = rows.map((r) => r.id);
+    pickClips(rows, view === 'cards' || view === 'carousel');
     const none = 'No streams match' + (p.server ? ' on ' + p.server : '') + ' right now.';
     if (!d.data.length && view !== 'table' && !rows.length) {
       const box = view === 'rows' ? list : view === 'carousel' ? car : cards;
@@ -2027,6 +2100,11 @@
   document.getElementById('settings').addEventListener('keydown', (e) => { if (e.key === 'Escape') openSettings(false); });
   sizeInput.addEventListener('input', () => applySize(Number(sizeInput.value)));
   sizeInput.addEventListener('change', () => dash.setParams({ cardsize: Number(sizeInput.value) }));
+  const clipBox = document.getElementById('clip-mode');
+  function applyClipMode(v) {
+    clipBox.querySelectorAll('input').forEach((i) => { i.checked = i.value === v; i.parentElement.classList.toggle('gs-chip--selected', i.checked); });
+  }
+  clipBox.addEventListener('change', (e) => { if (e.target.name === 'clips') { applyClipMode(e.target.value); dash.setParams({ clips: e.target.value }); } });
   styleBox.addEventListener('change', (e) => { if (e.target.name === 'cstyle') { applyStyle(e.target.value); dash.setParams({ cardstyle: e.target.value }); } });
   lightInput.addEventListener('input', () => applyLight(Number(lightInput.value)));
   lightInput.addEventListener('change', () => dash.setParams({ artlight: Number(lightInput.value) }));
@@ -2084,6 +2162,7 @@
     applySize(Number(dash.params().cardsize) || 100);
     applyLight(artLight());
     applyStyle(styleOf());
+    applyClipMode(clipMode());
     renderLook();
     renderKpis();
     renderNewest();

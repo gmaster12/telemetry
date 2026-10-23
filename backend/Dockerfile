@@ -6,6 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     WEB_DIR=/app/web
 
 WORKDIR /app
+# ffmpeg cuts the short looping clips shown in stream cards (app/clips.py)
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
 COPY backend/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r /app/requirements.txt \
  && useradd --system --uid 10001 --home /app telemetry \

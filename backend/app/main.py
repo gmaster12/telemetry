@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -185,7 +185,19 @@ def api_status(request: Request):
         "servers": [{"name": s.name, "enabled": s.enabled, **poller.server_state.get(s.name, {})} for s in cfg.servers],
         "netdata": {"mode": cfg.netdata.mode, "error": poller.netdata_error, "ok_at": poller.netdata_ok_at},
         "users": {"synced_at": poller.users_synced_at or None, "error": poller.users_sync_error},
+        "clips": poller.clips.status(),
     }
+
+
+@app.get("/api/clip/{server_id}/{rating_key}")
+def api_clip(request: Request, server_id: int, rating_key: str):
+    """A short silent looping clip for a stream card (app/clips.py). Supports range requests, which Safari needs."""
+    need(request, "streams")
+    p = poller.clips.path(server_id, rating_key)
+    if not p.exists():
+        raise HTTPException(404)
+    poller.clips.touch(p)
+    return FileResponse(p, media_type="video/mp4", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/poster/{server_id}/{rating_key}")
