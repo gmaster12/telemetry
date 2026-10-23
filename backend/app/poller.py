@@ -32,19 +32,33 @@ class Poller:
         self.art: dict[tuple[int, str], str] = {}
         self.last_poll: float | None = None
         self._last_minute = 0
-        self._wake = asyncio.Event()
+        self._wake = asyncio.Event()         # settings changed: poll Plex now
+        self._tel_wake = asyncio.Event()     # refresh Netdata now
+        self._upkeep_wake = asyncio.Event()  # run the account syncs now
+        self._source_cache: dict[tuple[int, str], dict] = {}  # (server id, ratingKey) -> source metadata
         self.directory = Directory(store)
         self.active_plays: dict[tuple[str, str], dict] = {}
-        self.users_synced_at: float = 0.0
+        # Remembered across restarts, so a restart does not redo a full plex.tv and Stripe copy.
+        self.users_synced_at: float = self._saved_time("users_synced_at")
         self.users_sync_error: str | None = None
         self.client_id: str = "greystar-telemetry"
         self.owner_by_server: dict[str, str] = {}
         self.billing = Billing(store)
-        self.billing_synced_at: float = 0.0
+        self.billing_synced_at: float = self._saved_time("billing_synced_at")
         self.billing_error: str | None = None
         self.billing_counts: dict = {}
         self._load_owners()
         self.directory.close_stale_plays()
+
+    def _saved_time(self, key: str) -> float:
+        try:
+            return float(self.store.get_setting(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def kick(self) -> None:
+        """Run the account syncs (plex.tv users, Stripe) now, in the background."""
+        self._upkeep_wake.set()
 
     # ---------- config ----------
     def _load_owners(self) -> None:
@@ -67,6 +81,7 @@ class Poller:
         names = {s.name for s in self.cfg.servers}
         self.server_state = {k: v for k, v in self.server_state.items() if k in names}
         self._wake.set()
+        self._tel_wake.set()
 
     def client(self, s: ServerCfg) -> PlexClient:
         c = self.clients.get(s.id)
@@ -80,14 +95,25 @@ class Poller:
         c = self.client(s)
         try:
             items = await c.sessions()
-            rows = []
-            for it in items:
-                source = it
-                if it.get("TranscodeSession") and it.get("ratingKey"):
+
+            async def source_for(it: dict) -> dict:
+                # Transcodes report the stream, not the file: ask once per title for the source details.
+                if not (it.get("TranscodeSession") and it.get("ratingKey")):
+                    return it
+                key = (s.id, str(it["ratingKey"]))
+                if key not in self._source_cache:
                     try:
-                        source = await c.metadata(str(it["ratingKey"]))
+                        self._source_cache[key] = await c.metadata(key[1])
                     except Exception as e:  # source details are a nice-to-have
                         log.debug("metadata failed: %s", e)
+                        return it
+                    if len(self._source_cache) > 2000:
+                        self._source_cache.pop(next(iter(self._source_cache)))
+                return self._source_cache[key]
+
+            sources = await asyncio.gather(*(source_for(it) for it in items))
+            rows = []
+            for it, source in zip(items, sources):
                 row = normalize_session(s, it, source)
                 row["session_key"] = str(it.get("sessionKey") or (it.get("Session") or {}).get("id") or "")
                 art = row.pop("_art", None)
@@ -168,6 +194,7 @@ class Poller:
             raise
         finally:
             self.billing_synced_at = time.time()
+            self.store.set_setting("billing_synced_at", str(self.billing_synced_at))
         return self.billing_counts
 
     async def migrate_legacy_account(self) -> None:
@@ -225,6 +252,7 @@ class Poller:
             self.directory.upsert_user({**p, "servers": sorted(p["servers"])}, shared=True, is_owner=(pid in owners) or None if errors else pid in owners)
         self._load_owners()
         self.users_synced_at = time.time()
+        self.store.set_setting("users_synced_at", str(self.users_synced_at))
         self.users_sync_error = "; ".join(errors) or None
         return len(people)
 
@@ -306,40 +334,71 @@ class Poller:
             self.store.prune(self.cfg.history_days)
 
     async def run(self) -> None:
-        last_tel = 0.0
+        """Live streams every poll_seconds. Netdata and the slow account syncs (plex.tv users,
+        Stripe) run in loops of their own, so neither can hold up the streams, at startup or later."""
+        side = [asyncio.create_task(self._telemetry_loop()), asyncio.create_task(self._upkeep_loop())]
+        try:
+            while True:
+                try:
+                    if not self.cfg.use_sample:
+                        await self.poll_plex()
+                        self.record_minute()
+                except Exception:
+                    log.exception("poll cycle failed")
+                self._wake.clear()
+                try:
+                    await asyncio.wait_for(self._wake.wait(), timeout=self.cfg.poll_seconds)
+                except asyncio.TimeoutError:
+                    pass
+        finally:
+            for t in side:
+                t.cancel()
+
+    async def _telemetry_loop(self) -> None:
         while True:
             try:
-                if self.store.get_setting("plex_account_token"):
-                    try:
-                        await self.migrate_legacy_account()
-                    except Exception as e:
-                        log.warning("Could not move the linked Plex account: %s", e)
-                if time.time() - self.users_synced_at > 6 * 3600 and self.store.list_accounts():
-                    try:
-                        await self.sync_users()
-                    except Exception as e:
-                        self.users_sync_error = str(e)
-                        self.users_synced_at = time.time() - 5 * 3600  # retry in an hour
-                        log.warning("User sync failed: %s", e)
-                if time.time() - self.billing_synced_at > 15 * 60 and self.store.get_setting("stripe_key"):
-                    try:
-                        await self.sync_billing()
-                    except Exception:
-                        pass  # recorded in billing_error, shown in Settings
                 if not self.cfg.use_sample:
-                    await self.poll_plex()
-                    if time.time() - last_tel >= self.cfg.telemetry_seconds:
-                        await self.poll_netdata()
-                        last_tel = time.time()
-                    self.record_minute()
+                    await self.poll_netdata()
             except Exception:
-                log.exception("poll cycle failed")
-            self._wake.clear()
+                log.exception("Netdata cycle failed")
+            self._tel_wake.clear()
             try:
-                await asyncio.wait_for(self._wake.wait(), timeout=self.cfg.poll_seconds)
-                last_tel = 0.0  # settings changed: refresh telemetry right away
+                await asyncio.wait_for(self._tel_wake.wait(), timeout=self.cfg.telemetry_seconds)
             except asyncio.TimeoutError:
                 pass
+
+    async def _upkeep_loop(self) -> None:
+        await asyncio.sleep(2)  # let the first Plex poll go out first
+        while True:
+            try:
+                await self.upkeep()
+            except Exception:
+                log.exception("background sync failed")
+            self._upkeep_wake.clear()
+            try:
+                await asyncio.wait_for(self._upkeep_wake.wait(), timeout=60)
+            except asyncio.TimeoutError:
+                pass
+
+    async def upkeep(self) -> None:
+        """Account syncs that only need to run now and then: plex.tv users every 6 hours, Stripe every 15 minutes."""
+        if self.store.get_setting("plex_account_token"):
+            try:
+                await self.migrate_legacy_account()
+            except Exception as e:
+                log.warning("Could not move the linked Plex account: %s", e)
+        if time.time() - self.users_synced_at > 6 * 3600 and self.store.list_accounts():
+            try:
+                await self.sync_users()
+            except Exception as e:
+                self.users_sync_error = str(e)
+                self.users_synced_at = time.time() - 5 * 3600  # retry in an hour
+                log.warning("User sync failed: %s", e)
+        if time.time() - self.billing_synced_at > 15 * 60 and self.store.get_setting("stripe_key"):
+            try:
+                await self.sync_billing()
+            except Exception:
+                pass  # recorded in billing_error, shown in Settings
 
     # ---------- views ----------
     def servers_view(self) -> list[dict]:

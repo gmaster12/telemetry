@@ -113,6 +113,16 @@ files to add servers. Keep it that way.
   - `import_history` maps `accountID` from `/status/sessions/history/all`
     through `/accounts`. Spot-check one person's imported plays.
 
+## Polling (backend/app/poller.py)
+
+`Poller.run` polls Plex every `poll_seconds` and nothing else, so live streams
+show within seconds of a restart. Netdata runs in `_telemetry_loop` (CPU and
+network queries in parallel). The slow account syncs run in `_upkeep_loop`
+(`upkeep`: plex.tv users every 6 hours, Stripe every 15 minutes); their last
+run times are saved in settings (`users_synced_at`, `billing_synced_at`) so a
+restart does not redo them. Settings changes call `poller.kick()` to sync now.
+Source metadata for transcodes is fetched in parallel and cached per title.
+
 ## How the page gets data
 
 `web/index.html` was designed inside a hosted dashboard runtime and calls a

@@ -4,6 +4,7 @@ Returns per-server values keyed by the server name from servers.yaml.
 """
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -182,17 +183,19 @@ class NetdataClient:
         servers = [s for s in self.cfg.servers if s.enabled]
         out: dict[str, dict[str, float]] = {s.name: {} for s in servers}
         if self.nd.mode == "cloud":
-            cpu = parse_json2_by_node(await self._cloud_query(self.nd.cpu_context, None), servers)
-            net = parse_json2_by_node(await self._cloud_query(self.nd.net_context, [self.nd.net_out_dimension]), servers)
+            cpu_raw, net_raw = await asyncio.gather(self._cloud_query(self.nd.cpu_context, None),
+                                                    self._cloud_query(self.nd.net_context, [self.nd.net_out_dimension]))
+            cpu, net = parse_json2_by_node(cpu_raw, servers), parse_json2_by_node(net_raw, servers)
             for name in out:
                 if name in cpu:
                     out[name]["cpu_pct"] = round(min(cpu[name], 100.0), 1)
                 if name in net:
                     out[name]["net_out_mbps"] = round(abs(net[name]) / self.nd.net_units_per_mbps, 1)
         elif self.nd.mode == "agent":
-            for s in servers:
-                c = await self._agent_value(s, self.nd.cpu_context, None)
-                n = await self._agent_value(s, self.nd.net_context, [self.nd.net_out_dimension])
+            async def both(s):
+                return await asyncio.gather(self._agent_value(s, self.nd.cpu_context, None),
+                                            self._agent_value(s, self.nd.net_context, [self.nd.net_out_dimension]))
+            for s, (c, n) in zip(servers, await asyncio.gather(*(both(s) for s in servers))):
                 if c is not None:
                     out[s.name]["cpu_pct"] = round(min(c, 100.0), 1)
                 if n is not None:

@@ -316,6 +316,7 @@ async def add_server(body: ServerIn):
         data["owner_plex_id"] = owner
     sid = store.add_server(data, token)
     poller.users_synced_at = 0  # learn the owner and who it is shared with
+    poller.kick()
     poller.reload()
     return {"id": sid, **info}
 
@@ -362,6 +363,7 @@ async def plex_link_check(pin_id: int):
     info = await acct.user_info(token)
     store.save_account(info, token)
     poller.users_synced_at = 0  # load shared users right away
+    poller.kick()
     poller.reload()
     return {"linked": True, "account": {"id": str(info["id"]), "name": info.get("title") or info.get("username"), "email": info.get("email")}}
 
@@ -498,6 +500,7 @@ async def auth_plex_check(pin_id: int, request: Request):
     if is_admin and not store.list_accounts():
         store.save_account(info, token)  # first run: lets Settings find this account's servers
         poller.users_synced_at = 0
+        poller.kick()
     user = directory.get_user(info["id"])
     if user and user.get("disabled"):
         raise HTTPException(403, "Your access to this dashboard has been turned off.")
@@ -641,7 +644,7 @@ async def put_billing(body: StripeKeyIn):
         raise HTTPException(422, f"Stripe refused the key: {check['customers']}")
     store.set_setting("stripe_key", key)
     poller.billing_synced_at = 0  # sync right away
-    poller._wake.set()
+    poller.kick()
     return {"ok": True, "missing": missing}
 
 
