@@ -202,21 +202,24 @@ design system). The dashboard adds its own patterns:
   signed-in Plex user (hidden for an admin with no subscription, and when
   Stripe is not connected). Admin sees it in the history drawer; the people
   picker flags Past due, Unpaid, Canceled.
-- Streams starting and stopping use "Drop in, fall away" with the Live now bar
-  (Glenn's pick from a second round of six; it replaced Lime pulse).
+- Streams starting and stopping use "Clock sweep" with the Live now bar
+  (Glenn's pick; it replaced "Drop in, fall away", which had replaced Lime pulse).
   `trackStreams`, `withEnded`, `pulseMarks`, `glideFrom` in `index.html`, styles
-  in `people.css`: a new stream's card drops into its slot with a small bounce
-  (`.is-dropping`, 560 ms); an ended one stays in its old place, tips over and
-  falls out (`.is-falling`, 520 ms), then the cards around it glide to their new
-  places (FLIP, 420 ms, only right after a change). The lime Live now bar shows
-  "<user> started <title> on <server>" or "<user> stopped <title> after N min"
-  (several at once: "2 streams started, 1 stream stopped") for 6 s, with a circle
-  for started and a square for stopped, then goes back to the newest streams.
-  Cards, carousel and phone rows (not the table). Changes are also announced in
-  a polite live region. Reduced motion: no movement, ended cards just dim.
-  It only plays for streams that start or stop while the page is open (nothing on
-  first load). A drop or fall in progress continues by time across redraws.
-  Preview: open the page with `?demo=pulse` to treat every current stream as new.
+  in `people.css` (`.sd-sweep`, a conic-gradient ring animated through the
+  registered `--sw-a` angle): a new stream's card fades in while a lime border
+  sweeps once around it like a clock hand (760 ms), holds, then fades (`.is-new`);
+  an ended card stays in its old place while a grey border unwinds the other way
+  and the poster goes grey (640 ms), then it fades out (`.is-ending`) and the cards
+  around it glide to their new places (FLIP, 420 ms, only right after a change).
+  The lime Live now bar shows "<user> started <title> on <server>" or "<user>
+  stopped <title> after N min" (several at once: "2 streams started, 1 stream
+  stopped") for 6 s, with a circle for started and a square for stopped, then
+  goes back to the newest streams. Cards, carousel and phone rows (not the
+  table). Changes are also announced in a polite live region. Reduced motion: no
+  sweep, ended cards just dim. It only plays for streams that start or stop while
+  the page is open (nothing on first load). A sweep in progress continues by time
+  across redraws (negative `--sw-d`). Preview: open the page with `?demo=pulse` to
+  treat every current stream as new.
 - The Servers online summary card was removed at Glenn's request. Transcoding,
   Buffering and Paused are a row of pills (`.sd-pills`, Glenn's pick "C. Pill
   row"): count, label, detail tag and a black arrow. A pill filters the stream

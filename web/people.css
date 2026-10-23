@@ -289,15 +289,27 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 /* ---------- lime pulse: streams starting and stopping ---------- */
 .sd-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .sd-scard { position: relative; }
-.sd-flip.is-dropping, .sd-row.is-dropping { animation: sd-drop 560ms cubic-bezier(0.3, 1.5, 0.5, 1) var(--drop-delay, 0ms) both; }
-.sd-flip.is-falling { pointer-events: none; animation: sd-fall 520ms cubic-bezier(0.4, 0, 1, 1) var(--fall-delay, 0ms) both; }
-.sd-row.is-falling { pointer-events: none; animation: sd-fall-row 520ms cubic-bezier(0.4, 0, 1, 1) var(--fall-delay, 0ms) both; }
-.sd-row.is-falling .sd-row__thumb { filter: grayscale(1) brightness(0.6); }
+.sd-row { position: relative; }
+/* Streams starting and stopping, "Clock sweep" (index.html, pulseMarks). --sw-d is negative for a sweep
+   already under way, so a redraw picks it up where it was. */
+@property --sw-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.sd-sweep { position: absolute; inset: 0; z-index: 1; box-sizing: border-box; padding: 3px; border-radius: inherit; pointer-events: none;
+  background: conic-gradient(var(--sw-c, var(--lime)) var(--sw-a), transparent 0);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; }
+.sd-sweep--in { animation: sd-sweep 760ms cubic-bezier(0.4, 0, 0.2, 1) var(--sw-d, 0ms) both, sd-sweep-off 400ms ease calc(var(--sw-d, 0ms) + 1060ms) both; }
+.sd-sweep--out { --sw-c: #a7a7ad; animation: sd-unsweep 640ms cubic-bezier(0.4, 0, 0.2, 1) var(--sw-d, 0ms) both; }
+.sd-flip.is-new, .sd-row.is-new { animation: sd-fade-in 260ms ease-out var(--sw-d, 0ms) both; }
+.sd-flip.is-ending, .sd-row.is-ending { pointer-events: none; animation: sd-fade-out 280ms cubic-bezier(0.4, 0, 1, 1) calc(var(--sw-d, 0ms) + 640ms) both; }
+.sd-flip.is-ending .sd-flip__inner > .sd-face:first-child, .sd-row.is-ending .sd-row__thumb { animation: sd-greyout 640ms ease var(--sw-d, 0ms) both; }
+@keyframes sd-sweep { from { --sw-a: 0deg; } to { --sw-a: 360deg; } }
+@keyframes sd-sweep-off { from { opacity: 1; } to { opacity: 0; } }
+@keyframes sd-unsweep { from { --sw-a: 360deg; } to { --sw-a: 0deg; } }
+@keyframes sd-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes sd-fade-out { from { opacity: 1; } to { opacity: 0; } }
+@keyframes sd-greyout { from { filter: none; } to { filter: grayscale(1); } }  /* no darkening: the page-colored corner cut must stay page-colored */
 .sd-row__ended { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--surface-page); color: var(--ink-muted); font-size: 12px; font-weight: 600; }
 .sd-row__ended::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: currentColor; }
-@keyframes sd-drop { 0% { opacity: 0; transform: translateY(-60px); } 1% { opacity: 1; transform: translateY(-60px); } 100% { opacity: 1; transform: none; } }
-@keyframes sd-fall { 0% { opacity: 1; transform: none; } 18% { opacity: 1; transform: translateY(-8px) rotate(-2deg); } 100% { opacity: 0; transform: translateY(160px) rotate(8deg); } }
-@keyframes sd-fall-row { 0% { opacity: 1; transform: none; } 18% { opacity: 1; transform: translateY(-4px); } 100% { opacity: 0; transform: translateY(28px) rotate(1.5deg); } }
 /* The Live now bar names who started or stopped what: a circle for started, a square for stopped. */
 .sd-pill-lime.is-msg { overflow: hidden; }
 .sd-pill-lime.is-flash { animation: sd-lane-flash 600ms ease-out; }
@@ -311,6 +323,8 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 @keyframes sd-msg-in { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: none; } }
 @keyframes sd-lane-flash { from { filter: brightness(1.2); } to { filter: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .sd-flip.is-dropping, .sd-row.is-dropping, .sd-livemsg, .sd-pill-lime.is-flash { animation: none; }
-  .sd-flip.is-falling, .sd-row.is-falling { animation: none; opacity: 0.4; }
+  .sd-flip.is-new, .sd-row.is-new, .sd-livemsg, .sd-pill-lime.is-flash { animation: none; }
+  .sd-sweep { display: none; }
+  .sd-flip.is-ending, .sd-row.is-ending { animation: none; opacity: 0.4; }
+  .sd-flip.is-ending .sd-flip__inner > .sd-face:first-child, .sd-row.is-ending .sd-row__thumb { animation: none; filter: grayscale(1); }
 }

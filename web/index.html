@@ -1478,10 +1478,11 @@
     if (flipped.has(id)) flipped.delete(id); else flipped.add(id);
     if (inner) { inner.classList.toggle('is-flipped', flipped.has(id)); inner.setAttribute('aria-pressed', flipped.has(id) ? 'true' : 'false'); }
   }
-  /* Streams starting and stopping, "Drop in, fall away" with the Live now bar (Glenn's pick): a new card
-     drops into its slot with a small bounce; an ended card stays in its old place, tips over and falls out,
-     then the cards around it glide over to close the gap. The lime Live now bar says who started or stopped what. */
-  const DROP_MS = 560, FALL_MS = 520, GLIDE_MS = 420, MSG_MS = 6000;  // match people.css
+  /* Streams starting and stopping, "Clock sweep" with the Live now bar (Glenn's pick): a lime border sweeps once
+     around a new card like a clock hand, then fades; an ended card stays in its old place while a grey border
+     unwinds the other way and the poster goes grey, then it fades out and the cards around it glide over to
+     close the gap. The lime Live now bar says who started or stopped what. */
+  const NEW_MS = 1460, END_MS = 920, GLIDE_MS = 420, MSG_MS = 6000;  // match people.css (sweep 760 + hold 300 + fade 400; unwind 640 + fade 280)
   // ids in the last streams load; null until the first load. ?demo=pulse treats the first load as new (preview).
   let seenIds = /[?&]demo=pulse(&|$)/.test(location.search) ? new Set() : null;
   let lastData = null;
@@ -1521,46 +1522,50 @@
         document.getElementById('stream-announcer').textContent = events.map((e) => e.kind === 'start'
           ? e.r.user + ' started ' + e.r.title + ' on ' + e.r.server : e.r.user + ' stopped ' + e.r.title).join('. ') + '.';
         liveMsg = Object.assign(liveMessage(events), { until: now + MSG_MS, shown: false });
-        glideUntil = now + DROP_MS + FALL_MS + GLIDE_MS + 1000;
-        setTimeout(renderStreams, FALL_MS + 30);   // take the fallen cards out; the rest glide over
+        glideUntil = now + END_MS + GLIDE_MS + 1000;
+        setTimeout(renderStreams, END_MS + 30);    // take the ended cards out; the rest glide over
         setTimeout(renderNewest, MSG_MS + 30);     // back to the newest streams
       }
     }
     seenIds = ids;
     lastRows = new Map(d.data.map((r) => [r.id, r]));
   }
-  // Rows to draw: the visible ones plus ones that just ended, back in their old places while they fall.
+  // Rows to draw: the visible ones plus ones that just ended, back in their old places while they go.
   function withEnded(rows) {
     const now = Date.now();
     const out = rows.slice();
     ended.forEach((e, id) => {
-      if (now - e.at > FALL_MS) { ended.delete(id); return; }
+      if (now - e.at > END_MS) { ended.delete(id); return; }
       const at = Math.max(0, Math.min(out.length, lastOrder.indexOf(id) < 0 ? out.length : lastOrder.indexOf(id)));
       out.splice(at, 0, Object.assign({}, e.row, { _ended: e.at }));
     });
     return out;
   }
-  // The page redraws often (every poll, resize, flip), so a drop or fall in progress picks up where it was.
-  function pulseMarks(node, r) {
+  // The page redraws often (every poll, resize, flip), so a sweep in progress picks up where it was.
+  // node: the card (or phone row); front: the card face the border goes around.
+  function pulseMarks(node, r, front) {
     node.dataset.id = r.id;
+    const sweep = (cls) => { const s = el('span', 'sd-sweep ' + cls); s.setAttribute('aria-hidden', 'true'); (front || node).appendChild(s); };
     if (r._ended) {
-      node.classList.add('is-falling');
+      node.classList.add('is-ending');
       node.inert = true;
-      node.style.setProperty('--fall-delay', -(Date.now() - r._ended) + 'ms');
+      node.style.setProperty('--sw-d', -(Date.now() - r._ended) + 'ms');
+      sweep('sd-sweep--out');
       return;
     }
     const t = firstSeen.get(r.id);
     const age = t ? Date.now() - t : Infinity;
-    if (age < DROP_MS) {
-      node.classList.add('is-dropping');
-      node.style.setProperty('--drop-delay', -age + 'ms');
+    if (age < NEW_MS) {
+      node.classList.add('is-new');
+      node.style.setProperty('--sw-d', -age + 'ms');
+      sweep('sd-sweep--in');
     }
   }
   // Cards that stay slide from where they were to where they are now (only right after a start or stop).
   function streamRects() {
     const out = new Map();
     root.querySelectorAll('#cards .sd-flip[data-id], #carousel .sd-flip[data-id], #rows .sd-row[data-id]').forEach((n) => {
-      if (!n.classList.contains('is-falling')) out.set(n.dataset.id, n.getBoundingClientRect());
+      if (!n.classList.contains('is-ending')) out.set(n.dataset.id, n.getBoundingClientRect());
     });
     return out;
   }
@@ -1568,8 +1573,8 @@
     const z = Number(getComputedStyle(root).getPropertyValue('--card-scale')) || 1;
     streamRects().forEach((b, id) => {
       const a = before.get(id);
-      const n = root.querySelector('[data-id="' + CSS.escape(id) + '"]:not(.is-falling)');
-      if (!a || !n || n.classList.contains('is-dropping')) return;
+      const n = root.querySelector('[data-id="' + CSS.escape(id) + '"]:not(.is-ending)');
+      if (!a || !n) return;
       const k = n.classList.contains('sd-row') ? 1 : z;
       const dx = (a.left - b.left) / k, dy = (a.top - b.top) / k;
       if (Math.abs(dx) + Math.abs(dy) < 1) return;
@@ -1588,7 +1593,7 @@
     const front = streamFront(r);
     inner.append(front, streamBack(r));
     wrap.appendChild(inner);
-    pulseMarks(wrap, r);
+    pulseMarks(wrap, r, front);
     return wrap;
   }
   function idleState() {
