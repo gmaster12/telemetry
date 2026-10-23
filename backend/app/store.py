@@ -263,6 +263,30 @@ class Store:
         cur = self.db.execute(q + " GROUP BY ts ORDER BY ts", args)
         return [{"minute": time.strftime("%Y-%m-%dT%H:%M:00Z", time.gmtime(r["ts"])), "mbps": round(r["v"] or 0, 1)} for r in cur]
 
+    def bandwidth_daily(self, servers: list[str] | None = None, tz_offset_min: int = 0, days: int = 7) -> list[dict]:
+        """Peak total bandwidth (all servers, per minute) for each of the last `days` days in the
+        viewer's time zone, today included, oldest first. Days with no history have no peak."""
+        off = tz_offset_min * 60
+        today = (int(time.time()) + off) // 86400
+        first = today - (days - 1)
+        q = "SELECT ts, SUM(bandwidth_mbps) AS v FROM samples WHERE ts >= ?"
+        args: list = [first * 86400 - off]
+        if servers:
+            q += f" AND server IN ({','.join('?' * len(servers))})"
+            args += servers
+        best: dict[int, tuple[float, int]] = {}
+        for r in self.db.execute(q + " GROUP BY ts", args):
+            d, v = (r["ts"] + off) // 86400, float(r["v"] or 0)
+            if d not in best or v > best[d][0]:
+                best[d] = (v, r["ts"])
+        out = []
+        for d in range(first, today + 1):
+            v, ts = best.get(d, (None, None))
+            out.append({"day": time.strftime("%Y-%m-%d", time.gmtime(d * 86400)), "today": d == today,
+                        "peak_mbps": round(v, 1) if v is not None else None,
+                        "peak_at": time.strftime("%Y-%m-%dT%H:%M:00Z", time.gmtime(ts)) if ts is not None else None})
+        return out
+
     def viewing_week(self, tz_offset_min: int = 0) -> list[dict]:
         """Peak concurrent streams per weekday and hour over the last 7 days (in the viewer's time zone)."""
         since = int(time.time()) - 7 * 86400

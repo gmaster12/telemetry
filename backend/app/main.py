@@ -144,6 +144,27 @@ def api_bandwidth(request: Request):
     return wrap(store.bandwidth_last_hour([s.name for s in poller.cfg.servers if s.enabled]), False)
 
 
+_daily_cache: dict[tuple, tuple[float, list]] = {}
+
+
+@app.get("/api/bandwidth/daily")
+def api_bandwidth_daily(request: Request, tz: int = 0):
+    """Peak bandwidth per day, last 7 days. tz: viewer's offset from UTC in minutes.
+    It reads up to a week of per-minute history, so the answer is kept for a minute."""
+    need(request, "bandwidth")
+    tz = max(-840, min(840, tz))
+    if poller.cfg.use_sample:
+        return wrap(sample.bandwidth_daily(tz), True)
+    names = tuple(s.name for s in poller.cfg.servers if s.enabled)
+    key, now = (tz, names), time.time()
+    hit = _daily_cache.get(key)
+    if not hit or now - hit[0] > 60:
+        hit = (now, store.bandwidth_daily(list(names), tz))
+        _daily_cache.clear()
+        _daily_cache[key] = hit
+    return wrap(hit[1], False)
+
+
 @app.get("/api/viewing")
 def api_viewing(request: Request, tz: int = 0):
     """tz: viewer's offset from UTC in minutes (JavaScript's -getTimezoneOffset())."""

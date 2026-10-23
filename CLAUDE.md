@@ -134,6 +134,7 @@ small `dash` API. `web/dash-shim.js` implements that API against the backend:
 | `servers` | `GET /api/servers` | one per enabled server: status, cpu_pct, cpu_known, net_out_mbps, max_streams, hot_for_min |
 | `bandwidth` | `GET /api/bandwidth` | `{minute, mbps}` for the last hour |
 | `viewing_hours` | `GET /api/viewing?tz=` | `{day, hour, streams}` peak concurrency, last 7 days |
+| `bandwidth_daily` | `GET /api/bandwidth/daily?tz=` | `{day, today, peak_mbps, peak_at}` peak total bandwidth per local day, last 7 days (cached 60 s) |
 
 Each response is `{"rows": [...], "sample": bool}`. The page derives
 `kpis`, `server_load` and `viewing_summary` with `dash.calc` in the browser.
@@ -217,6 +218,11 @@ design system). The dashboard adds its own patterns:
   list and shows pressed while its filter is on; pressing it again clears the
   filter. On phones the pills are three equal tiles (count over label);
   Buffering turns amber with a warning shape when anything is buffering.
+- Bandwidth card: the last-hour chart, then "Peak by day, last 7 days"
+  (`renderDaily`, `.sd-bwdays`; Glenn's pick "A" of four): one bar per day with
+  its peak Mbps and the time it happened, the busiest day in solid ink and named
+  in "Highest: ...", today in lime with a dashed outline marked "so far". On
+  phones the times are hidden.
 - Status is always a word plus a shape, never color alone. No emoji.
 
 ## Running tests

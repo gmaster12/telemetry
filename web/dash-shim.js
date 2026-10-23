@@ -8,9 +8,10 @@
     streams: '/api/streams',
     servers: '/api/servers',
     bandwidth: '/api/bandwidth',
-    viewing_hours: '/api/viewing?tz=' + tz
+    viewing_hours: '/api/viewing?tz=' + tz,
+    bandwidth_daily: '/api/bandwidth/daily?tz=' + tz
   };
-  var SECTION = { streams: 'streams', servers: 'servers', bandwidth: 'bandwidth', viewing_hours: 'viewing' };
+  var SECTION = { streams: 'streams', servers: 'servers', bandwidth: 'bandwidth', viewing_hours: 'viewing', bandwidth_daily: 'bandwidth' };
   var REFRESH_MS = 10000;
   var me = null;
   var loaded = false;
