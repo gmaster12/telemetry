@@ -78,6 +78,7 @@
   function hideSplash() {
     if (!splash || splash.hidden) return;
     splash.classList.add('is-done');
+    document.dispatchEvent(new CustomEvent('gs:ready'));  // index.html plays the page-load build
     setTimeout(function () { splash.hidden = true; }, 350);
   }
   setTimeout(hideSplash, 8000);

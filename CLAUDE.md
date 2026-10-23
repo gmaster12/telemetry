@@ -223,6 +223,13 @@ design system). The dashboard adds its own patterns:
   its peak Mbps and the time it happened, the busiest day in solid ink and named
   in "Highest: ...", today in lime with a dashed outline marked "so far". On
   phones the times are hidden.
+- Page-load build, "Build and count" (Glenn's pick of five; `playIntro` in
+  `index.html`, started by the `gs:ready` event `people.js` sends as the splash
+  fades): navigation and header slide in, the pills drop one by one, the cards
+  rise in order, the big numbers and pill counts count up from zero, and the
+  bandwidth line draws (`.sd-bwline`, `.gs-intro-draw`). Plays once per page
+  load, never on the 10-second refreshes; skipped for reduced motion. The
+  classes are removed when each animation ends.
 - Status is always a word plus a shape, never color alone. No emoji.
 
 ## Running tests

@@ -109,6 +109,17 @@
   .sd-pill[aria-pressed="true"] .sd-pill__tag b { color: var(--on-ink); }
   .sd-pill[aria-pressed="true"] .sd-pill__go { background: var(--volt); color: var(--on-fill); }
   @media (prefers-reduced-motion: reduce) { .sd-pill { transition: none; } .sd-pill:active { transform: none; } }
+  /* Page-load build ("Build and count"): playIntro() gives each block a kind and a delay once, after the splash. */
+  .gs-in { animation: 420ms cubic-bezier(0.2, 0.7, 0.2, 1) var(--intro-d, 0ms) both; }
+  .gs-in--left { animation-name: gs-in-left; }
+  .gs-in--rise { animation-name: gs-in-rise; }
+  .gs-in--drop { animation-name: gs-in-drop; animation-duration: 520ms; animation-timing-function: cubic-bezier(0.3, 1.45, 0.5, 1); }
+  .gs-intro-draw .sd-bwline { stroke-dasharray: 1; animation: gs-draw 900ms 950ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+  @keyframes gs-in-left { from { opacity: 0; transform: translateX(-22px); } to { opacity: 1; transform: none; } }
+  @keyframes gs-in-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  @keyframes gs-in-drop { from { opacity: 0; transform: translateY(-26px); } to { opacity: 1; transform: none; } }
+  @keyframes gs-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+  @media (prefers-reduced-motion: reduce) { .gs-in, .gs-intro-draw .sd-bwline { animation: none; } }
   .sd-tag { display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: var(--surface-page); color: var(--ink-muted); font-size: 13px; font-weight: 500; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .sd-tag b { margin-right: 4px; font-weight: 600; color: var(--ink); }
 
@@ -1123,7 +1134,7 @@
       xt.append('text').attr('x', x(t)).attr('y', H - 6).attr('text-anchor', i === 0 ? 'start' : i === all.length - 1 ? 'end' : 'middle').text(clock(t));
     });
     svg.append('path').datum(rows).attr('d', d3.area().x((r) => x(r.t)).y0(y(0)).y1((r) => y(r.v))).attr('fill', 'url(#sd-area)');
-    svg.append('path').datum(rows).attr('d', d3.line().x((r) => x(r.t)).y((r) => y(r.v))).attr('fill', 'none').attr('stroke', 'var(--ink)').attr('stroke-width', 2).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round');
+    svg.append('path').datum(rows).attr('class', 'sd-bwline').attr('pathLength', 1).attr('d', d3.line().x((r) => x(r.t)).y((r) => y(r.v))).attr('fill', 'none').attr('stroke', 'var(--ink)').attr('stroke-width', 2).attr('stroke-linecap', 'round').attr('stroke-linejoin', 'round');
     const last = rows[rows.length - 1];
     svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last.v)).attr('r', 12).attr('fill', 'var(--volt)').attr('fill-opacity', 0.55);
     svg.append('circle').attr('cx', x(last.t)).attr('cy', y(last.v)).attr('r', 5).attr('fill', 'var(--volt)').attr('stroke', 'var(--ink)').attr('stroke-width', 2);
@@ -1972,6 +1983,49 @@
   lightInput.addEventListener('input', () => applyLight(Number(lightInput.value)));
   lightInput.addEventListener('change', () => dash.setParams({ artlight: Number(lightInput.value) }));
   document.getElementById('card-size-reset').addEventListener('click', () => { applySize(100); applyLight(ART_DEFAULT); applyStyle('classic'); dash.setParams({ cardsize: 100, artlight: ART_DEFAULT, cardstyle: 'classic' }); });
+
+  // Page-load build ("Build and count", Glenn's pick of five): plays once, as the splash fades.
+  // Navigation, header, pills, then cards come in; the big numbers count up and the bandwidth line draws.
+  let introPlayed = false;
+  function playIntro() {
+    if (introPlayed) return;
+    introPlayed = true;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const steps = [];
+    const add = (sel, kind, delay, gap) => root.querySelectorAll(sel).forEach((el, i) => {
+      if (!el.hidden && el.offsetParent !== null) steps.push([el, kind, delay + i * (gap || 0)]);
+    });
+    add('.sd-nav', 'left', 0); add('.sd-top', 'rise', 120); add('.sd-lockup', 'left', 180); add('.sd-head', 'left', 220);
+    add('#sub-card', 'rise', 260); add('.sd-alertbar', 'drop', 320); add('.sd-pills > .sd-pill', 'drop', 420, 70);
+    add('.sd-main > .sd-card', 'rise', 640, 90); add('.sd-insights > .sd-card', 'rise', 820, 90);
+    add('#streams-card', 'rise', 1000); add('#people-card', 'rise', 1080); add('#alerts', 'rise', 1140); add('.sd-tabbar', 'rise', 300);
+    steps.forEach(([el, kind, d]) => {
+      el.style.setProperty('--intro-d', d + 'ms');
+      el.classList.add('gs-in', 'gs-in--' + kind);
+      el.addEventListener('animationend', function done(e) {
+        if (e.target !== el) return;
+        el.classList.remove('gs-in', 'gs-in--' + kind); el.style.removeProperty('--intro-d');
+        el.removeEventListener('animationend', done);
+      });
+    });
+    root.classList.add('gs-intro-draw');
+    setTimeout(() => root.classList.remove('gs-intro-draw'), 2200);
+    // Count the big numbers and the pill counts up from zero, then put the live values back.
+    const nums = Array.from(root.querySelectorAll('.sd-big, .sd-pill__num')).map((el) => {
+      const to = Number(String(el.textContent).replace(/,/g, ''));
+      return Number.isFinite(to) ? { el, to, dp: el.dataset.fmt === '1' ? 1 : 0 } : null;
+    }).filter(Boolean);
+    const start = performance.now() + 700, dur = 900;
+    nums.forEach((n) => { n.el.textContent = n.dp ? n1(0) : '0'; });
+    const step = (t) => {
+      const x = Math.max(0, Math.min(1, (t - start) / dur));
+      const e = 1 - Math.pow(1 - x, 3);
+      nums.forEach((n) => { n.el.textContent = n.dp ? n1(n.to * e) : n0(Math.round(n.to * e)); });
+      if (x < 1) requestAnimationFrame(step); else renderKpis();
+    };
+    requestAnimationFrame(step);
+  }
+  document.addEventListener('gs:ready', playIntro, { once: true });
 
   function renderAll() {
     const tabs = okTabs();
