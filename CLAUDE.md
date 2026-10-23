@@ -202,16 +202,21 @@ design system). The dashboard adds its own patterns:
   signed-in Plex user (hidden for an admin with no subscription, and when
   Stripe is not connected). Admin sees it in the history drawer; the people
   picker flags Past due, Unpaid, Canceled.
-- Streams starting and stopping use "Lime pulse" (Glenn's pick from six options;
-  `trackStreams`, `withEnded`, `pulseMarks` in `index.html`, styles in
-  `people.css`): a new stream fades in with a lime ring that pulses twice and a
-  "New" tag for 6 s; an ended one stays 1.7 s dimmed with an "Ended" stamp in its
-  old place, then fades out. Cards, carousel and phone rows (not the table).
-  Changes are announced in a polite live region. Reduced motion: no movement.
+- Streams starting and stopping use "Drop in, fall away" with the Live now bar
+  (Glenn's pick from a second round of six; it replaced Lime pulse).
+  `trackStreams`, `withEnded`, `pulseMarks`, `glideFrom` in `index.html`, styles
+  in `people.css`: a new stream's card drops into its slot with a small bounce
+  (`.is-dropping`, 560 ms); an ended one stays in its old place, tips over and
+  falls out (`.is-falling`, 520 ms), then the cards around it glide to their new
+  places (FLIP, 420 ms, only right after a change). The lime Live now bar shows
+  "<user> started <title> on <server>" or "<user> stopped <title> after N min"
+  (several at once: "2 streams started, 1 stream stopped") for 6 s, with a circle
+  for started and a square for stopped, then goes back to the newest streams.
+  Cards, carousel and phone rows (not the table). Changes are also announced in
+  a polite live region. Reduced motion: no movement, ended cards just dim.
   It only plays for streams that start or stop while the page is open (nothing on
-  first load). The ring and tag are timed from when the stream appeared, so page
-  redraws do not cut them short. Preview: open the page with `?demo=pulse` to
-  treat every current stream as new.
+  first load). A drop or fall in progress continues by time across redraws.
+  Preview: open the page with `?demo=pulse` to treat every current stream as new.
 - The Servers online summary card was removed at Glenn's request. Transcoding,
   Buffering and Paused are a row of pills (`.sd-pills`, Glenn's pick "C. Pill
   row"): count, label, detail tag and a black arrow. A pill filters the stream

@@ -307,7 +307,7 @@
   .sd-scard--art { --s: var(--art-shade, 1); background: linear-gradient(180deg, rgba(8, 8, 10, calc(0.5 * var(--s))) 0%, rgba(8, 8, 10, calc(0.66 * var(--s))) 45%, rgba(8, 8, 10, max(0.6, calc(0.9 * var(--s)))) 100%), var(--art) center 30% / cover no-repeat, #1a1a1e; color: #f6f6f4;
     text-shadow: 0 1px 2px rgba(0, 0, 0, calc(0.9 - 0.9 * var(--s))), 0 0 14px rgba(0, 0, 0, calc(0.6 - 0.6 * var(--s))); }
   .sd-scard--art .sd-scard__title, .sd-scard--art .sd-micro, .sd-scard--art .sd-progress { color: #d4d4d6; }
-  .sd-scard--art .gs-badge:not(.gs-badge--neutral), .sd-scard--art .sd-newchip { text-shadow: none; }
+  .sd-scard--art .gs-badge:not(.gs-badge--neutral) { text-shadow: none; }
   .sd-scard--art .sd-tag { background: linear-gradient(rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.16)), rgba(10, 10, 12, calc(0.6 - 0.6 * var(--s))); color: #f6f6f4; backdrop-filter: blur(6px); }
   .sd-scard--art .sd-prog { background: rgba(255, 255, 255, 0.22); }
   .sd-scard--art .sd-prog i { background: var(--volt); }
@@ -467,11 +467,6 @@
   .sd-scard--tile .sd-scard__title { font-size: 12px; line-height: 16px; color: #e4e4e4; }
   .sd-scard--tile .sd-prog { display: block; width: 100%; height: 4px; margin: 0; background: rgba(255, 255, 255, 0.25); }
   .sd-scard--tile .sd-scard__name, .sd-scard--tile .sd-scard__title, .sd-scard--tile .sd-scard__meta { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
-  /* "New" tag position per style (people.css places it for Classic) */
-  .sd-scard--side .sd-newchip { top: 22px; left: 22px; }
-  .sd-scard--top .sd-newchip { top: 26px; left: 72px; }
-  .sd-scard--banner .sd-newchip { top: 26px; left: auto; right: 92px; }
-  .sd-scard--tile .sd-newchip { top: 40px; left: 12px; height: 20px; font-size: 11px; }
   /* Settings: card style picker */
   .sd-cstyle { margin: 0; border: 0; }
   .sd-cstyle legend { float: left; width: 100%; margin-bottom: 12px; padding: 0; font-size: 15px; font-weight: 600; }
@@ -1066,6 +1061,20 @@
     const d = dash.data('streams');
     if (failed(d)) { box.appendChild(el('span', 'sd-pill-lime__label', 'Failed to load')); return; }
     if (d.status !== 'ok') return;
+    trackStreams();
+    // Right after a stream starts or stops, the bar says so for a few seconds, then shows the newest streams again.
+    const showMsg = liveMsg && Date.now() < liveMsg.until;
+    box.classList.toggle('is-msg', !!showMsg);
+    if (showMsg) {
+      const m = el('div', 'sd-livemsg sd-livemsg--' + liveMsg.kind + (liveMsg.shown ? ' is-old' : ''));
+      const shape = el('span', 'sd-livemsg__shape'); shape.setAttribute('aria-hidden', 'true');
+      const text = el('span', 'sd-livemsg__text');
+      liveMsg.parts.forEach((x) => text.append(typeof x === 'string' ? x : x.cloneNode(true)));
+      m.append(shape, text);
+      box.appendChild(m);
+      if (!liveMsg.shown) { liveMsg.shown = true; box.classList.remove('is-flash'); void box.offsetWidth; box.classList.add('is-flash'); }
+      return;
+    }
     sortedStreams().slice(0, 3).forEach((r) => {
       const item = el('div', 'sd-newest');
       item.appendChild(avatar(r.user, 'sm'));
@@ -1469,74 +1478,103 @@
     if (flipped.has(id)) flipped.delete(id); else flipped.add(id);
     if (inner) { inner.classList.toggle('is-flipped', flipped.has(id)); inner.setAttribute('aria-pressed', flipped.has(id) ? 'true' : 'false'); }
   }
-  /* Lime pulse: a stream that just started gets a lime ring (twice) and a "New" tag for a few
-     seconds; one that just ended stays a moment, greyed with an "Ended" stamp, then leaves. */
-  const NEW_MS = 6000, ENDED_MS = 1700, PULSE_DELAY = 250, PULSE_MS = 2050; // ring: 0.25 s wait + 1.8 s (people.css)
+  /* Streams starting and stopping, "Drop in, fall away" with the Live now bar (Glenn's pick): a new card
+     drops into its slot with a small bounce; an ended card stays in its old place, tips over and falls out,
+     then the cards around it glide over to close the gap. The lime Live now bar says who started or stopped what. */
+  const DROP_MS = 560, FALL_MS = 520, GLIDE_MS = 420, MSG_MS = 6000;  // match people.css
   // ids in the last streams load; null until the first load. ?demo=pulse treats the first load as new (preview).
   let seenIds = /[?&]demo=pulse(&|$)/.test(location.search) ? new Set() : null;
   let lastData = null;
   let lastRows = new Map();
   let lastOrder = [];              // ids in the order last drawn, to put an ended card back where it was
   const firstSeen = new Map();     // id -> when it appeared (only after the first load)
-  const pulsed = new Set();        // ids whose ring already played
   const ended = new Map();         // id -> { row, at }
+  let liveMsg = null;              // what the Live now bar says: { kind, parts, until, shown }
+  let glideUntil = 0;              // cards glide to their new places until then
+  const still = () => window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function liveMessage(events) {
+    const starts = events.filter((e) => e.kind === 'start'), stops = events.filter((e) => e.kind === 'stop');
+    if (events.length === 1) {
+      const { kind, r } = events[0];
+      return { kind, parts: kind === 'start'
+        ? [el('b', null, r.user), ' started ' + r.title + ' on ' + r.server]
+        : [el('b', null, r.user), ' stopped ' + r.title + (r.elapsed_min ? ' after ' + n0(r.elapsed_min) + ' min' : '')] };
+    }
+    const bits = [];
+    if (starts.length) bits.push(starts.length + (starts.length === 1 ? ' stream started' : ' streams started'));
+    if (stops.length) bits.push(stops.length + (stops.length === 1 ? ' stream stopped' : ' streams stopped'));
+    return { kind: !stops.length ? 'start' : !starts.length ? 'stop' : 'mixed', parts: [el('b', null, bits.join(', '))] };
+  }
   function trackStreams() {
     const d = dash.data('streams');
     if (d.status !== 'ok' || d.data === lastData) return;
     lastData = d.data;
     const now = Date.now();
     const ids = new Set(d.data.map((r) => r.id));
-    const said = [];
+    const events = [];
     if (seenIds !== null) {
-      d.data.forEach((r) => { if (!seenIds.has(r.id)) { firstSeen.set(r.id, now); ended.delete(r.id); said.push(r.user + ' started ' + r.title + ' on ' + r.server); } });
+      d.data.forEach((r) => { if (!seenIds.has(r.id)) { firstSeen.set(r.id, now); ended.delete(r.id); events.push({ kind: 'start', r }); } });
       seenIds.forEach((id) => {
-        if (!ids.has(id) && lastRows.has(id)) { const r = lastRows.get(id); ended.set(id, { row: r, at: now }); said.push(r.user + ' stopped ' + r.title); }
+        if (!ids.has(id) && lastRows.has(id)) { const r = lastRows.get(id); ended.set(id, { row: r, at: now }); events.push({ kind: 'stop', r }); }
       });
-      if (said.length) {
-        document.getElementById('stream-announcer').textContent = said.join('. ') + '.';
-        setTimeout(renderStreams, ENDED_MS + 50);   // let ended cards go
-        setTimeout(renderStreams, NEW_MS + 50);     // drop the "New" tags
+      if (events.length) {
+        document.getElementById('stream-announcer').textContent = events.map((e) => e.kind === 'start'
+          ? e.r.user + ' started ' + e.r.title + ' on ' + e.r.server : e.r.user + ' stopped ' + e.r.title).join('. ') + '.';
+        liveMsg = Object.assign(liveMessage(events), { until: now + MSG_MS, shown: false });
+        glideUntil = now + DROP_MS + FALL_MS + GLIDE_MS + 1000;
+        setTimeout(renderStreams, FALL_MS + 30);   // take the fallen cards out; the rest glide over
+        setTimeout(renderNewest, MSG_MS + 30);     // back to the newest streams
       }
     }
     seenIds = ids;
     lastRows = new Map(d.data.map((r) => [r.id, r]));
   }
-  // Rows to draw: the visible ones plus recently ended ones, back in their old places.
+  // Rows to draw: the visible ones plus ones that just ended, back in their old places while they fall.
   function withEnded(rows) {
     const now = Date.now();
     const out = rows.slice();
     ended.forEach((e, id) => {
-      if (now - e.at > ENDED_MS) { ended.delete(id); return; }
+      if (now - e.at > FALL_MS) { ended.delete(id); return; }
       const at = Math.max(0, Math.min(out.length, lastOrder.indexOf(id) < 0 ? out.length : lastOrder.indexOf(id)));
       out.splice(at, 0, Object.assign({}, e.row, { _ended: e.at }));
     });
     return out;
   }
-  function pulseMarks(node, r, front) {
+  // The page redraws often (every poll, resize, flip), so a drop or fall in progress picks up where it was.
+  function pulseMarks(node, r) {
+    node.dataset.id = r.id;
     if (r._ended) {
-      node.classList.add('is-ended');
+      node.classList.add('is-falling');
       node.inert = true;
-      const left = Math.max(0, ENDED_MS - (Date.now() - r._ended));
-      node.style.setProperty('--leave-delay', Math.max(0, left - 300) + 'ms');
-      const stamp = el('span', 'sd-endstamp'); stamp.appendChild(el('span', null, 'Ended'));
-      if (front) front.appendChild(el('span', 'sd-enddim'));
-      (front || node).appendChild(stamp);
+      node.style.setProperty('--fall-delay', -(Date.now() - r._ended) + 'ms');
       return;
     }
     const t = firstSeen.get(r.id);
     const age = t ? Date.now() - t : Infinity;
-    if (age > NEW_MS) return;
-    // The page redraws often (every poll, resize, flip), so the ring and chip pick up
-    // where they were by time instead of restarting or vanishing.
-    const chip = el('span', 'sd-newchip', 'New');
-    if (pulsed.has(r.id)) chip.style.animation = 'none';
-    (front || node).appendChild(chip);
-    if (!pulsed.has(r.id)) { pulsed.add(r.id); node.classList.add('is-new'); }
-    if (age < PULSE_MS) {
-      const ring = el('span', 'sd-pulse');
-      ring.style.animationDelay = (PULSE_DELAY - age) + 'ms';
-      (front || node).appendChild(ring);
+    if (age < DROP_MS) {
+      node.classList.add('is-dropping');
+      node.style.setProperty('--drop-delay', -age + 'ms');
     }
+  }
+  // Cards that stay slide from where they were to where they are now (only right after a start or stop).
+  function streamRects() {
+    const out = new Map();
+    root.querySelectorAll('#cards .sd-flip[data-id], #carousel .sd-flip[data-id], #rows .sd-row[data-id]').forEach((n) => {
+      if (!n.classList.contains('is-falling')) out.set(n.dataset.id, n.getBoundingClientRect());
+    });
+    return out;
+  }
+  function glideFrom(before) {
+    const z = Number(getComputedStyle(root).getPropertyValue('--card-scale')) || 1;
+    streamRects().forEach((b, id) => {
+      const a = before.get(id);
+      const n = root.querySelector('[data-id="' + CSS.escape(id) + '"]:not(.is-falling)');
+      if (!a || !n || n.classList.contains('is-dropping')) return;
+      const k = n.classList.contains('sd-row') ? 1 : z;
+      const dx = (a.left - b.left) / k, dy = (a.top - b.top) / k;
+      if (Math.abs(dx) + Math.abs(dy) < 1) return;
+      n.animate([{ transform: 'translate(' + dx + 'px, ' + dy + 'px)' }, { transform: 'none' }], { duration: GLIDE_MS, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
+    });
   }
   function streamCard(r) {
     const wrap = el('div', 'sd-flip');
@@ -1550,7 +1588,7 @@
     const front = streamFront(r);
     inner.append(front, streamBack(r));
     wrap.appendChild(inner);
-    pulseMarks(wrap, r, front);
+    pulseMarks(wrap, r);
     return wrap;
   }
   function idleState() {
@@ -1568,6 +1606,11 @@
     return box;
   }
   function renderStreams() {
+    const before = Date.now() < glideUntil && !still() ? streamRects() : null;
+    drawStreams();
+    if (before) glideFrom(before);
+  }
+  function drawStreams() {
     const d = dash.data('streams');
     const p = dash.params();
     if (isMobile() && view !== 'rows' && view !== 'carousel') view = 'rows';
@@ -1683,7 +1726,7 @@
     main.appendChild(bar);
     b.append(th, main, r._ended ? el('span', 'sd-row__ended', 'Ended') : badge(STATE_TONE[r.state] || 'neutral', r.state));
     if (!r._ended) b.addEventListener('click', () => { sheetId = sheetId === r.id ? null : r.id; renderStreams(); });
-    pulseMarks(b, r, null);
+    pulseMarks(b, r);
     return b;
   }
   function renderSheet() {

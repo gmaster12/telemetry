@@ -289,35 +289,28 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 /* ---------- lime pulse: streams starting and stopping ---------- */
 .sd-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .sd-scard { position: relative; }
-.sd-pulse { position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none; box-shadow: inset 0 0 0 3px var(--lime); opacity: 0;
-  animation: sd-pulse 1.8s ease-out 0.25s both; }
-.sd-newchip { position: absolute; top: 34px; left: 104px; z-index: 2; display: inline-flex; align-items: center; height: 24px; padding: 0 10px; border-radius: 999px;
-  background: var(--lime); color: var(--on-fill); font-size: 12px; font-weight: 700; animation: sd-pop 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) 0.12s both; }
-.sd-flip.is-new { animation: sd-fade-in 0.26s ease-out both; }
-.sd-enddim { position: absolute; inset: 0; z-index: 1; border-radius: inherit; pointer-events: none; background: rgba(10, 10, 14, 0.45);
-  -webkit-backdrop-filter: grayscale(1); backdrop-filter: grayscale(1); animation: sd-fade-in 0.4s ease both; }
-.sd-flip.is-ended { animation: sd-leave 0.28s cubic-bezier(0.4, 0, 1, 1) var(--leave-delay, 1.2s) forwards; }
-.sd-endstamp { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; pointer-events: none; }
-.sd-endstamp span { display: inline-flex; align-items: center; gap: 8px; padding: 8px 16px; border-radius: 999px; background: rgba(10, 10, 14, 0.78); color: #f6f6f4;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35); font-size: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-  transform: rotate(-6deg); animation: sd-stamp 0.32s cubic-bezier(0.3, 1.4, 0.5, 1) both; }
-.sd-endstamp span::before { content: ""; width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
-/* phone list rows */
-.sd-row { position: relative; }
-.sd-row .sd-newchip { top: 6px; left: auto; right: 10px; height: 20px; font-size: 11px; }
-.sd-row.is-new { animation: sd-fade-in 0.26s ease-out both; }
-.sd-row.is-ended { animation: sd-leave 0.28s cubic-bezier(0.4, 0, 1, 1) var(--leave-delay, 1.2s) forwards; }
-.sd-row.is-ended .sd-row__thumb { filter: grayscale(1) brightness(0.6); }
-.sd-row .sd-endstamp { display: none; }
+.sd-flip.is-dropping, .sd-row.is-dropping { animation: sd-drop 560ms cubic-bezier(0.3, 1.5, 0.5, 1) var(--drop-delay, 0ms) both; }
+.sd-flip.is-falling { pointer-events: none; animation: sd-fall 520ms cubic-bezier(0.4, 0, 1, 1) var(--fall-delay, 0ms) both; }
+.sd-row.is-falling { pointer-events: none; animation: sd-fall-row 520ms cubic-bezier(0.4, 0, 1, 1) var(--fall-delay, 0ms) both; }
+.sd-row.is-falling .sd-row__thumb { filter: grayscale(1) brightness(0.6); }
 .sd-row__ended { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--surface-page); color: var(--ink-muted); font-size: 12px; font-weight: 600; }
 .sd-row__ended::before { content: ""; width: 7px; height: 7px; border-radius: 2px; background: currentColor; }
-@keyframes sd-pulse { 0% { opacity: 0; } 25% { opacity: 1; } 50% { opacity: 0.15; } 75% { opacity: 1; } 100% { opacity: 0; } }
-@keyframes sd-pop { from { opacity: 0; transform: scale(0.6); } to { opacity: 1; transform: none; } }
-@keyframes sd-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes sd-leave { to { opacity: 0; transform: scale(0.94); } }
-@keyframes sd-stamp { from { opacity: 0; transform: scale(1.5) rotate(-6deg); } to { opacity: 1; transform: rotate(-6deg); } }
+@keyframes sd-drop { 0% { opacity: 0; transform: translateY(-60px); } 1% { opacity: 1; transform: translateY(-60px); } 100% { opacity: 1; transform: none; } }
+@keyframes sd-fall { 0% { opacity: 1; transform: none; } 18% { opacity: 1; transform: translateY(-8px) rotate(-2deg); } 100% { opacity: 0; transform: translateY(160px) rotate(8deg); } }
+@keyframes sd-fall-row { 0% { opacity: 1; transform: none; } 18% { opacity: 1; transform: translateY(-4px); } 100% { opacity: 0; transform: translateY(28px) rotate(1.5deg); } }
+/* The Live now bar names who started or stopped what: a circle for started, a square for stopped. */
+.sd-pill-lime.is-msg { overflow: hidden; }
+.sd-pill-lime.is-flash { animation: sd-lane-flash 600ms ease-out; }
+.sd-livemsg { display: flex; align-items: center; gap: 10px; min-width: 0; padding-left: 14px; font-size: 13px; line-height: 18px; animation: sd-msg-in 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.sd-livemsg.is-old { animation: none; }
+.sd-livemsg__shape { flex: none; width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.sd-livemsg--stop .sd-livemsg__shape { border-radius: 2px; }
+.sd-livemsg--mixed .sd-livemsg__shape { border-radius: 1px; transform: rotate(45deg); }
+.sd-livemsg__text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-livemsg__text b { font-weight: 700; }
+@keyframes sd-msg-in { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: none; } }
+@keyframes sd-lane-flash { from { filter: brightness(1.2); } to { filter: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .sd-pulse { animation: none; opacity: 1; transition: none; }
-  .sd-newchip, .sd-flip.is-new, .sd-row.is-new, .sd-endstamp span { animation: none; }
-  .sd-flip.is-ended, .sd-row.is-ended { animation: none; }
+  .sd-flip.is-dropping, .sd-row.is-dropping, .sd-livemsg, .sd-pill-lime.is-flash { animation: none; }
+  .sd-flip.is-falling, .sd-row.is-falling { animation: none; opacity: 0.4; }
 }
