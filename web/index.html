@@ -363,6 +363,84 @@
   .sd-carousel::-webkit-scrollbar { display: none; }
   .sd-carousel .sd-flip { flex: 0 0 calc(86% * var(--card-scale, 1)); scroll-snap-align: center; }
   .sd-carousel .sd-scard { min-height: 330px; }
+
+  /* Stream card styles (Settings, Display, Stream card style). Classic is the original card above;
+     the others show the poster at full brightness. The flip side keeps the front's size and scrolls. */
+  .gs-app[data-cstyle="side"] .sd-cards, .gs-app[data-cstyle="banner"] .sd-cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(400px * var(--card-scale, 1))), 1fr)); }
+  .gs-app[data-cstyle="tiles"] .sd-cards { grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(168px * var(--card-scale, 1))), 1fr)); gap: calc(12px * var(--card-scale, 1)); }
+  .gs-app[data-cstyle="tiles"] .sd-carousel .sd-flip { flex-basis: calc(46% * var(--card-scale, 1)); }
+  .sd-carousel .sd-scard.sd-scard--side, .sd-carousel .sd-scard.sd-scard--top, .sd-carousel .sd-scard.sd-scard--banner, .sd-carousel .sd-scard.sd-scard--tile { min-height: 0; }
+  .sd-flip__inner { position: relative; }
+  .sd-back.sd-back--fit { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: var(--space-4); gap: var(--space-3); }
+  .sd-back--fit .sd-back__title { font-size: 20px; line-height: 26px; }
+  .sd-back--side, .sd-back--banner { --notch-w: 72px; --notch-h: 72px; border-radius: 28px; }
+  .sd-back--top { --notch-w: 96px; --notch-h: 96px; }
+  .sd-back--tile { --notch-w: 56px; --notch-h: 56px; border-radius: 24px; padding: 12px; }
+  .sd-back--tile .sd-back__title { font-size: 16px; line-height: 20px; }
+  .sd-back--tile .sd-dl { grid-template-columns: minmax(0, 1fr); gap: 0; font-size: 12px; }
+  .sd-back--tile .sd-dl dd { margin-bottom: 6px; }
+  .sd-back--side .sd-go, .sd-back--banner .sd-go, .sd-scard--side .sd-go, .sd-scard--banner .sd-go { top: 6px; right: 6px; width: 40px; height: 40px; }
+  .sd-back--top .sd-go, .sd-scard--top .sd-go { width: 44px; height: 44px; }
+  .sd-back--tile .sd-go, .sd-scard--tile .sd-go { top: 4px; right: 4px; width: 32px; height: 32px; }
+  .sd-back--tile .sd-go svg, .sd-scard--tile .sd-go svg { width: 14px; height: 14px; }
+  .sd-scard__body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .sd-scard__status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-muted); }
+  .sd-scard__meta { margin: 2px 0 8px; font-size: 11px; line-height: 14px; color: #c4c4c8; }
+  .sd-tag.sd-tag--line { background: transparent; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.28); }
+  /* A. Poster beside the details: a light card */
+  .sd-scard--side { flex-direction: row; gap: var(--space-4); min-height: 0; padding: var(--space-4); border-radius: 28px; --notch-w: 72px; --notch-h: 72px; }
+  .sd-scard--side .sd-scard__poster { flex: none; width: 112px; aspect-ratio: 2 / 3; align-self: flex-start; border-radius: 18px; background: var(--art) center / cover no-repeat, #222; }
+  .sd-scard--side .sd-scard__who, .sd-scard--top .sd-scard__who { margin-top: 0; }
+  .sd-scard--side .sd-scard__who { padding-right: 44px; }
+  .sd-scard--side .sd-scard__name, .sd-scard--top .sd-scard__name { font-size: 24px; line-height: 30px; }
+  .sd-scard--side .sd-scard__title, .sd-scard--top .sd-scard__title, .sd-scard--banner .sd-scard__title { font-size: 14px; }
+  .sd-scard--side .sd-tag, .sd-scard--top .sd-tag, .sd-scard--banner .sd-tag { height: 26px; padding: 0 10px; font-size: 12px; }
+  .sd-scard--side .sd-progress, .sd-scard--top .sd-progress, .sd-scard--banner .sd-progress { margin-top: auto; font-size: 12px; }
+  /* B. Full poster on top */
+  .sd-scard--top { padding: 0; gap: 0; min-height: 0; background: #141416; color: #f6f6f4; --notch-w: 96px; --notch-h: 96px; }
+  .sd-scard--top .sd-scard__poster { height: 200px; flex: none; padding: var(--space-4); border-radius: var(--radius-lg) 0 0 0; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start;
+    background: linear-gradient(180deg, rgba(8, 8, 10, 0.28) 0%, rgba(8, 8, 10, 0) 38%, rgba(8, 8, 10, 0) 70%, rgba(20, 20, 22, 0.85) 100%), var(--art) center 30% / cover no-repeat, #1a1a1e; }
+  .sd-scard--top .sd-avatar { width: 44px; height: 44px; font-size: 18px; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.35); }
+  .sd-scard--top .sd-scard__body { padding: 14px 20px 18px; gap: 12px; }
+  .sd-scard--top .sd-scard__title, .sd-scard--top .sd-progress, .sd-scard--banner .sd-scard__title, .sd-scard--banner .sd-scard__status { color: #c4c4c8; }
+  .sd-scard--top .sd-tag { background: rgba(255, 255, 255, 0.1); color: #f6f6f4; }
+  .sd-scard--top .sd-prog, .sd-scard--banner .sd-prog { background: rgba(255, 255, 255, 0.18); }
+  .sd-scard--top .sd-prog i, .sd-scard--banner .sd-prog i, .sd-scard--tile .sd-prog i { background: var(--volt); }
+  .sd-scard--top .gs-badge--neutral, .sd-scard--tile .gs-badge--neutral { background: rgba(20, 20, 22, 0.72); color: #f6f6f4; }
+  /* C. Wide banner: details on dark at the left, poster bright at the right */
+  .sd-scard--banner { min-height: 210px; padding: 20px 22px; gap: 12px; border-radius: 30px; color: #f6f6f4; --notch-w: 80px; --notch-h: 80px;
+    background: linear-gradient(90deg, #141416 0%, #141416 36%, rgba(20, 20, 22, 0.62) 60%, rgba(20, 20, 22, 0) 86%), var(--art) right 25% / 64% auto no-repeat, #141416; }
+  .sd-scard__whorow { display: flex; align-items: center; gap: var(--space-3); max-width: 62%; }
+  .sd-scard--banner .sd-scard__who { margin-top: 0; min-width: 0; }
+  .sd-scard--banner .sd-scard__name { font-size: 22px; line-height: 26px; }
+  .sd-scard--banner .sd-avatar { width: 40px; height: 40px; font-size: 16px; }
+  .sd-scard--banner .sd-tags { max-width: 62%; }
+  .sd-scard--banner .sd-tag { background: rgba(255, 255, 255, 0.12); color: #f6f6f4; }
+  .sd-scard--banner .gs-badge--neutral { background: rgba(255, 255, 255, 0.16); color: #f6f6f4; }
+  .sd-scard--banner .sd-progress { color: #e4e4e4; }
+  .sd-scard--banner .sd-progress > span:last-child { padding: 2px 8px; border-radius: 999px; background: rgba(20, 20, 22, 0.7); }
+  /* D. Compact poster tiles */
+  .sd-scard--tile { min-height: 0; aspect-ratio: 2 / 3; padding: 12px; gap: 0; border-radius: 24px; justify-content: space-between; color: #f6f6f4; --notch-w: 56px; --notch-h: 56px;
+    background: linear-gradient(180deg, rgba(8, 8, 10, 0) 45%, rgba(8, 8, 10, 0.86) 100%), var(--art) center / cover no-repeat, #1a1a1e; }
+  .sd-scard--tile > .gs-badge { align-self: flex-start; height: 22px; padding: 0 9px; font-size: 11px; font-weight: 600; }
+  .sd-scard--tile .sd-scard__who { margin-top: 0; }
+  .sd-scard--tile .sd-scard__name { font-size: 17px; line-height: 22px; font-weight: 500; letter-spacing: 0; }
+  .sd-scard--tile .sd-scard__title { font-size: 12px; line-height: 16px; color: #e4e4e4; }
+  .sd-scard--tile .sd-prog { display: block; width: 100%; height: 4px; margin: 0; background: rgba(255, 255, 255, 0.25); }
+  .sd-scard--tile .sd-scard__name, .sd-scard--tile .sd-scard__title, .sd-scard--tile .sd-scard__meta { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+  /* "New" tag position per style (people.css places it for Classic) */
+  .sd-scard--side .sd-newchip { top: 22px; left: 22px; }
+  .sd-scard--top .sd-newchip { top: 26px; left: 72px; }
+  .sd-scard--banner .sd-newchip { top: 26px; left: auto; right: 92px; }
+  .sd-scard--tile .sd-newchip { top: 40px; left: 12px; height: 20px; font-size: 11px; }
+  /* Settings: card style picker */
+  .sd-cstyle { margin: 0; border: 0; }
+  .sd-cstyle legend { float: left; width: 100%; margin-bottom: 12px; padding: 0; font-size: 15px; font-weight: 600; }
+  .sd-cstyle__opts { clear: both; display: flex; flex-wrap: wrap; gap: 6px; }
+  .sd-cstyle__opts label { position: relative; cursor: pointer; }
+  .sd-cstyle__opts input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .sd-cstyle__opts label:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+  .sd-field.is-off { opacity: 0.55; }
   .sd-dots { display: flex; justify-content: center; gap: 6px; }
   .sd-dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--border-strong); opacity: 0.5; transition: width 0.2s ease; }
   .sd-dots i.on { width: 18px; background: var(--ink); opacity: 1; }
@@ -466,11 +544,22 @@
             <div class="sd-field__ticks"><span>Smaller</span><span>Default</span></div>
             <p class="sd-field__hint">Resizes the poster cards in Live streams as you drag. List and table views stay the same.</p>
           </div>
-          <div class="sd-field">
+          <fieldset class="sd-field sd-cstyle" id="card-style">
+            <legend>Stream card style</legend>
+            <div class="sd-cstyle__opts">
+              <label class="gs-chip"><input type="radio" name="cstyle" value="classic">Classic</label>
+              <label class="gs-chip"><input type="radio" name="cstyle" value="side">Poster beside</label>
+              <label class="gs-chip"><input type="radio" name="cstyle" value="top">Poster on top</label>
+              <label class="gs-chip"><input type="radio" name="cstyle" value="banner">Banner</label>
+              <label class="gs-chip"><input type="radio" name="cstyle" value="tiles">Tiles</label>
+            </div>
+            <p class="sd-field__hint">Classic is the original card. Poster beside and Banner fit two per row, Tiles fit the most. Select a card to flip it in any style.</p>
+          </fieldset>
+          <div class="sd-field" id="art-light-field">
             <div class="sd-field__row"><label for="art-light">Cover art brightness</label><output id="art-light-out" for="art-light">30%</output></div>
             <input class="sd-range" type="range" id="art-light" min="0" max="100" step="5" value="30">
             <div class="sd-field__ticks"><span>Darker</span><span>Brighter</span></div>
-            <p class="sd-field__hint">How much of the poster shows through on stream cards. Text keeps a shadow so it stays readable.</p>
+            <p class="sd-field__hint" id="art-light-hint">How much of the poster shows through on stream cards. Text keeps a shadow so it stays readable.</p>
           </div>
           <button type="button" class="sd-settings__reset" id="card-size-reset" disabled>Reset to default</button>
         </div>
@@ -1171,7 +1260,68 @@
     g.putImageData(img, 0, 0);
     return (artCache[r.title] = cv.toDataURL('image/jpeg', 0.75));
   }
+  // Stream card style (Settings, Display): classic (the original) or one of four poster layouts.
+  const CARD_STYLES = ['classic', 'side', 'top', 'banner', 'tiles'];
+  let cardStyle = 'classic';
+  const progressEl = (r, withText) => {
+    const prog = el('div', 'sd-progress');
+    const bar = el('span', 'sd-prog'); bar.setAttribute('aria-hidden', 'true');
+    const fill = el('i'); fill.style.width = Math.min(100, r.progress_pct) + '%'; bar.appendChild(fill);
+    prog.appendChild(bar);
+    const text = el('span', withText ? null : 'sd-sr', n0(r.progress_pct) + '% · ' + n0(r.elapsed_min) + ' min in');
+    prog.appendChild(text);
+    return prog;
+  };
+  function whoEl(r) {
+    const who = el('div', 'sd-scard__who');
+    const nameEl = el('h3', 'sd-scard__name');
+    const nb = window.gsPeople && window.gsPeople.nameButton(r);
+    if (nb) nameEl.appendChild(nb); else nameEl.textContent = r.user;
+    who.append(nameEl, el('p', 'sd-scard__title', r.title));
+    return who;
+  }
+  function tagsEl(r, withMethod) {
+    const tags = el('div', 'sd-tags');
+    [r.server, r.device, r.resolution].forEach((t) => tags.appendChild(el('span', 'sd-tag', t)));
+    if (withMethod) tags.appendChild(el('span', 'sd-tag sd-tag--line', r.method));
+    return tags;
+  }
+  const stateBadge = (r) => badge(STATE_TONE[r.state] || 'neutral', r.state);
+  function statusEl(r) {
+    const row = el('div', 'sd-scard__status');
+    row.append(stateBadge(r), el('span', null, r.method));
+    return row;
+  }
+  function styledFront(r, style) {
+    const go = (e) => { e.stopPropagation(); pickServer(r.server); };
+    const card = notchCard('sd-scard sd-scard--' + (style === 'tiles' ? 'tile' : style) + ' sd-face', 'Show all streams on ' + r.server, go);
+    const art = 'url(' + artFor(r) + ')';
+    if (style === 'side') {
+      const poster = el('div', 'sd-scard__poster'); poster.setAttribute('aria-hidden', 'true'); poster.style.setProperty('--art', art);
+      const body = el('div', 'sd-scard__body');
+      body.append(whoEl(r), tagsEl(r), statusEl(r), progressEl(r, true));
+      card.append(poster, body);
+    } else if (style === 'top') {
+      const poster = el('div', 'sd-scard__poster'); poster.style.setProperty('--art', art);
+      poster.append(avatar(r.user), stateBadge(r));
+      const body = el('div', 'sd-scard__body');
+      body.append(whoEl(r), tagsEl(r, true), progressEl(r, true));
+      card.append(poster, body);
+    } else if (style === 'banner') {
+      card.style.setProperty('--art', art);
+      const row = el('div', 'sd-scard__whorow');
+      row.append(avatar(r.user), whoEl(r));
+      card.append(row, tagsEl(r), statusEl(r), progressEl(r, true));
+    } else {
+      card.style.setProperty('--art', art);
+      const bottom = el('div');
+      bottom.append(whoEl(r), el('p', 'sd-scard__meta', [r.server, r.resolution, r.method].filter(Boolean).join(' · ')), progressEl(r, false));
+      card.append(stateBadge(r), bottom);
+    }
+    return card;
+  }
   function streamFront(r) {
+    if (cardStyle !== 'classic') return styledFront(r, cardStyle);
     const card = notchCard('sd-scard sd-scard--art sd-face', 'Show all streams on ' + r.server, (e) => { e.stopPropagation(); pickServer(r.server); });
     const head = el('div', 'sd-card__head');
     head.appendChild(avatar(r.user, 'lg'));
@@ -1201,7 +1351,8 @@
 
   const flipped = new Set();
   function streamBack(r) {
-    const card = notchCard('sd-scard sd-back sd-face', 'Flip back', (e) => { e.stopPropagation(); toggleFlip(r.id, e.currentTarget.closest('.sd-flip__inner')); });
+    const fit = cardStyle === 'classic' ? '' : ' sd-back--fit sd-back--' + (cardStyle === 'tiles' ? 'tile' : cardStyle);
+    const card = notchCard('sd-scard sd-back sd-face' + fit, 'Flip back', (e) => { e.stopPropagation(); toggleFlip(r.id, e.currentTarget.closest('.sd-flip__inner')); });
     card.style.setProperty('--art', 'url(' + artFor(r) + ')');
     const head = el('div', 'sd-card__head');
     const sub = el('p', 'sd-back__sub');
@@ -1697,8 +1848,23 @@
   const lightInput = document.getElementById('art-light');
   const lightOut = document.getElementById('art-light-out');
   const artLight = () => { const v = Number(dash.params().artlight); return Number.isFinite(v) && dash.params().artlight != null ? Math.max(0, Math.min(100, v)) : ART_DEFAULT; };
+  const styleBox = document.getElementById('card-style');
+  const styleOf = () => (CARD_STYLES.includes(dash.params().cardstyle) ? dash.params().cardstyle : 'classic');
   function syncReset() {
-    document.getElementById('card-size-reset').disabled = Number(sizeInput.value) === 100 && Number(lightInput.value) === ART_DEFAULT;
+    document.getElementById('card-size-reset').disabled = Number(sizeInput.value) === 100 && Number(lightInput.value) === ART_DEFAULT && cardStyle === 'classic';
+  }
+  function applyStyle(v) {
+    cardStyle = v;
+    root.dataset.cstyle = v;
+    styleBox.querySelectorAll('input').forEach((i) => { i.checked = i.value === v; i.parentElement.classList.toggle('gs-chip--selected', i.checked); });
+    // Brightness only changes the Classic card; the other styles show the poster at full brightness.
+    const classic = v === 'classic';
+    lightInput.disabled = !classic;
+    document.getElementById('art-light-field').classList.toggle('is-off', !classic);
+    document.getElementById('art-light-hint').textContent = classic
+      ? 'How much of the poster shows through on stream cards. Text keeps a shadow so it stays readable.'
+      : 'Only for the Classic style. The other styles show the poster at full brightness.';
+    syncReset();
   }
   function applySize(v) {
     root.style.setProperty('--card-scale', String(v / 100));
@@ -1729,9 +1895,10 @@
   document.getElementById('settings').addEventListener('keydown', (e) => { if (e.key === 'Escape') openSettings(false); });
   sizeInput.addEventListener('input', () => applySize(Number(sizeInput.value)));
   sizeInput.addEventListener('change', () => dash.setParams({ cardsize: Number(sizeInput.value) }));
+  styleBox.addEventListener('change', (e) => { if (e.target.name === 'cstyle') { applyStyle(e.target.value); dash.setParams({ cardstyle: e.target.value }); } });
   lightInput.addEventListener('input', () => applyLight(Number(lightInput.value)));
   lightInput.addEventListener('change', () => dash.setParams({ artlight: Number(lightInput.value) }));
-  document.getElementById('card-size-reset').addEventListener('click', () => { applySize(100); applyLight(ART_DEFAULT); dash.setParams({ cardsize: 100, artlight: ART_DEFAULT }); });
+  document.getElementById('card-size-reset').addEventListener('click', () => { applySize(100); applyLight(ART_DEFAULT); applyStyle('classic'); dash.setParams({ cardsize: 100, artlight: ART_DEFAULT, cardstyle: 'classic' }); });
 
   function renderAll() {
     const tabs = okTabs();
@@ -1741,6 +1908,7 @@
     document.getElementById('sample-badge').hidden = !(dash.isSample && dash.isSample());
     applySize(Number(dash.params().cardsize) || 100);
     applyLight(artLight());
+    applyStyle(styleOf());
     renderLook();
     renderKpis();
     renderNewest();

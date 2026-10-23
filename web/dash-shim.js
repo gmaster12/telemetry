@@ -14,7 +14,7 @@
   var REFRESH_MS = 10000;
   var me = null;
   var loaded = false;
-  var KEEP = ['look', 'cardsize', 'artlight'];
+  var KEEP = ['look', 'cardsize', 'artlight', 'cardstyle'];
   var store = {};
   var calcs = {};
   var callbacks = [];
