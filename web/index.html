@@ -373,12 +373,22 @@
   .sd-flip__inner { position: relative; }
   .sd-back.sd-back--fit { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: var(--space-4); gap: var(--space-3); }
   .sd-back--fit .sd-back__title { font-size: 20px; line-height: 26px; }
+  .sd-back--fit > * { flex-shrink: 0; }  /* scroll instead of squeezing rows together */
   .sd-back--side, .sd-back--banner { --notch-w: 72px; --notch-h: 72px; border-radius: 28px; }
   .sd-back--top { --notch-w: 96px; --notch-h: 96px; }
-  .sd-back--tile { --notch-w: 56px; --notch-h: 56px; border-radius: 24px; padding: 12px; }
-  .sd-back--tile .sd-back__title { font-size: 16px; line-height: 20px; }
-  .sd-back--tile .sd-dl { grid-template-columns: minmax(0, 1fr); gap: 0; font-size: 12px; }
-  .sd-back--tile .sd-dl dd { margin-bottom: 6px; }
+  /* Tiles: the back is narrow, so details stack as label over value with a thin divider between them. */
+  .sd-back--tile { --notch-w: 56px; --notch-h: 56px; border-radius: 24px; padding: 14px 12px 16px 14px; gap: 10px; }
+  .sd-back--tile .sd-card__head { min-height: 0; padding-right: 28px; }
+  .sd-back--tile .sd-back__eyebrow { font-size: 10px; line-height: 12px; }
+  .sd-back--tile .sd-back__title { margin-top: 3px; font-size: 15px; line-height: 19px; overflow-wrap: anywhere; }
+  .sd-back--tile .sd-back__sub { margin-top: 2px; font-size: 12px; line-height: 16px; }
+  .sd-back--tile .sd-tags { gap: 4px; }
+  .sd-back--tile .sd-tags .gs-badge, .sd-back--tile .sd-tags .sd-tag { height: 22px; padding: 0 8px; gap: 4px; font-size: 11px; }
+  .sd-back--tile .sd-dl { display: block; font-size: 12px; line-height: 16px; }
+  .sd-back--tile .sd-dl dt { margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255, 255, 255, 0.09); font-size: 10px; line-height: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; }
+  .sd-back--tile .sd-dl dt:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+  .sd-back--tile .sd-dl dd { margin: 3px 0 0; }
+  .sd-back--tile .sd-dl dd small { display: block; margin-top: 1px; font-size: 11px; line-height: 14px; }
   .sd-back--side .sd-go, .sd-back--banner .sd-go, .sd-scard--side .sd-go, .sd-scard--banner .sd-go { top: 6px; right: 6px; width: 40px; height: 40px; }
   .sd-back--top .sd-go, .sd-scard--top .sd-go { width: 44px; height: 44px; }
   .sd-back--tile .sd-go, .sd-scard--tile .sd-go { top: 4px; right: 4px; width: 32px; height: 32px; }
@@ -1357,7 +1367,8 @@
     const head = el('div', 'sd-card__head');
     const sub = el('p', 'sd-back__sub');
     const nb = window.gsPeople && window.gsPeople.nameButton(r);
-    sub.append(nb || document.createTextNode(r.user), document.createTextNode(' \u00b7 ' + r.id + ' \u00b7 ' + r.location));
+    // Tiles are narrow: leave out the session id there.
+    sub.append(nb || document.createTextNode(r.user), document.createTextNode(cardStyle === 'tiles' ? ' \u00b7 ' + r.location : ' \u00b7 ' + r.id + ' \u00b7 ' + r.location));
     head.append(el('p', 'sd-back__eyebrow', 'Playback details'), el('h3', 'sd-back__title', r.title), sub);
     const tags = el('div', 'sd-tags');
     tags.appendChild(badge(METHOD_TONE[r.method] || 'neutral', r.method));
