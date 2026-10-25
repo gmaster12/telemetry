@@ -146,3 +146,15 @@ def test_everyone_gets_requests_once(env):
     store.set_setting("default_sections", json.dumps(["history"]))  # Glenn turns it off later: it stays off
     add_requests_section(store)
     assert default_sections(store) == ["history"]
+
+
+def test_search_sends_spaces_and_apostrophes_the_way_seerr_wants(env):
+    from app.seerr import query_string
+    assert query_string({"query": "The 'Burbs (1989)!*", "page": 1}) == "query=The%20%27Burbs%20%281989%29%21%2A&page=1"
+    store, d, svc = env
+    d.upsert_user({"id": "2001", "username": "sable", "email": "s@x.com"}, shared=True)
+    c = app_for(svc, d, principal("2001", "s@x.com", "sable"))
+    for q in ["the burbs", "The 'Burbs", "the+burbs (1989)"]:
+        r = c.get("/api/requests/search", params={"q": q})
+        assert r.status_code == 200, (q, r.text)
+    assert any(i["title"] == "The 'Burbs" for i in c.get("/api/requests/search", params={"q": "the 'burbs"}).json()["items"])

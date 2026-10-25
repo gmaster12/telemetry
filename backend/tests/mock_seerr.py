@@ -52,6 +52,9 @@ SHOWS = {
 
 
 def me(request: Request) -> dict:
+    raw = request.scope.get("query_string", b"").decode()
+    if any(c in raw for c in "+'()!* "):  # like Seerr: the query must be fully url encoded
+        raise HTTPException(400, "Parameter 'query' must be url encoded. Its value may not contain reserved characters.")
     if request.headers.get("x-api-key") != KEY:
         raise HTTPException(403, "You do not have permission to access this endpoint")
     uid = int(request.headers.get("x-api-user") or 1)
@@ -192,6 +195,8 @@ def discover(request: Request, page: int = 1, query: str = ""):
         res = [r for r in res if r["mediaType"] == "tv"]
     if query:
         res = [r for r in res if query.lower() in (r.get("title") or r.get("name")).lower()]
+        if "burbs" in query.lower():
+            res.append({"id": 11974, "mediaType": "movie", "title": "The 'Burbs", "releaseDate": "1989-02-17", "posterPath": "/b.jpg"})
         if "keanu" in query.lower():
             res.append({"id": 6384, "mediaType": "person", "name": "Keanu Reeves", "profilePath": "/k.jpg", "knownFor": [{"title": "The Matrix"}]})
     return {"page": page, "totalPages": 2, "totalResults": len(res) * 2, "results": res}

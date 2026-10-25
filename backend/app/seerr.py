@@ -20,6 +20,7 @@ import logging
 import secrets
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -80,6 +81,13 @@ def scrub(obj: Any, me: int | None = None) -> Any:
     return out
 
 
+def query_string(params: dict | None) -> str:
+    """Seerr rejects '+' for spaces and raw reserved characters (' ( ) ! *): encode everything but
+    letters, digits and - _ . ~ as %XX, the way its own web page does."""
+    pairs = [(k, v) for k, v in (params or {}).items() if v is not None]
+    return "&".join(f"{quote(str(k), safe='')}={quote(str(v), safe='')}" for k, v in pairs)
+
+
 class SeerrClient:
     def __init__(self, url: str, key: str, http: httpx.AsyncClient):
         self.base = url.rstrip("/") + "/api/v1"
@@ -92,8 +100,8 @@ class SeerrClient:
         if user:
             headers["X-API-User"] = str(int(user))
         try:
-            r = await self.http.request(method, self.base + path, headers=headers, params={k: v for k, v in (params or {}).items() if v is not None},
-                                        json=body, timeout=timeout)
+            q = query_string(params)
+            r = await self.http.request(method, self.base + path + ("?" + q if q else ""), headers=headers, json=body, timeout=timeout)
         except httpx.HTTPError as e:
             raise SeerrError(502, f"Could not reach Seerr: {e.__class__.__name__}") from None
         if r.status_code >= 400:
