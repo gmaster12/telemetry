@@ -91,7 +91,6 @@
     ALL.forEach(function (s) { root.classList.toggle('gs-no-' + s, !window.dash.can(s)); });
     var dashSections = ['streams', 'servers', 'bandwidth', 'viewing'].filter(window.dash.can);
     root.classList.toggle('gs-only-history', dashSections.length === 0);
-    document.querySelectorAll('.st-tabs [data-admin]').forEach(function (b) { b.hidden = me.role !== 'admin'; });
     var gear = document.getElementById('gear');
     if (gear) gear.hidden = !(me.role === 'admin' || window.dash.can('streams'));
   }

@@ -322,6 +322,43 @@ def get_settings():
     }
 
 
+@app.get("/api/settings/summary")
+def settings_summary():
+    """One small call for the Settings home: what is set up, what is working and what needs a look."""
+    cfg = poller.cfg
+    rows = store.list_servers()
+    enabled = [r for r in rows if r["enabled"]]
+    view = sample.servers() if cfg.use_sample else poller.servers_view()
+    offline, errors = [], []
+    for r in enabled:
+        st = poller.server_state.get(r["name"], {})
+        if st.get("online") is False:
+            offline.append(r["name"])
+            if st.get("error"):
+                errors.append({"name": r["name"], "error": str(st["error"])[:200]})
+    online = sum(1 for r in enabled if poller.server_state.get(r["name"], {}).get("online") is True)
+    unlinked = [r["name"] for r in enabled if not (r["netdata_node"] if cfg.netdata.mode == "cloud" else r["netdata_agent_url"])] \
+        if cfg.netdata.mode != "off" else []
+    people = store.db.execute(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(sections IS NOT NULL), 0) AS custom, COALESCE(SUM(disabled), 0) AS off FROM users").fetchone()
+    imported = store.get_setting("history_imported_at")
+    has_key = bool(store.get_setting("stripe_key"))
+    counts = poller.billing.counts() if has_key else {}
+    return {
+        "sample": cfg.use_sample,
+        "servers": {"total": len(rows), "enabled": len(enabled), "online": online, "offline": offline, "errors": errors},
+        "accounts": len(store.list_accounts()),
+        "netdata": {"mode": cfg.netdata.mode, "error": poller.netdata_error, "unlinked": unlinked,
+                    "reporting": sum(1 for v in view if v.get("cpu_known")), "of": len(view)},
+        "alerts": {"hot_cpu_pct": cfg.hot_cpu_pct, "hot": [v["server"] for v in view if v.get("status") == "Degraded"]},
+        "access": {"people": people["n"], "custom": people["custom"], "off": people["off"],
+                   "admins": len(directory.list_admins()), "synced_at": poller.users_synced_at or None,
+                   "sync_error": poller.users_sync_error, "history_imported_at": int(imported) if imported else None},
+        "billing": {"connected": has_key, "synced_at": poller.billing_synced_at or None, "error": poller.billing_error,
+                    "customers": counts.get("customers", 0), "unmatched": counts.get("unmatched", 0)},
+    }
+
+
 @app.post("/api/settings/servers/test")
 async def test_server(body: TestIn):
     token = body.token
@@ -825,7 +862,9 @@ async def import_history():
         await poller.sync_users()
     except Exception:
         pass
-    return await poller.import_history()
+    r = await poller.import_history()
+    store.set_setting("history_imported_at", str(int(time.time())))
+    return r
 
 
 # ---------- static dashboard ----------

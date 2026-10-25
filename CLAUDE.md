@@ -161,7 +161,7 @@ Before loading datasets the shim calls `GET /api/me` (401 sends the browser to
 | Sign in | `POST /api/auth/plex/start`, `GET /api/auth/plex/check/{pin}`, `POST /api/auth/local`, `POST /api/auth/logout` | anyone |
 | Me | `GET /api/me`, `GET /api/me/history?before=` (`history` section), `GET /api/me/subscription` (always, own only) | signed in |
 | Users | `GET /api/users?q=&server=` (username, name or email; returns each person's `servers` and the monitored server names), `GET /api/users/{id}`, `GET /api/users/{id}/history` | admin |
-| Settings | everything under `/api/settings`, including `billing` (key, `sync`, `unmatched`, `links`), `plex/link`, `plex/accounts/{id}` (unlink), `plex/discover?account=`, `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
+| Settings | everything under `/api/settings`, including `summary` (the Settings home), `billing` (key, `sync`, `unmatched`, `links`), `plex/link`, `plex/accounts/{id}` (unlink), `plex/discover?account=`, `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
 
 Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie
 (`gst_session`, 30 days); only their SHA-256 is stored. A Plex sign-in PIN can
@@ -186,9 +186,29 @@ design system). The dashboard adds its own patterns:
   and flip to show playback details.
 - Mobile (760px and below): bottom tab bar Home / Servers / Streams / Alerts,
   compact stream rows with a bottom sheet, optional poster carousel.
-- Settings screen: Display (stream card style, stream card size slider, cover
-  art brightness slider: `artlight` 0 to 100, default 30, drives `--art-shade`
-  on the Classic poster overlay), Plex servers, Netdata, Alerts, Access, Billing.
+- Settings screen (Glenn's pick "Mix": a home of cards plus Display with a live
+  preview). Admins open the gear onto a home (`#st-home`, `renderHome` in
+  `settings.js`, data from `GET /api/settings/summary`): a tall Display card with a
+  small live preview of a stream card in the current look and chips for the
+  choices, then Plex servers, Netdata, a black "needs a look" card (`problems`:
+  servers not answering, missing Netdata nodes, failed syncs, unmatched Stripe
+  customers; each line opens the section that fixes it), Alerts, Access, Billing.
+  Every card says what it controls, shows a status (word plus shape) and a few
+  numbers, and has a scope tag: "This browser only" (Display) or "Everyone".
+  Opening a card shows that section alone (`setTab`, `data-view` on `#settings`)
+  with a back arrow, a "Settings" crumb, the title, the scope tag and a one-line
+  lead (`VIEWS`). Home and Display are 1120px wide, the other sections 760px,
+  over a dimmed page (`#set-scrim`; click or Escape closes). Viewers go straight
+  to Display with no home. Display: style picked by picture (`.st-thumb`), card
+  size, cover art brightness (`artlight` 0 to 100, default 30, drives
+  `--art-shade` on the Classic overlay; only for Classic), Moving clips switch,
+  Reset to default in the header (resets all four), and the live preview
+  (`renderPreviews` in `index.html`): a real card drawn with `streamFront` /
+  `streamBack` from a stream playing now (or a sample), Card / Back switch,
+  follows the size slider. The preview has its own `<video>` (`pvMode`,
+  `pvVideos`) so it never takes a clip from a real card. Simple controls save as
+  you change them (Display, Alerts threshold on release, default access as you
+  tick); forms with addresses, tokens or passwords keep their button.
 - Stream card style (`cardstyle`, saved per browser): `classic` (default, the
   original dimmed-poster card), `side` (light card, poster beside the details),
   `top` (full poster on top, details below), `banner` (wide, poster bright at

@@ -136,31 +136,195 @@
     return loadState();
   }
 
-  // ---------- tabs ----------
+  // ---------- views: the Settings home, and one section at a time ----------
+  // Admins land on the home of cards; each card opens its section, with a back arrow to the home.
+  // Viewers only have Display, so they go straight there.
+  var VIEWS = {
+    home: { title: 'Settings', lead: 'Everything at a glance. Open a card to change it.' },
+    display: { title: 'Display', scope: 'you', lead: 'How stream cards look on this screen. Nobody else sees these changes, and your other devices keep their own.' },
+    plex: { title: 'Plex servers', scope: 'all', lead: 'Where live streams come from. The dashboard asks each server what is playing every few seconds. Each server can belong to its own Plex account.' },
+    netdata: { title: 'Netdata', scope: 'all', lead: 'CPU and upload speed for each server, read from Netdata. They drive the capacity rings, server status and the bandwidth chart.' },
+    alerts: { title: 'Alerts', scope: 'all', lead: 'When a server counts as running hot. A hot server turns amber on the capacity rings and shows up under Alerts.' },
+    access: { title: 'Access', scope: 'all', lead: 'Who can sign in and what each person can see. Anyone you share a Plex server with can sign in with Plex.' },
+    billing: { title: 'Billing', scope: 'all', lead: 'Shows each person their own Stripe subscription. The key is read-only: nothing is ever charged or changed from here.' }
+  };
+  var summary = null;
+  var summaryAt = 0;
+  var summaryTimer = null;
+
   function setTab(t) {
+    if (!isAdmin()) t = 'display';
+    if (!VIEWS[t]) t = 'home';
+    var changed = tab !== t;
     tab = t;
-    document.querySelectorAll('.st-tabs [role="tab"]').forEach(function (b) {
-      var on = b.dataset.tab === t;
-      b.setAttribute('aria-selected', on ? 'true' : 'false');
-      b.classList.toggle('gs-chip--selected', on);
-      b.tabIndex = on ? 0 : -1;
-    });
+    var v = VIEWS[t];
+    var panel = document.getElementById('settings');
+    panel.dataset.view = t;
+    var home = t === 'home';
+    panel.classList.toggle('has-back', !home && isAdmin());
+    document.getElementById('set-back').hidden = home || !isAdmin();
+    document.getElementById('set-crumb').hidden = home || !isAdmin();
+    document.getElementById('set-title').textContent = v.title;
+    var scope = document.getElementById('set-scope');
+    scope.hidden = !v.scope;
+    scope.textContent = v.scope === 'you' ? 'This browser only' : 'Everyone';
+    scope.className = 'st-scope st-scope--' + (v.scope || 'none');
+    var lead = document.getElementById('set-lead');
+    lead.textContent = v.lead;
+    lead.hidden = false;
+    document.getElementById('card-size-reset').hidden = t !== 'display';
+    document.getElementById('st-home').hidden = !home;
     document.querySelectorAll('.st-pane').forEach(function (pane) { pane.hidden = pane.id !== 'st-pane-' + t; });
-    if (t === 'access') loadAccess();
+    if (changed) { panel.scrollTop = 0; }
+    clearInterval(summaryTimer);
+    if (home) {
+      renderHome();
+      loadSummary();
+      summaryTimer = setInterval(function () { if (!document.getElementById('settings-dock').hidden && tab === 'home') loadSummary(); }, 20000);
+    } else if (t === 'access') loadAccess();
     else if (t === 'billing') loadBilling();
-    else if (t !== 'display' && isAdmin()) loadState();
+    else if (t !== 'display') loadState();
+    if (window.sdRenderPreviews) window.sdRenderPreviews();
   }
 
-  document.querySelectorAll('.st-tabs [role="tab"]').forEach(function (b) {
-    b.addEventListener('click', function () { setTab(b.dataset.tab); });
-    b.addEventListener('keydown', function (e) {
-      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
-      var tabs = Array.prototype.slice.call(document.querySelectorAll('.st-tabs [role="tab"]'));
-      var i = tabs.indexOf(b) + (e.key === 'ArrowRight' ? 1 : -1);
-      var next = tabs[(i + tabs.length) % tabs.length];
-      next.focus();
-      setTab(next.dataset.tab);
-    });
+  // Called when Settings opens. fresh: opened from the gear, so start at the home.
+  window.stOnOpen = function (fresh) {
+    if (fresh || !isAdmin()) setTab(isAdmin() ? 'home' : 'display');
+    else if (tab === 'home') loadSummary();
+    var t = document.getElementById('set-title');
+    if (t) t.focus({ preventScroll: true });
+  };
+
+  function go(t) {
+    setTab(t);
+    var title = document.getElementById('set-title');
+    if (title) title.focus({ preventScroll: true });
+  }
+  document.getElementById('set-back').appendChild(window.sdIcon ? window.sdIcon('arrow', 18) : document.createTextNode('<'));
+  document.getElementById('set-back').addEventListener('click', function () { go('home'); });
+
+  function loadSummary() {
+    if (!isAdmin()) return Promise.resolve();
+    return api('GET', '/api/settings/summary').then(function (r) {
+      summary = r; summaryAt = Date.now();
+      if (tab === 'home') renderHome();
+    }).catch(function (e) { msgs.home = { kind: 'error', text: e.message }; if (tab === 'home') renderHome(); });
+  }
+
+  function since(ts) {
+    if (!ts) return null;
+    var m = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+    if (m < 1) return 'just now';
+    if (m < 60) return m + ' min ago';
+    var h = Math.round(m / 60);
+    if (h < 48) return h + ' h ago';
+    return Math.round(h / 24) + ' days ago';
+  }
+
+  function badgeEl(tone, text) {
+    if (window.sdBadge) return window.sdBadge(tone, text);
+    return el('span', { class: 'gs-badge gs-badge--' + tone, text: text });
+  }
+
+  function names(list, max) {
+    max = max || 2;
+    return list.length <= max ? list.join(' and ') : list.slice(0, max).join(', ') + ' and ' + (list.length - max) + ' more';
+  }
+
+  // What needs a look, most important first. Each item opens the section that fixes it.
+  function problems(s) {
+    var out = [];
+    if (!s) return out;
+    if (!s.servers.total) out.push({ view: 'plex', tone: 'warning', text: 'No Plex servers yet. The dashboard shows sample data until you add one.' });
+    if (s.servers.offline.length) out.push({ view: 'plex', tone: 'danger', text: names(s.servers.offline) + (s.servers.offline.length === 1 ? ' is' : ' are') + ' not answering.' });
+    if (s.netdata.error) out.push({ view: 'netdata', tone: 'danger', text: 'Netdata: the last check failed.' });
+    if (s.netdata.unlinked.length) out.push({ view: 'plex', tone: 'warning', text: names(s.netdata.unlinked) + (s.netdata.unlinked.length === 1 ? ' has' : ' have') + ' no Netdata node, so CPU and upload are unknown.' });
+    else if (s.netdata.mode !== 'off' && !s.netdata.error && s.netdata.of && s.netdata.reporting < s.netdata.of)
+      out.push({ view: 'netdata', tone: 'warning', text: 'CPU is coming in from ' + s.netdata.reporting + ' of ' + s.netdata.of + ' servers. Check the metric names.' });
+    if (s.access.sync_error) out.push({ view: 'access', tone: 'danger', text: 'Loading people from Plex failed.' });
+    else if (s.accounts && !s.access.synced_at) out.push({ view: 'access', tone: 'warning', text: 'People have not been loaded from Plex yet.' });
+    if (s.billing.connected && s.billing.error) out.push({ view: 'billing', tone: 'danger', text: 'Stripe: the last sync failed.' });
+    if (s.billing.connected && s.billing.unmatched) out.push({ view: 'billing', tone: 'warning', text: s.billing.unmatched + ' Stripe ' + (s.billing.unmatched === 1 ? 'customer is' : 'customers are') + ' not matched to a Plex user.' });
+    return out;
+  }
+
+  function homeCard(view, opts) {
+    var card = el('article', { class: 'sd-card st-hcard' + (opts.cls ? ' ' + opts.cls : '') });
+    card.appendChild(el('span', { class: 'sd-notch', 'aria-hidden': 'true' }));
+    var goBtn = el('button', { type: 'button', class: 'sd-go', 'aria-label': opts.goLabel || ('Open ' + VIEWS[view].title), onclick: function () { go(view); } });
+    if (window.sdIcon) goBtn.appendChild(window.sdIcon('arrow'));
+    card.appendChild(goBtn);
+    if (opts.scope) card.appendChild(el('span', { class: 'st-scope st-scope--' + opts.scope, text: opts.scope === 'you' ? 'This browser only' : 'Everyone' }));
+    card.appendChild(el('h3', { class: 'st-hcard__title' }, el('button', { type: 'button', class: 'st-hcard__link', onclick: function () { go(view); } }, opts.title || VIEWS[view].title)));
+    if (opts.what) card.appendChild(el('p', { class: 'st-hcard__what', text: opts.what }));
+    (opts.body || []).forEach(function (n) { if (n) card.appendChild(n); });
+    if (opts.status) card.appendChild(el('div', { class: 'st-hcard__status' }, badgeEl(opts.status[0], opts.status[1])));
+    if (opts.facts && opts.facts.length) {
+      card.appendChild(el('dl', { class: 'st-facts' }, opts.facts.map(function (f) {
+        return el('div', null, el('dt', { text: f[1] }), el('dd', { text: String(f[0]) }));
+      })));
+    }
+    return card;
+  }
+
+  function renderHome() {
+    var box = document.getElementById('st-home');
+    if (!box) return;
+    var s = summary;
+    var look = window.sdLook ? window.sdLook() : { styleName: 'Classic', size: 100, light: 30, clips: 'on', style: 'classic' };
+    var chips = el('div', { class: 'st-chips', id: 'st-look-chips' });
+    fillLookChips(chips, look);
+    var display = homeCard('display', { cls: 'st-hcard--display', scope: 'you', what: 'How stream cards look on this screen. This is how they look right now.',
+      body: [el('div', { class: 'st-preview__stage st-preview__stage--mini', 'data-sd-preview': 'mini' }), chips,
+        el('button', { type: 'button', class: 'st-btn st-btn--accent st-hcard__cta', text: 'Change the look', onclick: function () { go('display'); } })] });
+    var cards = [display];
+    if (!s) {
+      box.replaceChildren(el('div', { class: 'st-homegrid' }, display, el('p', { class: 'st-note st-home__loading', text: msgs.home ? 'Could not load the overview: ' + msgs.home.text : 'Loading…' })));
+      if (window.sdRenderPreviews) window.sdRenderPreviews();
+      return;
+    }
+    var sv = s.servers;
+    cards.push(homeCard('plex', { scope: 'all', what: 'Where live streams come from. Each server is linked through the Plex account that owns it.',
+      status: !sv.total ? ['warning', 'No servers yet'] : sv.online === sv.enabled ? ['success', sv.enabled === 1 ? 'Online' : 'All ' + sv.enabled + ' online']
+        : [sv.offline.length ? 'danger' : 'neutral', sv.online + ' of ' + sv.enabled + ' online'],
+      facts: [[sv.total, sv.total === 1 ? 'server' : 'servers'], [s.accounts, s.accounts === 1 ? 'Plex account' : 'Plex accounts']] }));
+    var nd = s.netdata;
+    cards.push(homeCard('netdata', { scope: 'all', what: 'CPU and upload speed per server. Feeds the capacity rings and the bandwidth chart.',
+      status: nd.mode === 'off' ? ['neutral', 'Off'] : nd.error ? ['danger', 'Last check failed']
+        : nd.of && nd.reporting < nd.of ? ['warning', 'Partly reporting'] : ['success', nd.mode === 'cloud' ? 'Netdata Cloud' : 'From each agent'],
+      facts: nd.mode === 'off' ? [] : [[nd.reporting + '/' + nd.of, 'servers reporting CPU']] }));
+    var issues = problems(s);
+    var attn = homeCard(issues.length ? issues[0].view : 'plex', { cls: 'st-hcard--attn', goLabel: issues.length ? 'Open ' + VIEWS[issues[0].view].title : 'Open Plex servers',
+      title: issues.length ? (issues.length === 1 ? '1 thing needs a look' : issues.length + ' things need a look') : 'Nothing needs a look',
+      body: issues.length ? [el('ul', { class: 'st-issues' }, issues.slice(0, 4).map(function (p) {
+        return el('li', null, el('button', { type: 'button', onclick: function () { go(p.view); } }, badgeEl(p.tone, VIEWS[p.view].title), el('span', { text: p.text })));
+      })), issues.length > 4 ? el('p', { class: 'st-hcard__what', text: 'And ' + (issues.length - 4) + ' more.' }) : null]
+        : [el('p', { class: 'st-hcard__what', text: 'Servers, Netdata, people and billing all look fine. This card lists anything that needs fixing.' })] });
+    cards.push(attn);
+    var al = s.alerts;
+    cards.push(homeCard('alerts', { scope: 'all', what: 'When a server counts as running hot. Hot servers turn amber and show under Alerts.',
+      status: al.hot.length ? ['warning', names(al.hot) + (al.hot.length === 1 ? ' is hot' : ' are hot')] : ['success', 'No server is hot'],
+      facts: [[Math.round(al.hot_cpu_pct) + '%', 'CPU threshold']] }));
+    var ac = s.access;
+    cards.push(homeCard('access', { scope: 'all', what: 'Who can sign in and what each person sees.',
+      status: ac.sync_error ? ['danger', 'Loading people failed'] : ac.synced_at ? ['success', 'People loaded ' + since(ac.synced_at)] : ['warning', 'People not loaded yet'],
+      facts: [[ac.people, ac.people === 1 ? 'person' : 'people'], [ac.custom + ac.off, 'custom or off'], [ac.admins, ac.admins === 1 ? 'admin login' : 'admin logins']] }));
+    var bl = s.billing;
+    cards.push(homeCard('billing', { scope: 'all', what: bl.connected ? 'Shows each person their own Stripe subscription. Read-only key.' : 'Optional. Connect Stripe to show each person their own subscription.',
+      status: !bl.connected ? ['neutral', 'Not connected'] : bl.error ? ['danger', 'Last sync failed'] : bl.unmatched ? ['warning', bl.unmatched + ' not matched'] : ['success', 'Synced ' + (since(bl.synced_at) || 'soon')],
+      facts: bl.connected ? [[bl.customers, bl.customers === 1 ? 'customer' : 'customers']] : [] }));
+    box.replaceChildren(el('div', { class: 'st-homegrid' }, cards));
+    if (window.sdRenderPreviews) window.sdRenderPreviews();
+  }
+
+  function fillLookChips(box, look) {
+    var chip = function (label, value) { return el('span', { class: 'st-chip' }, label ? label + ' ' : '', el('b', { text: value })); };
+    box.replaceChildren(chip('', look.styleName), chip('Size', look.size + '%'), look.style === 'classic' ? chip('Art', look.light + '%') : null,
+      chip('Clips', look.clips === 'on' ? 'on' : 'off'));
+  }
+  window.addEventListener('gs:look', function (e) {
+    var chips = document.getElementById('st-look-chips');
+    if (chips) fillLookChips(chips, e.detail);
   });
 
   // ---------- Plex: sign in ----------
@@ -269,7 +433,7 @@
   function renderAccount() {
     var accounts = state.plex_accounts || [];
     var sec = el('section', { class: 'st-section' }, el('h3', { text: 'Plex accounts' }),
-      el('p', { class: 'st-note', text: 'Each of your servers can belong to its own Plex account. Link each account here: the dashboard finds the servers it owns, their access tokens, and the people it shares them with.' }));
+      el('p', { class: 'st-note', text: 'Link the Plex account that owns each server. The dashboard then finds that account’s servers, their access tokens and the people they are shared with.' }));
     if (accounts.length) {
       var list = el('ul', { class: 'st-list' });
       accounts.forEach(function (a) {
@@ -496,14 +660,14 @@
       }).catch(function (e) { setMsg('netdata', 'error', e.message); }));
     };
     pane.appendChild(el('section', { class: 'st-section' },
-      el('h3', { text: 'Server telemetry' }),
-      el('p', { class: 'st-note', text: 'CPU and network traffic for the capacity rings, server status and throughput.' }),
+      el('h3', { text: 'Connection' }),
+      el('p', { class: 'st-note', text: 'Where the numbers come from. Netdata Cloud is simplest when your agents already stream to it.' }),
       field('Source', mode), cloudOnly,
       el('details', { class: 'st-details' }, el('summary', { text: 'Advanced: metric names' }),
         el('div', { class: 'st-form' }, field('CPU context', cpu), field('Network context', net),
           el('div', { class: 'st-wide' }, field('Outbound dimension', dim, 'Windows nodes may use different names. Check one node’s charts in Netdata.')))),
       el('div', { class: 'st-row' },
-        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['nd-save'] ? 'Saving…' : 'Save', disabled: busy['nd-save'], onclick: save }),
+        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['nd-save'] ? 'Saving…' : 'Save connection', disabled: busy['nd-save'], onclick: save }),
         el('button', { type: 'button', class: 'st-btn', text: busy['nd-test'] ? 'Testing…' : 'Test connection', disabled: busy['nd-test'] || nd.mode === 'off', onclick: test })),
       nd.error ? el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), 'Last poll failed: ' + nd.error) : null,
       message('netdata'),
@@ -533,19 +697,23 @@
   function renderAlerts(pane) {
     var val = el('output', { text: Math.round(state.hot_cpu_pct) + '%' });
     var range = el('input', { class: 'sd-range', type: 'range', min: 50, max: 100, step: 5, value: state.hot_cpu_pct, 'aria-label': 'Hot CPU threshold', id: 'al-hot' });
-    range.addEventListener('input', function () { val.textContent = range.value + '%'; });
+    var fill = function () { range.style.setProperty('--fill', ((Number(range.value) - 50) / 50) * 100 + '%'); };
+    fill();
+    range.addEventListener('input', function () { val.textContent = range.value + '%'; fill(); });
+    // Saves when you let go of the slider.
+    range.addEventListener('change', function () {
+      var v = Number(range.value);
+      api('PUT', '/api/settings/general', { hot_cpu_pct: v }).then(function () {
+        delete drafts['al-hot'];
+        msgs.alerts = { kind: 'ok', text: 'Saved. A server above ' + v + '% CPU now counts as hot.' };
+        return afterChange();
+      }).catch(function (e) { setMsg('alerts', 'error', e.message); });
+    });
     pane.appendChild(el('section', { class: 'st-section' },
-      el('div', { class: 'sd-field__row' }, el('h3', { text: 'Hot CPU threshold' }), val),
+      el('div', { class: 'sd-field__row' }, el('label', { for: 'al-hot', text: 'Hot CPU threshold' }), val),
       range,
-      el('p', { class: 'st-note', text: 'A server above this is marked degraded, turns amber on the capacity rings and gets an alert.' }),
-      el('div', { class: 'st-row' },
-        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy.general ? 'Saving…' : 'Save', disabled: busy.general,
-          onclick: function () {
-            withBusy('general', api('PUT', '/api/settings/general', { hot_cpu_pct: Number(range.value) }).then(function () {
-              msgs.alerts = { kind: 'ok', text: 'Saved.' };
-              return afterChange();
-            }).catch(function (e) { setMsg('alerts', 'error', e.message); }));
-          } })),
+      el('div', { class: 'sd-field__ticks' }, el('span', { text: '50%' }), el('span', { text: '100%' })),
+      el('p', { class: 'st-note', text: 'A server whose CPU stays above this is marked Degraded, turns amber on its capacity ring and gets an alert. Lower it to hear about busy servers sooner. Saves when you let go.' }),
       message('alerts')));
   }
 
@@ -648,18 +816,20 @@
     // Defaults
     pane.appendChild(el('section', { class: 'st-section' },
       el('h3', { text: 'Default access for Plex users' }),
-      el('p', { class: 'st-note', text: 'Applies to everyone without custom access below.' }),
-      sectionChecks('acc-def', access.default_sections),
-      el('div', { class: 'st-row' },
-        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['acc-def'] ? 'Saving…' : 'Save defaults', disabled: busy['acc-def'],
-          onclick: function () {
-            var picked = checked('acc-def');
-            withBusy('acc-def', api('PUT', '/api/settings/access/defaults', { sections: picked }).then(function () {
-              clearDrafts('acc-def');
-              msgs['acc-def'] = { kind: 'ok', text: 'Saved.' };
-              return loadAccess();
-            }).catch(function (e) { setMsg('acc-def', 'error', e.message); }));
-          } })),
+      el('p', { class: 'st-note', text: 'What everyone sees unless you give them custom access below. Saves as you tick.' }),
+      (function () {
+        var box = sectionChecks('acc-def', access.default_sections);
+        // Saves as soon as a box is ticked or cleared.
+        box.addEventListener('change', function () {
+          var picked = checked('acc-def');
+          api('PUT', '/api/settings/access/defaults', { sections: picked }).then(function () {
+            clearDrafts('acc-def');
+            msgs['acc-def'] = { kind: 'ok', text: 'Saved. People on the default now see ' + (picked.length ? picked.map(function (k) { var x = access.sections.find(function (z) { return z.key === k; }); return x ? x.label : k; }).join(', ') : 'nothing') + '.' };
+            return loadAccess();
+          }).catch(function (e) { setMsg('acc-def', 'error', e.message); });
+        });
+        return box;
+      })(),
       message('acc-def')));
 
     // People: find one person at a time, plus a short list of everyone not on the defaults.
@@ -952,7 +1122,7 @@
 
   // ---------- render ----------
   function render() {
-    if (tab === 'display') return;
+    if (tab === 'display' || tab === 'home') return;
     var pane = document.getElementById('st-pane-' + tab);
     if (!pane) return;
     var active = document.activeElement && pane.contains(document.activeElement) ? document.activeElement.id : null;
@@ -1001,5 +1171,5 @@
     });
   }
 
-  setTab('display');
+  setTab(isAdmin() ? 'home' : 'display');
 })();

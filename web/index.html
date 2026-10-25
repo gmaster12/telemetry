@@ -479,12 +479,6 @@
   .sd-flip__inner.is-flipped .sd-clip { visibility: hidden; }
   @media (prefers-reduced-motion: reduce) { .sd-clip { display: none; } }
   /* Settings: card style picker */
-  .sd-cstyle { margin: 0; border: 0; }
-  .sd-cstyle legend { float: left; width: 100%; margin-bottom: 12px; padding: 0; font-size: 15px; font-weight: 600; }
-  .sd-cstyle__opts { clear: both; display: flex; flex-wrap: wrap; gap: 6px; }
-  .sd-cstyle__opts label { position: relative; cursor: pointer; }
-  .sd-cstyle__opts input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-  .sd-cstyle__opts label:focus-within { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
   .sd-field.is-off { opacity: 0.55; }
   .sd-dots { display: flex; justify-content: center; gap: 6px; }
   .sd-dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--border-strong); opacity: 0.5; transition: width 0.2s ease; }
@@ -577,55 +571,69 @@
 
   <div class="sd-content">
     <div class="sd-settings-dock" id="settings-dock" hidden>
-      <section class="sd-settings" id="settings" role="dialog" aria-labelledby="set-title">
-        <div class="sd-settings__head"><h2 class="sd-settings__title" id="set-title">Settings</h2><button type="button" class="sd-settings__close" id="set-close" aria-label="Close settings"></button></div>
-        <div class="st-tabs" role="tablist" aria-label="Settings sections">
-          <button type="button" class="gs-chip gs-chip--selected" role="tab" id="st-tab-display" aria-selected="true" aria-controls="st-pane-display" data-tab="display">Display</button>
-          <button type="button" class="gs-chip" role="tab" id="st-tab-plex" aria-selected="false" aria-controls="st-pane-plex" data-tab="plex" data-admin hidden>Plex servers</button>
-          <button type="button" class="gs-chip" role="tab" id="st-tab-netdata" aria-selected="false" aria-controls="st-pane-netdata" data-tab="netdata" data-admin hidden>Netdata</button>
-          <button type="button" class="gs-chip" role="tab" id="st-tab-alerts" aria-selected="false" aria-controls="st-pane-alerts" data-tab="alerts" data-admin hidden>Alerts</button>
-          <button type="button" class="gs-chip" role="tab" id="st-tab-access" aria-selected="false" aria-controls="st-pane-access" data-tab="access" data-admin hidden>Access</button>
-          <button type="button" class="gs-chip" role="tab" id="st-tab-billing" aria-selected="false" aria-controls="st-pane-billing" data-tab="billing" data-admin hidden>Billing</button>
-        </div>
-        <div class="st-pane" id="st-pane-display" role="tabpanel" aria-labelledby="st-tab-display">
-          <div class="sd-field">
-            <div class="sd-field__row"><label for="card-size">Stream card size</label><output id="card-size-out" for="card-size">100%</output></div>
-            <input class="sd-range" type="range" id="card-size" min="60" max="100" step="5" value="100">
-            <div class="sd-field__ticks"><span>Smaller</span><span>Default</span></div>
-            <p class="sd-field__hint">Resizes the poster cards in Live streams as you drag. List and table views stay the same.</p>
+      <div class="sd-settings-scrim" id="set-scrim"></div>
+      <section class="sd-settings" id="settings" role="dialog" aria-labelledby="set-title" data-view="display">
+        <div class="sd-settings__head">
+          <button type="button" class="st-back" id="set-back" aria-label="Back to all settings" hidden></button>
+          <div class="st-titles">
+            <span class="st-crumb" id="set-crumb" hidden>Settings</span>
+            <div class="st-titleline"><h2 class="sd-settings__title" id="set-title" tabindex="-1">Settings</h2><span class="st-scope" id="set-scope" hidden></span></div>
           </div>
-          <fieldset class="sd-field sd-cstyle" id="card-style">
-            <legend>Stream card style</legend>
-            <div class="sd-cstyle__opts">
-              <label class="gs-chip"><input type="radio" name="cstyle" value="classic">Classic</label>
-              <label class="gs-chip"><input type="radio" name="cstyle" value="side">Poster beside</label>
-              <label class="gs-chip"><input type="radio" name="cstyle" value="top">Poster on top</label>
-              <label class="gs-chip"><input type="radio" name="cstyle" value="banner">Banner</label>
-              <label class="gs-chip"><input type="radio" name="cstyle" value="tiles">Tiles</label>
-            </div>
-            <p class="sd-field__hint">Classic is the original card. Poster beside and Banner fit two per row, Tiles fit the most. Select a card to flip it in any style.</p>
-          </fieldset>
-          <fieldset class="sd-field sd-cstyle" id="clip-mode">
-            <legend>Moving clips in stream cards</legend>
-            <div class="sd-cstyle__opts">
-              <label class="gs-chip"><input type="radio" name="clips" value="on">On</label>
-              <label class="gs-chip"><input type="radio" name="clips" value="off">Off</label>
-            </div>
-            <p class="sd-field__hint">Up to 6 cards, picked at random, play a silent 8-second loop from 10% into the show or movie, and pause when the viewer pauses. A new title's clip shows up within a minute or so. Turn this off to save data on a phone.</p>
-          </fieldset>
-          <div class="sd-field" id="art-light-field">
-            <div class="sd-field__row"><label for="art-light">Cover art brightness</label><output id="art-light-out" for="art-light">30%</output></div>
-            <input class="sd-range" type="range" id="art-light" min="0" max="100" step="5" value="30">
-            <div class="sd-field__ticks"><span>Darker</span><span>Brighter</span></div>
-            <p class="sd-field__hint" id="art-light-hint">How much of the poster shows through on stream cards. Text keeps a shadow so it stays readable.</p>
-          </div>
-          <button type="button" class="sd-settings__reset" id="card-size-reset" disabled>Reset to default</button>
+          <span class="st-spacer"></span>
+          <button type="button" class="st-btn" id="card-size-reset" disabled>Reset to default</button>
+          <button type="button" class="sd-settings__close" id="set-close" aria-label="Close settings"></button>
         </div>
-        <div class="st-pane" id="st-pane-plex" role="tabpanel" aria-labelledby="st-tab-plex" hidden></div>
-        <div class="st-pane" id="st-pane-netdata" role="tabpanel" aria-labelledby="st-tab-netdata" hidden></div>
-        <div class="st-pane" id="st-pane-alerts" role="tabpanel" aria-labelledby="st-tab-alerts" hidden></div>
-        <div class="st-pane" id="st-pane-access" role="tabpanel" aria-labelledby="st-tab-access" hidden></div>
-        <div class="st-pane" id="st-pane-billing" role="tabpanel" aria-labelledby="st-tab-billing" hidden></div>
+        <p class="st-lead" id="set-lead" hidden></p>
+        <div class="st-home" id="st-home" hidden></div>
+        <div class="st-pane st-display" id="st-pane-display">
+          <div class="st-display__ctl">
+            <fieldset class="sd-field st-styles" id="card-style">
+              <legend>Stream card style</legend>
+              <p class="sd-field__hint">Pick by picture. The preview changes as you choose. Select any card on the dashboard to flip it.</p>
+              <div class="st-thumbs">
+                <label class="st-thumb"><input type="radio" name="cstyle" value="classic"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="8" y="8" width="80" height="56" rx="8" fill="#2a3542"/><rect x="14" y="40" width="40" height="5" rx="2" fill="#fff"/><rect x="14" y="49" width="28" height="4" rx="2" fill="#aab"/><rect x="14" y="57" width="68" height="2" rx="1" fill="#b8fc64"/></svg><span>Classic</span></label>
+                <label class="st-thumb"><input type="radio" name="cstyle" value="side"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="8" y="8" width="80" height="56" rx="8" fill="#e4e4e4"/><rect x="12" y="12" width="28" height="48" rx="5" fill="#3f6d8c"/><rect x="46" y="18" width="34" height="5" rx="2" fill="#0b0b0d"/><rect x="46" y="27" width="24" height="4" rx="2" fill="#8a8a8f"/><rect x="46" y="50" width="36" height="2" rx="1" fill="#0b0b0d"/></svg><span>Poster beside</span></label>
+                <label class="st-thumb"><input type="radio" name="cstyle" value="top"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="22" y="4" width="52" height="64" rx="8" fill="#e4e4e4"/><rect x="22" y="4" width="52" height="38" rx="8" fill="#3f6d8c"/><rect x="28" y="48" width="34" height="5" rx="2" fill="#0b0b0d"/><rect x="28" y="57" width="22" height="4" rx="2" fill="#8a8a8f"/></svg><span>Poster on top</span></label>
+                <label class="st-thumb"><input type="radio" name="cstyle" value="banner"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="4" y="18" width="88" height="36" rx="8" fill="#e4e4e4"/><rect x="56" y="18" width="36" height="36" rx="8" fill="#3f6d8c"/><rect x="10" y="27" width="36" height="5" rx="2" fill="#0b0b0d"/><rect x="10" y="36" width="24" height="4" rx="2" fill="#8a8a8f"/></svg><span>Banner</span></label>
+                <label class="st-thumb"><input type="radio" name="cstyle" value="tiles"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="10" y="8" width="22" height="33" rx="4" fill="#3f6d8c"/><rect x="37" y="8" width="22" height="33" rx="4" fill="#6b4f7a"/><rect x="64" y="8" width="22" height="33" rx="4" fill="#4f7a5a"/><rect x="10" y="44" width="22" height="20" rx="4" fill="#7a6a4f"/><rect x="37" y="44" width="22" height="20" rx="4" fill="#3f6d8c"/></svg><span>Tiles</span></label>
+              </div>
+            </fieldset>
+            <div class="sd-field">
+              <div class="sd-field__row"><label for="card-size">Card size</label><output id="card-size-out" for="card-size">100%</output></div>
+              <input class="sd-range" type="range" id="card-size" min="60" max="100" step="5" value="100">
+              <div class="sd-field__ticks"><span>Smaller</span><span>Default</span></div>
+              <p class="sd-field__hint">Smaller cards fit more per row. The phone rows and the table stay the same.</p>
+            </div>
+            <div class="sd-field" id="art-light-field">
+              <div class="sd-field__row"><label for="art-light">Cover art brightness</label><output id="art-light-out" for="art-light">30%</output></div>
+              <input class="sd-range" type="range" id="art-light" min="0" max="100" step="5" value="30">
+              <div class="sd-field__ticks"><span>Darker</span><span>Brighter</span></div>
+              <p class="sd-field__hint" id="art-light-hint">How much of the poster shows through the shade. Text keeps a shadow so it stays readable.</p>
+            </div>
+            <div class="sd-field st-switchrow" id="clip-mode">
+              <div><label class="st-switchrow__label" for="clip-switch">Moving clips</label>
+                <p class="sd-field__hint">Up to 6 cards play a silent 8-second loop from 10% into the show or movie, only while that person is watching. Turn it off to save data on a phone.</p></div>
+              <input type="checkbox" class="st-switch" id="clip-switch" role="switch" checked>
+              <span class="st-switchrow__state" id="clip-state" aria-hidden="true">On</span>
+            </div>
+          </div>
+          <aside class="st-preview" aria-label="Live preview">
+            <div class="st-preview__head">
+              <span class="st-preview__label"><i aria-hidden="true"></i>Live preview</span>
+              <div class="st-seg" role="group" aria-label="Preview side">
+                <button type="button" data-side="front" aria-pressed="true">Card</button>
+                <button type="button" data-side="back" aria-pressed="false">Back</button>
+              </div>
+            </div>
+            <div class="st-preview__stage" id="set-preview" data-sd-preview="full"></div>
+            <p class="st-preview__note" id="set-preview-note"></p>
+          </aside>
+        </div>
+        <div class="st-pane" id="st-pane-plex" hidden></div>
+        <div class="st-pane" id="st-pane-netdata" hidden></div>
+        <div class="st-pane" id="st-pane-alerts" hidden></div>
+        <div class="st-pane" id="st-pane-access" hidden></div>
+        <div class="st-pane" id="st-pane-billing" hidden></div>
       </section>
     </div>
     <div class="sd-top">
@@ -1386,7 +1394,7 @@
   function clipPlay(v) {
     if (v._want && v._seen !== false && !document.hidden && v.isConnected) { const p = v.play(); if (p) p.catch(() => {}); } else v.pause();
   }
-  document.addEventListener('visibilitychange', () => clipVideos.forEach(clipPlay));
+  document.addEventListener('visibilitychange', () => { clipVideos.forEach(clipPlay); pvVideos.forEach(clipPlay); });
   function pickClips(rows, cardView) {
     const ok = new Set(cardView && clipsOn() ? rows.filter((r) => r.clip && !r._ended).map((r) => r.id) : []);
     clipPicks.forEach((id) => { if (!ok.has(id)) clipPicks.delete(id); });
@@ -1399,20 +1407,32 @@
       clipVideos.delete(id);
     });
   }
+  function clipVideo() {
+    const v = document.createElement('video');
+    v.className = 'sd-clip';
+    v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto'; v.disablePictureInPicture = true; v.tabIndex = -1;
+    ['muted', 'playsinline'].forEach((a) => v.setAttribute(a, ''));
+    v.setAttribute('aria-hidden', 'true');
+    v.addEventListener('canplay', () => v.classList.add('is-ready'));
+    return v;
+  }
+  // The Settings preview draws a card too; it gets its own <video> so it never takes one from a real card.
+  let pvMode = false;
+  const pvVideos = new Map();      // clip url -> <video> used by the Settings preview
   function attachClip(host, r) {
-    if (!r.clip || r._ended || !clipPicks.has(r.id)) return;
-    let v = clipVideos.get(r.id);
-    if (!v) {
-      v = document.createElement('video');
-      v.className = 'sd-clip';
-      v.muted = true; v.loop = true; v.playsInline = true; v.preload = 'auto'; v.disablePictureInPicture = true; v.tabIndex = -1;
-      ['muted', 'playsinline'].forEach((a) => v.setAttribute(a, ''));
-      v.setAttribute('aria-hidden', 'true');
-      v.addEventListener('canplay', () => v.classList.add('is-ready'));
-      clipVideos.set(r.id, v);
-      if (clipObserver) clipObserver.observe(v);
+    if (!r.clip || r._ended) return;
+    let v;
+    if (pvMode) {
+      if (!clipsOn()) return;
+      v = pvVideos.get(r.clip);
+      if (!v) { v = clipVideo(); v.src = r.clip; pvVideos.set(r.clip, v); }
+      v._used = true;
+    } else {
+      if (!clipPicks.has(r.id)) return;
+      v = clipVideos.get(r.id);
+      if (!v) { v = clipVideo(); clipVideos.set(r.id, v); if (clipObserver) clipObserver.observe(v); }
+      if (v.getAttribute('src') !== r.clip) v.src = r.clip;
     }
-    if (v.getAttribute('src') !== r.clip) v.src = r.clip;
     v._want = r.state === 'Playing';
     host.classList.add('has-clip');
     const shade = el('span', 'sd-clip__shade'); shade.setAttribute('aria-hidden', 'true');
@@ -2041,11 +2061,14 @@
     }
   }
 
-  /* Settings: stream card size */
+  /* Settings, Display (saved in this browser only): card style by picture, size, cover art brightness and moving
+     clips, next to a live preview that draws a real card with the current look. The Settings home shows a small
+     copy of the same preview on its Display card. */
   const sizeInput = document.getElementById('card-size');
   const sizeOut = document.getElementById('card-size-out');
   const dock = document.getElementById('settings-dock');
   const gear = document.getElementById('gear');
+  const resetBtn = document.getElementById('card-size-reset');
   gear.appendChild(icon('sliders', 22));
   document.getElementById('set-close').appendChild(icon('close', 18));
   // Cover art brightness: 0 is the original dim look, 100 the brightest; 30 by default.
@@ -2055,21 +2078,26 @@
   const artLight = () => { const v = Number(dash.params().artlight); return Number.isFinite(v) && dash.params().artlight != null ? Math.max(0, Math.min(100, v)) : ART_DEFAULT; };
   const styleBox = document.getElementById('card-style');
   const styleOf = () => (CARD_STYLES.includes(dash.params().cardstyle) ? dash.params().cardstyle : 'classic');
+  const clipSwitch = document.getElementById('clip-switch');
+  let clipShown = null;
+  const STYLE_NAMES = { classic: 'Classic', side: 'Poster beside', top: 'Poster on top', banner: 'Banner', tiles: 'Tiles' };
   function syncReset() {
-    document.getElementById('card-size-reset').disabled = Number(sizeInput.value) === 100 && Number(lightInput.value) === ART_DEFAULT && cardStyle === 'classic';
+    resetBtn.disabled = Number(sizeInput.value) === 100 && Number(lightInput.value) === ART_DEFAULT && cardStyle === 'classic' && clipMode() === 'on';
   }
   function applyStyle(v) {
+    const changed = cardStyle !== v;
     cardStyle = v;
     root.dataset.cstyle = v;
-    styleBox.querySelectorAll('input').forEach((i) => { i.checked = i.value === v; i.parentElement.classList.toggle('gs-chip--selected', i.checked); });
+    styleBox.querySelectorAll('input').forEach((i) => { i.checked = i.value === v; i.parentElement.classList.toggle('is-on', i.checked); });
     // Brightness only changes the Classic card; the other styles show the poster at full brightness.
     const classic = v === 'classic';
     lightInput.disabled = !classic;
     document.getElementById('art-light-field').classList.toggle('is-off', !classic);
     document.getElementById('art-light-hint').textContent = classic
-      ? 'How much of the poster shows through on stream cards. Text keeps a shadow so it stays readable.'
+      ? 'How much of the poster shows through the shade. Text keeps a shadow so it stays readable.'
       : 'Only for the Classic style. The other styles show the poster at full brightness.';
     syncReset();
+    if (changed) renderPreviews();
   }
   function applySize(v) {
     root.style.setProperty('--card-scale', String(v / 100));
@@ -2077,6 +2105,7 @@
     sizeInput.style.setProperty('--fill', ((v - 60) / 40) * 100 + '%');
     sizeOut.textContent = v + '%';
     syncReset();
+    zoomPreviews();
   }
   function applyLight(v) {
     root.style.setProperty('--art-shade', String(1 - 0.6 * (v / 100)));
@@ -2085,30 +2114,102 @@
     lightOut.textContent = v + '%';
     syncReset();
   }
-  function openSettings(open) {
+  function applyClipMode(v) {
+    clipSwitch.checked = v === 'on';
+    document.getElementById('clip-state').textContent = v === 'on' ? 'On' : 'Off';
+    syncReset();
+    if (clipShown !== null && clipShown !== v) renderPreviews();
+    clipShown = v;
+  }
+
+  // ---- live preview ----
+  const PV_W = { classic: 330, side: 430, top: 300, banner: 430, tiles: 190 };   // about the width each style gets in the grid
+  const PV_SAMPLE = { id: 'preview-sample', user: 'mara_k', title: 'Night Harbor', kind: 'Episode', device: 'Living room TV', platform: 'tvOS',
+    resolution: '1080p', method: 'Direct play', bitrate_mbps: 8.4, server: 'Atlas', state: 'Playing', progress_pct: 42, elapsed_min: 18,
+    location: 'WAN', player: 'Plex for Apple TV', source_video: 'H.264 1080p', stream_video: 'H.264 1080p', video_decision: 'Direct play',
+    source_audio: 'EAC3 5.1', stream_audio: 'EAC3 5.1', audio_decision: 'Direct play', container: 'MKV', transcode_reason: 'None',
+    hw_accel: 'None', transcode_speed: null, throttled: false, quality: 'Original', subtitles: 'None', clip: null };
+  let pvSide = 'front';
+  let pvId = null;
+  function previewRow() {
+    const d = dash.data('streams');
+    const rows = d.status === 'ok' ? d.data : [];
+    // Keep showing the same stream while it lasts; otherwise prefer one that is playing and has a clip.
+    const pick = rows.find((r) => r.id === pvId) || rows.find((r) => r.state === 'Playing' && r.clip)
+      || rows.find((r) => r.state === 'Playing') || rows[0];
+    pvId = pick ? pick.id : null;
+    return pick ? { row: pick, live: true } : { row: PV_SAMPLE, live: false };
+  }
+  const previewStages = () => Array.from(document.querySelectorAll('[data-sd-preview]')).filter((s) => !dock.hidden && s.offsetParent !== null);
+  function zoomPreviews() {
+    previewStages().forEach((stage) => {
+      const box = stage.firstElementChild;
+      if (!box) return;
+      const base = PV_W[cardStyle] || 330;
+      const fit = (stage.clientWidth || base) / base;
+      // The full preview follows the card size slider; the small one on the Settings home just fits its card.
+      box.style.zoom = String(Math.min(fit, stage.dataset.sdPreview === 'mini' ? 1 : Number(sizeInput.value) / 100));
+    });
+  }
+  function renderPreviews() {
+    const stages = previewStages();
+    if (!stages.length) { pvVideos.forEach((v) => v.pause()); return; }
+    const { row, live } = previewRow();
+    pvVideos.forEach((v) => { v._used = false; });
+    stages.forEach((stage) => {
+      const mini = stage.dataset.sdPreview === 'mini';
+      // Front and back share one spot, like the real flip card, so the back keeps the front's size.
+      const box = el('div', 'st-pv st-pv--' + cardStyle + (!mini && pvSide === 'back' ? ' is-back' : ''));
+      box.style.width = (PV_W[cardStyle] || 330) + 'px';
+      pvMode = true;
+      try { box.append(streamFront(row)); if (!mini) box.append(streamBack(row)); } finally { pvMode = false; }
+      box.inert = true;   // a picture of a card: nothing in it is clickable
+      box.setAttribute('aria-hidden', 'true');
+      stage.replaceChildren(box);
+    });
+    pvVideos.forEach((v, src) => { if (!v._used) { v.pause(); v.removeAttribute('src'); v.load(); pvVideos.delete(src); } });
+    zoomPreviews();
+    const note = document.getElementById('set-preview-note');
+    note.textContent = (live ? 'Using ' + row.user + '\u2019s stream, playing now.' : 'A sample stream: nothing is playing right now.')
+      + (pvSide === 'back' ? ' This is the back of the card, what you see when you select it.' : '')
+      + ' Changes save as you make them, on this browser only.';
+    window.dispatchEvent(new CustomEvent('gs:look', { detail: { style: cardStyle, styleName: STYLE_NAMES[cardStyle], size: Number(sizeInput.value),
+      light: Number(lightInput.value), clips: clipMode() } }));
+  }
+  window.sdRenderPreviews = renderPreviews;
+  window.sdLook = () => ({ style: cardStyle, styleName: STYLE_NAMES[cardStyle], size: Number(sizeInput.value), light: Number(lightInput.value), clips: clipMode() });
+  window.sdBadge = badge;
+  document.querySelectorAll('.st-seg [data-side]').forEach((b) => b.addEventListener('click', () => {
+    pvSide = b.dataset.side;
+    document.querySelectorAll('.st-seg [data-side]').forEach((x) => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+    renderPreviews();
+  }));
+  if ('ResizeObserver' in window) new ResizeObserver(() => zoomPreviews()).observe(document.getElementById('settings'));
+
+  // ---- open and close ----
+  function openSettings(open, fresh) {
+    const was = !dock.hidden;
     dock.hidden = !open;
     gear.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (!open) { gear.focus(); return; }
-    if (window.stActiveTab && window.stActiveTab() !== 'display') return;
-    if (isMobile()) { if (view === 'rows') view = 'carousel'; if (mtab !== 'streams') goTab('streams'); else renderStreams(); }
-    else { if (view === 'table') { view = 'cards'; renderStreams(); } goTo('streams-card'); }
-    sizeInput.focus();
+    if (!open) { pvVideos.forEach((v) => v.pause()); if (was) gear.focus(); return; }
+    if (window.stOnOpen) window.stOnOpen(fresh);   // settings.js picks the home (admins) or Display (viewers)
+    renderPreviews();
   }
   window.sdOpenSettings = openSettings;
-  gear.addEventListener('click', () => openSettings(dock.hidden));
+  gear.addEventListener('click', () => openSettings(dock.hidden, true));
   document.getElementById('set-close').addEventListener('click', () => openSettings(false));
+  document.getElementById('set-scrim').addEventListener('click', () => openSettings(false));
   document.getElementById('settings').addEventListener('keydown', (e) => { if (e.key === 'Escape') openSettings(false); });
   sizeInput.addEventListener('input', () => applySize(Number(sizeInput.value)));
   sizeInput.addEventListener('change', () => dash.setParams({ cardsize: Number(sizeInput.value) }));
-  const clipBox = document.getElementById('clip-mode');
-  function applyClipMode(v) {
-    clipBox.querySelectorAll('input').forEach((i) => { i.checked = i.value === v; i.parentElement.classList.toggle('gs-chip--selected', i.checked); });
-  }
-  clipBox.addEventListener('change', (e) => { if (e.target.name === 'clips') { applyClipMode(e.target.value); dash.setParams({ clips: e.target.value }); } });
-  styleBox.addEventListener('change', (e) => { if (e.target.name === 'cstyle') { applyStyle(e.target.value); dash.setParams({ cardstyle: e.target.value }); } });
+  clipSwitch.addEventListener('change', () => { const v = clipSwitch.checked ? 'on' : 'off'; dash.setParams({ clips: v }); applyClipMode(v); });
+  styleBox.addEventListener('change', (e) => { if (e.target.name === 'cstyle') { dash.setParams({ cardstyle: e.target.value }); applyStyle(e.target.value); } });
   lightInput.addEventListener('input', () => applyLight(Number(lightInput.value)));
   lightInput.addEventListener('change', () => dash.setParams({ artlight: Number(lightInput.value) }));
-  document.getElementById('card-size-reset').addEventListener('click', () => { applySize(100); applyLight(ART_DEFAULT); applyStyle('classic'); dash.setParams({ cardsize: 100, artlight: ART_DEFAULT, cardstyle: 'classic' }); });
+  resetBtn.addEventListener('click', () => {
+    dash.setParams({ cardsize: 100, artlight: ART_DEFAULT, cardstyle: 'classic', clips: 'on' });
+    applySize(100); applyLight(ART_DEFAULT); applyStyle('classic'); applyClipMode('on');
+  });
 
   // Page-load build ("Build and count", Glenn's pick of five): plays once, as the splash fades.
   // Navigation, header, pills, then cards come in; the big numbers count up and the bandwidth line draws.
@@ -2174,6 +2275,7 @@
     renderChips();
     renderStreams();
     renderTabbar(renderAlerts());
+    if (!dock.hidden) renderPreviews();
   }
   mq.addEventListener('change', renderAll);
   dash.onData(renderAll);
