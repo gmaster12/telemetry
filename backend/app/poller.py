@@ -61,6 +61,10 @@ class Poller:
         except (TypeError, ValueError):
             return 0.0
 
+    def refresh_now(self) -> None:
+        """Poll Plex right away (after stopping a stream)."""
+        self._wake.set()
+
     def kick(self) -> None:
         """Run the account syncs (plex.tv users, Stripe) now, in the background."""
         self._upkeep_wake.set()

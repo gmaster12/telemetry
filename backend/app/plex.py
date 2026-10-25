@@ -83,8 +83,11 @@ class PlexClient:
         return data.get("MediaContainer", {}).get("Metadata", []) or []
 
     async def terminate(self, session_id: str, reason: str) -> None:
-        """Plex Pass: stop a playback session. Not exposed unless ENABLE_ACTIONS=true."""
-        await self._get("/status/sessions/terminate", {"sessionId": session_id, "reason": reason})
+        """Plex Pass: stop a playback session; the viewer sees the reason. Plex answers with an empty body."""
+        url = self.server.plex_url.rstrip("/") + "/status/sessions/terminate"
+        r = await self.http.get(url, headers=self._headers(), params={"sessionId": session_id, "reason": reason}, timeout=8.0)
+        if r.status_code not in (200, 204):
+            raise PlexError(f"{self.server.name}: HTTP {r.status_code}" + (" (stopping streams needs Plex Pass)" if r.status_code in (401, 403) else ""))
 
 
 # ---------- plex.tv account: sign in with Plex and discover servers ----------

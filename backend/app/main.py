@@ -656,7 +656,43 @@ def auth_logout(request: Request):
 
 @app.get("/api/me")
 def api_me(request: Request):
-    return me(request).public()
+    p = me(request)
+    return {**p.public(), "actions": p.is_admin and actions_enabled()}
+
+
+# ---------- stopping a stream (admins; Plex Pass) ----------
+def actions_enabled() -> bool:
+    """On unless ENABLE_ACTIONS=false in .env."""
+    return (env("ENABLE_ACTIONS", "true") or "true").strip().lower() not in ("0", "false", "no", "off")
+
+
+class StopIn(BaseModel):
+    reason: str = Field(default="", max_length=300)
+
+
+@app.post("/api/streams/{stream_id}/stop")
+async def stop_stream(stream_id: str, body: StopIn, request: Request):
+    p = admin(request)
+    if not actions_enabled():
+        raise HTTPException(403, "Stopping streams is turned off (ENABLE_ACTIONS=false).")
+    if poller.cfg.use_sample:
+        raise HTTPException(409, "These are sample streams. Add a Plex server first.")
+    row = next((r for r in poller.streams if r.get("id") == stream_id), None)
+    if not row:
+        raise HTTPException(404, "That stream has already ended.")
+    if not row.get("session_id"):
+        raise HTTPException(409, "Plex did not give a session id for this stream, so it cannot be stopped from here.")
+    s = next((x for x in poller.cfg.servers if x.name == row["server"]), None)
+    if not s:
+        raise HTTPException(404, "That server is no longer set up.")
+    reason = body.reason.strip() or "This stream was stopped by the server admin."
+    try:
+        await poller.client(s).terminate(row["session_id"], reason)
+    except Exception as e:
+        raise HTTPException(502, f"{s.name} did not stop the stream: {str(e)[:200]}")
+    log.info("Stream %s on %s stopped by %s", stream_id, s.name, p.name)
+    poller.refresh_now()
+    return {"ok": True}
 
 
 # ---------- playback history and users ----------

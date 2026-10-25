@@ -241,3 +241,12 @@ body.rq-noscroll { overflow: hidden; }
   .rq-ghost, .rq-spin { animation: none; }
   .rq-card__art img, .rq-toast, .rq-season__btn > svg { transition: none; }
 }
+
+/* Report an issue: pick the title */
+.rq-picklist { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; max-height: 50vh; overflow-y: auto; }
+.rq-pick { display: flex; align-items: center; gap: 12px; width: 100%; padding: 8px; border: 0; border-radius: 14px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.rq-pick:hover { background: var(--surface-card); }
+.rq-pick:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.rq-pick img, .rq-pick__none { flex: none; width: 40px; height: 60px; border-radius: 8px; object-fit: cover; background: var(--surface-card); }
+.rq-pick > span:nth-child(2) { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: 14px; }
+.rq-pick .gs-badge { flex: none; height: 24px; font-size: 11px; }

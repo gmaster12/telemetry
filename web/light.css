@@ -1,0 +1,124 @@
+/* Light theme only: deeper shadows (Glenn's reference picture) and a light Servers card.
+   Applies when Light is picked, or when the device is light and Match device is picked. */
+
+/* chosen Light */
+/* Shadows that follow each card's cut corner: the card's own background leaves the corner see-through,
+   so drop-shadow (which follows what is painted) traces the cut instead of a hidden square corner. */
+.gs-app[data-look="light"] .sd-card:has(> .sd-notch):not(.sd-scard):not(.rq-hero):not(.st-hcard):not(.rq-personhead) {
+  background: linear-gradient(225deg, transparent calc(var(--notch-w) * 0.7071), var(--surface-card) calc(var(--notch-w) * 0.7071 + 0.5px));
+  filter: drop-shadow(0 2px 3px rgba(16, 24, 40, 0.08)) drop-shadow(0 16px 26px rgba(16, 24, 40, 0.14));
+}
+.gs-app[data-look="light"] .sd-card:has(> .sd-notch):not(.sd-scard):not(.rq-hero):not(.st-hcard):not(.rq-personhead) > .sd-notch { background: transparent; }
+.gs-app[data-look="light"] .sd-card:has(> .sd-notch):not(.sd-scard) > .sd-go { box-shadow: 0 2px 8px rgba(16, 24, 40, 0.10); }
+
+/* Stream cards: the face is cut out (keeping its round button) and the wrapper casts the shadow. */
+.gs-app[data-look="light"] .sd-flip { filter: drop-shadow(0 2px 3px rgba(16, 24, 40, 0.10)) drop-shadow(0 12px 22px rgba(16, 24, 40, 0.16)); }
+.gs-app[data-look="light"] .sd-flip .sd-scard {
+  --go-c: 32px; --go-r: 24px;
+  -webkit-mask: linear-gradient(225deg, transparent calc(var(--notch-w) * 0.7071), #000 calc(var(--notch-w) * 0.7071 + 0.5px)),
+    radial-gradient(circle at calc(100% - var(--go-c)) var(--go-c), #000 calc(var(--go-r) - 0.5px), transparent var(--go-r));
+  mask: linear-gradient(225deg, transparent calc(var(--notch-w) * 0.7071), #000 calc(var(--notch-w) * 0.7071 + 0.5px)),
+    radial-gradient(circle at calc(100% - var(--go-c)) var(--go-c), #000 calc(var(--go-r) - 0.5px), transparent var(--go-r));
+}
+.gs-app[data-look="light"] .sd-flip .sd-scard > .sd-notch { background: transparent; }
+.gs-app[data-look="light"] .sd-flip .sd-scard--side, .gs-app[data-look="light"] .sd-flip .sd-scard--banner, .gs-app[data-look="light"] .sd-flip .sd-back--side, .gs-app[data-look="light"] .sd-flip .sd-back--banner { --go-c: 26px; --go-r: 20px; }
+.gs-app[data-look="light"] .sd-flip .sd-scard--top, .gs-app[data-look="light"] .sd-flip .sd-back--top { --go-c: 30px; --go-r: 22px; }
+.gs-app[data-look="light"] .sd-flip .sd-scard--tile, .gs-app[data-look="light"] .sd-flip .sd-back--tile { --go-c: 20px; --go-r: 16px; }
+
+/* Everything round or pill-shaped gets a soft lift. */
+.gs-app[data-look="light"] .sd-pill, .gs-app[data-look="light"] .sd-look, .gs-app[data-look="light"] .sd-gear, .gs-app[data-look="light"] .sd-user, .gs-app[data-look="light"] .sd-navbtn, .gs-app[data-look="light"] .sd-chips .gs-chip, .gs-app[data-look="light"] .rq-tab, .gs-app[data-look="light"] .rq-search {
+  box-shadow: 0 2px 3px rgba(16, 24, 40, 0.07), 0 10px 22px rgba(16, 24, 40, 0.13);
+}
+.gs-app[data-look="light"] .sd-livebar, .gs-app[data-look="light"] .sd-alertbar { box-shadow: 0 2px 4px rgba(16, 24, 40, 0.10), 0 14px 28px rgba(16, 24, 40, 0.16); }
+.gs-app[data-look="light"] .sd-navbtn[aria-current="true"], .gs-app[data-look="light"] .sd-gear[aria-expanded="true"] { box-shadow: 0 2px 4px rgba(16, 24, 40, 0.12), 0 10px 20px rgba(16, 24, 40, 0.18); }
+.gs-app[data-look="light"] .rq-card__art { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08), 0 10px 20px rgba(16, 24, 40, 0.12); }
+.gs-app[data-look="light"] .rq-panel, .gs-app[data-look="light"] .rq-rrow, .gs-app[data-look="light"] .rq-empty { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 10px 22px rgba(16, 24, 40, 0.08); }
+
+/* Servers card: light, like the other cards. */
+.gs-app[data-look="light"] .sd-srvcard {
+  background: radial-gradient(90% 60% at 82% 6%, rgba(184, 252, 100, 0.16), transparent 60%), var(--surface-card);
+  color: var(--ink);
+  box-shadow: 0 2px 3px rgba(16, 24, 40, 0.08), 0 16px 32px rgba(16, 24, 40, 0.14);
+}
+.gs-app[data-look="light"] .sd-srvcard::before { background: linear-gradient(160deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.4) 40%, rgba(255, 255, 255, 0.2) 100%); }
+.gs-app[data-look="light"] .sd-srvsum { color: var(--ink-muted); }
+.gs-app[data-look="light"] .sd-srvnote { color: var(--ink-muted); }
+.gs-app[data-look="light"] .sd-srvtable th { background: rgba(11, 11, 13, 0.04); color: var(--ink-muted); }
+.gs-app[data-look="light"] .sd-srvtable td { border-bottom-color: rgba(11, 11, 13, 0.07); }
+.gs-app[data-look="light"] .sd-srvtable tr.is-selected td { background: rgba(184, 252, 100, 0.18); }
+.gs-app[data-look="light"] .sd-srvname { color: var(--ink); }
+.gs-app[data-look="light"] .sd-ring__track { stroke: rgba(11, 11, 13, 0.08); }
+.gs-app[data-look="light"] .sd-ring__pct { fill: var(--ink); }
+.gs-app[data-look="light"] .sd-ring span { color: var(--ink-muted); }
+.gs-app[data-look="light"] .sd-capwarn, .gs-app[data-look="light"] .sd-moves { background: rgba(11, 11, 13, 0.045); }
+
+.gs-app[data-look="light"] .sd-srvdot--offline { background: #a4a4aa; }
+.gs-app[data-look="light"] .sd-srvpill--online { background: rgba(184, 252, 100, 0.35); box-shadow: inset 0 0 0 1px rgba(98, 160, 30, 0.55); color: #2c4d08; }
+.gs-app[data-look="light"] .sd-srvpill--high { background: rgba(232, 180, 120, 0.3); box-shadow: inset 0 0 0 1px rgba(184, 120, 50, 0.55); color: #6b3d0c; }
+.gs-app[data-look="light"] .sd-srvpill--offline { background: rgba(11, 11, 13, 0.05); box-shadow: inset 0 0 0 1px rgba(11, 11, 13, 0.18); color: var(--ink-muted); }
+.gs-app[data-look="light"] .sd-srvgo { box-shadow: 0 2px 6px rgba(98, 160, 30, 0.35); }
+.gs-app[data-look="light"] .sd-rack { -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent 96%); mask-image: linear-gradient(180deg, #000 62%, transparent 96%);
+  clip-path: polygon(15% 39%, 30% 30%, 86% 9%, 93% 11%, 96% 100%, 13% 100%); filter: drop-shadow(0 8px 12px rgba(16, 24, 40, 0.25)); }
+
+
+/* Match device, device is light */
+@media (prefers-color-scheme: light) {
+/* Shadows that follow each card's cut corner: the card's own background leaves the corner see-through,
+   so drop-shadow (which follows what is painted) traces the cut instead of a hidden square corner. */
+.gs-app:not([data-look="dark"]) .sd-card:has(> .sd-notch):not(.sd-scard):not(.rq-hero):not(.st-hcard):not(.rq-personhead) {
+  background: linear-gradient(225deg, transparent calc(var(--notch-w) * 0.7071), var(--surface-card) calc(var(--notch-w) * 0.7071 + 0.5px));
+  filter: drop-shadow(0 2px 3px rgba(16, 24, 40, 0.08)) drop-shadow(0 16px 26px rgba(16, 24, 40, 0.14));
+}
+.gs-app:not([data-look="dark"]) .sd-card:has(> .sd-notch):not(.sd-scard):not(.rq-hero):not(.st-hcard):not(.rq-personhead) > .sd-notch { background: transparent; }
+.gs-app:not([data-look="dark"]) .sd-card:has(> .sd-notch):not(.sd-scard) > .sd-go { box-shadow: 0 2px 8px rgba(16, 24, 40, 0.10); }
+
+/* Stream cards: the face is cut out (keeping its round button) and the wrapper casts the shadow. */
+.gs-app:not([data-look="dark"]) .sd-flip { filter: drop-shadow(0 2px 3px rgba(16, 24, 40, 0.10)) drop-shadow(0 12px 22px rgba(16, 24, 40, 0.16)); }
+.gs-app:not([data-look="dark"]) .sd-flip .sd-scard {
+  --go-c: 32px; --go-r: 24px;
+  -webkit-mask: linear-gradient(225deg, transparent calc(var(--notch-w) * 0.7071), #000 calc(var(--notch-w) * 0.7071 + 0.5px)),
+    radial-gradient(circle at calc(100% - var(--go-c)) var(--go-c), #000 calc(var(--go-r) - 0.5px), transparent var(--go-r));
+  mask: linear-gradient(225deg, transparent calc(var(--notch-w) * 0.7071), #000 calc(var(--notch-w) * 0.7071 + 0.5px)),
+    radial-gradient(circle at calc(100% - var(--go-c)) var(--go-c), #000 calc(var(--go-r) - 0.5px), transparent var(--go-r));
+}
+.gs-app:not([data-look="dark"]) .sd-flip .sd-scard > .sd-notch { background: transparent; }
+.gs-app:not([data-look="dark"]) .sd-flip .sd-scard--side, .gs-app:not([data-look="dark"]) .sd-flip .sd-scard--banner, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--side, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--banner { --go-c: 26px; --go-r: 20px; }
+.gs-app:not([data-look="dark"]) .sd-flip .sd-scard--top, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--top { --go-c: 30px; --go-r: 22px; }
+.gs-app:not([data-look="dark"]) .sd-flip .sd-scard--tile, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--tile { --go-c: 20px; --go-r: 16px; }
+
+/* Everything round or pill-shaped gets a soft lift. */
+.gs-app:not([data-look="dark"]) .sd-pill, .gs-app:not([data-look="dark"]) .sd-look, .gs-app:not([data-look="dark"]) .sd-gear, .gs-app:not([data-look="dark"]) .sd-user, .gs-app:not([data-look="dark"]) .sd-navbtn, .gs-app:not([data-look="dark"]) .sd-chips .gs-chip, .gs-app:not([data-look="dark"]) .rq-tab, .gs-app:not([data-look="dark"]) .rq-search {
+  box-shadow: 0 2px 3px rgba(16, 24, 40, 0.07), 0 10px 22px rgba(16, 24, 40, 0.13);
+}
+.gs-app:not([data-look="dark"]) .sd-livebar, .gs-app:not([data-look="dark"]) .sd-alertbar { box-shadow: 0 2px 4px rgba(16, 24, 40, 0.10), 0 14px 28px rgba(16, 24, 40, 0.16); }
+.gs-app:not([data-look="dark"]) .sd-navbtn[aria-current="true"], .gs-app:not([data-look="dark"]) .sd-gear[aria-expanded="true"] { box-shadow: 0 2px 4px rgba(16, 24, 40, 0.12), 0 10px 20px rgba(16, 24, 40, 0.18); }
+.gs-app:not([data-look="dark"]) .rq-card__art { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08), 0 10px 20px rgba(16, 24, 40, 0.12); }
+.gs-app:not([data-look="dark"]) .rq-panel, .gs-app:not([data-look="dark"]) .rq-rrow, .gs-app:not([data-look="dark"]) .rq-empty { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 10px 22px rgba(16, 24, 40, 0.08); }
+
+/* Servers card: light, like the other cards. */
+.gs-app:not([data-look="dark"]) .sd-srvcard {
+  background: radial-gradient(90% 60% at 82% 6%, rgba(184, 252, 100, 0.16), transparent 60%), var(--surface-card);
+  color: var(--ink);
+  box-shadow: 0 2px 3px rgba(16, 24, 40, 0.08), 0 16px 32px rgba(16, 24, 40, 0.14);
+}
+.gs-app:not([data-look="dark"]) .sd-srvcard::before { background: linear-gradient(160deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.4) 40%, rgba(255, 255, 255, 0.2) 100%); }
+.gs-app:not([data-look="dark"]) .sd-srvsum { color: var(--ink-muted); }
+.gs-app:not([data-look="dark"]) .sd-srvnote { color: var(--ink-muted); }
+.gs-app:not([data-look="dark"]) .sd-srvtable th { background: rgba(11, 11, 13, 0.04); color: var(--ink-muted); }
+.gs-app:not([data-look="dark"]) .sd-srvtable td { border-bottom-color: rgba(11, 11, 13, 0.07); }
+.gs-app:not([data-look="dark"]) .sd-srvtable tr.is-selected td { background: rgba(184, 252, 100, 0.18); }
+.gs-app:not([data-look="dark"]) .sd-srvname { color: var(--ink); }
+.gs-app:not([data-look="dark"]) .sd-ring__track { stroke: rgba(11, 11, 13, 0.08); }
+.gs-app:not([data-look="dark"]) .sd-ring__pct { fill: var(--ink); }
+.gs-app:not([data-look="dark"]) .sd-ring span { color: var(--ink-muted); }
+.gs-app:not([data-look="dark"]) .sd-capwarn, .gs-app:not([data-look="dark"]) .sd-moves { background: rgba(11, 11, 13, 0.045); }
+
+.gs-app:not([data-look="dark"]) .sd-srvdot--offline { background: #a4a4aa; }
+.gs-app:not([data-look="dark"]) .sd-srvpill--online { background: rgba(184, 252, 100, 0.35); box-shadow: inset 0 0 0 1px rgba(98, 160, 30, 0.55); color: #2c4d08; }
+.gs-app:not([data-look="dark"]) .sd-srvpill--high { background: rgba(232, 180, 120, 0.3); box-shadow: inset 0 0 0 1px rgba(184, 120, 50, 0.55); color: #6b3d0c; }
+.gs-app:not([data-look="dark"]) .sd-srvpill--offline { background: rgba(11, 11, 13, 0.05); box-shadow: inset 0 0 0 1px rgba(11, 11, 13, 0.18); color: var(--ink-muted); }
+.gs-app:not([data-look="dark"]) .sd-srvgo { box-shadow: 0 2px 6px rgba(98, 160, 30, 0.35); }
+.gs-app:not([data-look="dark"]) .sd-rack { -webkit-mask-image: linear-gradient(180deg, #000 62%, transparent 96%); mask-image: linear-gradient(180deg, #000 62%, transparent 96%);
+  clip-path: polygon(15% 39%, 30% 30%, 86% 9%, 93% 11%, 96% 100%, 13% 100%); filter: drop-shadow(0 8px 12px rgba(16, 24, 40, 0.25)); }
+
+}

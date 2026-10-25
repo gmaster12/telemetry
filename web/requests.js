@@ -542,8 +542,9 @@
         .catch(function (e) { toast(e.message, 'error'); }).then(function () { wbtn.disabled = false; });
     });
     box.appendChild(wbtn);
-    if (me.can.issues && d.media.mediaId && ['available', 'partial'].indexOf(d.media.status) >= 0) {
-      box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--quiet', onclick: function () { issueDialog(kind, d); } }, icon('flag', 18), 'Report a problem'));
+    var onPlex = ['available', 'partial'].indexOf(d.media.status) >= 0 || ['available', 'partial'].indexOf(d.media.status4k) >= 0;
+    if (me.can.issues && d.media.mediaId && onPlex) {
+      box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--quiet', onclick: function () { issueDialog(kind, d); } }, icon('flag', 18), 'Report an issue'));
     }
     if (!canKind && open(d.media.status)) box.appendChild(el('p', { class: 'rq-note', text: 'Your account cannot request ' + (kind === 'movie' ? 'movies' : 'series') + '. Ask the admin if you need to.' }));
     return box;
@@ -708,7 +709,7 @@
       pick, kind === 'tv' ? el('div', { class: 'st-form' }, f('Season', season), f('Episode', episode)) : null, f('Details', text), msg);
     var send = el('button', { type: 'button', class: 'rq-btn rq-btn--accent', text: 'Send report' });
     var cancel = el('button', { type: 'button', class: 'rq-btn', text: 'Cancel' });
-    var dlg = dialog('Report a problem: ' + d.title, content, [cancel, send]);
+    var dlg = dialog('Report an issue: ' + d.title, content, [cancel, send]);
     cancel.addEventListener('click', dlg.close);
     send.addEventListener('click', function () {
       if (!text.value.trim()) { msg.textContent = 'Add a few words about the problem.'; msg.classList.add('is-error'); text.focus(); return; }
@@ -853,12 +854,14 @@
     setTitle('Issues');
     var f = q.filter || 'open';
     return api('GET', '/api/requests/issues?' + qs({ filter: f })).then(function (d) {
-      var chips = el('div', { class: 'rq-chips' }, [['open', 'Open'], ['resolved', 'Resolved'], ['all', 'All']].map(function (x) {
-        return el('a', { class: 'rq-chip', href: link('issues', { filter: x[0] }), 'aria-current': f === x[0] ? 'true' : null, text: x[1] });
-      }));
+      var chips = el('div', { class: 'rq-listtop' },
+        el('div', { class: 'rq-chips' }, [['open', 'Open'], ['resolved', 'Resolved'], ['all', 'All']].map(function (x) {
+          return el('a', { class: 'rq-chip', href: link('issues', { filter: x[0] }), 'aria-current': f === x[0] ? 'true' : null, text: x[1] });
+        })),
+        me.can.issues ? el('button', { type: 'button', class: 'rq-btn rq-btn--accent', onclick: pickForIssue }, icon('flag', 18), 'Report an issue') : null);
       if (!d.items.length) {
         body.replaceChildren(chips, el('div', { class: 'rq-empty' }, el('b', { text: f === 'open' ? 'No open issues' : 'No issues' }),
-          el('span', { text: 'If something on Plex will not play right, open the title here and choose Report a problem.' })));
+          el('span', { text: 'If something on Plex will not play right, choose Report an issue above, or open the title and use its Report an issue button.' })));
         return;
       }
       var list = el('ul', { class: 'rq-rlist' });
@@ -886,6 +889,45 @@
       });
       body.replaceChildren(chips, list);
     });
+  }
+
+  // Report an issue from the Issues page: find the title first (only what is on Plex can have an issue).
+  function pickForIssue() {
+    var input = el('input', { type: 'search', class: 'st-input', id: 'rq-ipick', placeholder: 'Search for the movie or series', autocomplete: 'off' });
+    var list = el('ul', { class: 'rq-picklist', role: 'listbox', 'aria-label': 'Titles on Plex' });
+    var hint = el('p', { class: 'rq-muted', text: 'Only titles that are on Plex can have an issue.' });
+    var content = el('div', { class: 'rq-req' }, el('div', { class: 'st-field' }, el('label', { for: 'rq-ipick', text: 'Which title?' }), input), hint, list);
+    var dlg = dialog('Report an issue', content, null);
+    var timer = null, n = 0;
+    function show(items) {
+      list.replaceChildren();
+      items.forEach(function (it) {
+        list.appendChild(el('li', null, el('button', { type: 'button', class: 'rq-pick', onclick: function () {
+          dlg.close();
+          get('/api/requests/' + (it.kind === 'tv' ? 'tv' : 'movie') + '/' + it.id, 30000).then(function (d) {
+            if (!d.media.mediaId) { toast('That title is not on Plex yet.', 'error'); return; }
+            issueDialog(it.kind, d);
+          }).catch(function (e) { toast(e.message, 'error'); });
+        } }, it.poster ? el('img', { src: img(it.poster, 'w92'), alt: '' }) : el('span', { class: 'rq-pick__none' }),
+          el('span', null, el('b', { text: it.title }), el('span', { class: 'rq-muted', text: [it.year, KIND_NAME[it.kind]].filter(Boolean).join(' · ') })),
+          mediaBadge(it.status))));
+      });
+      if (!items.length && input.value.trim()) list.appendChild(el('li', { class: 'rq-muted', text: 'Nothing on Plex matches that.' }));
+    }
+    function load() {
+      var q = input.value.trim();
+      var mine = ++n;
+      if (!q) {
+        get('/api/requests/row?type=1', 60000).then(function (d) { if (mine === n) { hint.textContent = 'Recently added, or search above.'; show((d.items || []).filter(onPlex)); } }).catch(function () {});
+        return;
+      }
+      get('/api/requests/search?' + qs({ q: q })).then(function (d) {
+        if (mine === n) { hint.textContent = 'Only titles that are on Plex can have an issue.'; show((d.items || []).filter(onPlex)); }
+      }).catch(function (e) { if (mine === n) list.replaceChildren(el('li', { class: 'rq-muted', text: e.message })); });
+    }
+    function onPlex(i) { return (i.kind === 'movie' || i.kind === 'tv') && (['available', 'partial'].indexOf(i.status) >= 0 || ['available', 'partial'].indexOf(i.status4k) >= 0); }
+    input.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(load, 300); });
+    load();
   }
 
   // ---------- start ----------

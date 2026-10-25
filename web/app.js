@@ -771,7 +771,57 @@
     row('Server', r.server);
     row('Player', r.player, r.device);
     card.append(head, tags, dl);
+    if (canStop() && !r._ended) card.appendChild(stopControl(r));
     return card;
+  }
+
+  /* Stop a stream from the back of its card (admins; Plex Pass; ENABLE_ACTIONS). The viewer sees the message. */
+  const STOP_DEFAULT = 'This stream was stopped by the server admin.';
+  const stopState = new Map();   // stream id -> { open, reason, busy, error, done }
+  const canStop = () => !!(window.dash.me && window.dash.me() && window.dash.me().actions) && !(dash.isSample && dash.isSample());
+  function stopControl(r) {
+    const st = stopState.get(r.id) || {};
+    const box = el('div', 'sd-stop');
+    ['click', 'keydown', 'pointerdown'].forEach((t) => box.addEventListener(t, (e) => e.stopPropagation()));
+    const paint = () => { stopState.set(r.id, st); box.replaceChildren(); fill(); };
+    function fill() {
+      if (st.done) { box.append(el('p', 'sd-stop__note', 'Stopping. The card goes when Plex confirms.')); return; }
+      if (!st.open) {
+        const b = el('button', 'sd-stop__btn');
+        b.type = 'button';
+        b.append(shapeSvg('danger'), document.createTextNode('Stop stream'));
+        b.addEventListener('click', () => { st.open = true; st.error = null; paint(); const i = box.querySelector('input'); if (i) i.focus(); });
+        box.append(b);
+        return;
+      }
+      const id = 'stop-' + r.id.replace(/[^A-Za-z0-9_-]/g, '_');
+      const label = el('label', 'sd-stop__label', 'Message ' + r.user + ' sees');
+      label.htmlFor = id;
+      const input = el('input', 'sd-stop__input');
+      input.id = id; input.maxLength = 300; input.value = st.reason != null ? st.reason : STOP_DEFAULT;
+      input.addEventListener('input', () => { st.reason = input.value; });
+      const go = el('button', 'sd-stop__btn sd-stop__btn--go', st.busy ? 'Stopping…' : 'Stop now');
+      go.type = 'button'; go.disabled = !!st.busy;
+      const keep = el('button', 'sd-stop__keep', 'Keep playing');
+      keep.type = 'button';
+      keep.addEventListener('click', () => { st.open = false; st.error = null; paint(); });
+      const send = () => {
+        st.busy = true; st.reason = input.value; paint();
+        fetch('/api/streams/' + encodeURIComponent(r.id) + '/stop', { method: 'POST', credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'greystar' }, body: JSON.stringify({ reason: st.reason }) })
+          .then((res) => res.json().catch(() => ({})).then((j) => { if (!res.ok) throw new Error(j.detail || ('HTTP ' + res.status)); }))
+          .then(() => { st.busy = false; st.done = true; paint(); setTimeout(() => dash.refresh && dash.refresh(), 1500); })
+          .catch((e) => { st.busy = false; st.error = e.message; paint(); });
+      };
+      go.addEventListener('click', send);
+      input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); send(); } if (e.key === 'Escape') { st.open = false; paint(); } });
+      box.append(el('p', 'sd-stop__q', 'Stop ' + r.user + '\u2019s stream of ' + r.title + ' on ' + r.server + '?'), label, input,
+        st.error ? el('p', 'sd-stop__err', st.error) : document.createTextNode(''),
+        el('div', 'sd-stop__row'));
+      box.lastChild.append(go, keep);
+    }
+    fill();
+    return box;
   }
   function toggleFlip(id, inner) {
     if (flipped.has(id)) flipped.delete(id); else flipped.add(id);
@@ -915,6 +965,8 @@
     if (before) glideFrom(before);
   }
   function drawStreams() {
+    // Do not redraw under someone typing the stop message.
+    if (document.activeElement && document.activeElement.closest && document.activeElement.closest('.sd-stop')) return;
     const d = dash.data('streams');
     const p = dash.params();
     if (isMobile() && view !== 'rows' && view !== 'carousel') view = 'rows';
@@ -1201,10 +1253,10 @@
     const svg = document.createElementNS(svgNS, 'svg');
     svg.setAttribute('viewBox', '0 0 72 72'); svg.setAttribute('aria-hidden', 'true');
     const mk = (attrs) => { const e = document.createElementNS(svgNS, 'circle'); Object.entries(attrs).forEach(([k, v]) => e.setAttribute(k, v)); svg.appendChild(e); return e; };
-    mk({ cx: 36, cy: 36, r, fill: 'none', stroke: 'rgba(255,255,255,0.12)', 'stroke-width': 7 });
+    mk({ cx: 36, cy: 36, r, fill: 'none', stroke: 'rgba(255,255,255,0.12)', 'stroke-width': 7, class: 'sd-ring__track' });
     if (pct > 0) mk({ cx: 36, cy: 36, r, fill: 'none', stroke: color, 'stroke-width': 7, 'stroke-linecap': 'round', 'stroke-dasharray': c.toFixed(1), 'stroke-dashoffset': (c * (1 - Math.min(pct, 100) / 100)).toFixed(1), transform: 'rotate(-90 36 36)' });
     const t = document.createElementNS(svgNS, 'text');
-    t.setAttribute('x', 36); t.setAttribute('y', 41); t.setAttribute('text-anchor', 'middle'); t.setAttribute('fill', '#f6f6f4'); t.setAttribute('font-size', 15);
+    t.setAttribute('x', 36); t.setAttribute('y', 41); t.setAttribute('text-anchor', 'middle'); t.setAttribute('fill', '#f6f6f4'); t.setAttribute('font-size', 15); t.setAttribute('class', 'sd-ring__pct');
     t.textContent = n0(pct) + '%';
     svg.appendChild(t);
     return svg;

@@ -320,6 +320,17 @@ design system). The dashboard adds its own patterns:
   the same shade, Poster beside and Poster on top in the poster area, Banner on
   the right with a fade, Tiles full tile with the bottom shade.
 - Status is always a word plus a shape, never color alone. No emoji.
+- Light theme (`web/light.css`, Glenn's reference picture): deeper shadows on
+  cards, pills, the top bar and stream cards, and light Servers and Server
+  capacity cards (the dark rack photo is cut to its shape). Notched cards get
+  their shadow from `filter: drop-shadow` on a background that leaves the cut
+  corner see-through, so the shadow follows the cut; stream card faces use a
+  mask (cut corner plus the round button) and `.sd-flip` casts the shadow.
+  Applies for Light, and for Match device when the device is light.
+- Stop a stream: admins see Stop stream on the back of a card, with a message
+  the viewer sees (`stopControl` in `app.js`, `POST /api/streams/{id}/stop`,
+  `PlexClient.terminate` with the session id; Plex Pass). On by default; set
+  `ENABLE_ACTIONS=false` in `.env` to turn it off. `/api/me` reports `actions`.
 
 ## Running tests
 
@@ -329,8 +340,6 @@ cd backend && pip install -r requirements-dev.txt && python -m pytest -q
 
 ## Not built yet (ask Glenn before starting)
 
-- "End stream" button: `PlexClient.terminate` exists (Plex Pass); needs a UI
-  and should be gated by an `ENABLE_ACTIONS=true` env flag.
 - Rebalance only suggests moves; Plex cannot move a live session between
   servers, so a real action would end the stream with a message.
 - Viewer avatars from Plex user thumbnails (currently initials; the thumb URL
