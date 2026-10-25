@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import sample
-from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, add_requests_section, admin_plex_email, check_password, default_sections,
+from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, add_mystreams_section, add_requests_section, admin_plex_email, check_password, default_sections,
                    end_session, hash_password, new_session, password_problem, plex_principal, principal_for, record_failure,
                    set_cookie, throttled, user_sections)
 from .config import DB_PATH, WEB_DIR, ServerCfg, env
@@ -38,6 +38,7 @@ directory = Directory(store)
 poller = Poller(store)
 seerr = Requests(store, poller.http)
 add_requests_section(store)
+add_mystreams_section(store)
 
 
 def client_id() -> str:
@@ -143,12 +144,32 @@ def wrap(rows: list, is_sample: bool) -> dict:
     return {"rows": rows, "sample": is_sample, "updated": poller.last_poll}
 
 
+def see_streams(request: Request) -> Principal:
+    """Everyone's streams (`streams`) or only your own (`mystreams`)."""
+    p = me(request)
+    if not (p.can("streams") or p.can("mystreams")):
+        raise HTTPException(403, "You do not have access to this section.")
+    return p
+
+
+def own_streams(p: Principal, rows: list[dict]) -> list[dict]:
+    """Streams on this person's own Plex account. Plex reports a server's owner as local account 1."""
+    if p.kind != "plex":
+        return []
+    me_id = str(p.subject)
+    return [r for r in rows if str(r.get("user_id") or "") == me_id
+            or (str(r.get("user_id") or "") == "1" and poller.owner_for(r.get("server")) == me_id)]
+
+
+def visible_streams(p: Principal) -> list[dict]:
+    rows = sample.streams() if poller.cfg.use_sample else poller.streams
+    return rows if p.can("streams") else own_streams(p, rows)
+
+
 @app.get("/api/streams")
 def api_streams(request: Request):
-    need(request, "streams")
-    if poller.cfg.use_sample:
-        return wrap(sample.streams(), True)
-    return wrap(poller.streams, False)
+    p = see_streams(request)
+    return wrap(visible_streams(p), poller.cfg.use_sample)
 
 
 @app.get("/api/servers")
@@ -215,7 +236,9 @@ def api_status(request: Request):
 @app.get("/api/clip/{server_id}/{rating_key}")
 def api_clip(request: Request, server_id: int, rating_key: str):
     """A short silent looping clip for a stream card (app/clips.py). Supports range requests, which Safari needs."""
-    need(request, "streams")
+    v = see_streams(request)
+    if not v.can("streams") and not any(r.get("rating_key") == rating_key for r in visible_streams(v)):
+        raise HTTPException(404)
     p = poller.clips.path(server_id, rating_key)
     if not p.exists():
         raise HTTPException(404)
@@ -226,7 +249,7 @@ def api_clip(request: Request, server_id: int, rating_key: str):
 @app.get("/api/poster/{server_id}/{rating_key}")
 async def api_poster(request: Request, server_id: int, rating_key: str):
     p = me(request)
-    if not (p.can("streams") or p.can("history")):  # posters appear on stream cards and in watch history
+    if not (p.can("streams") or p.can("mystreams") or p.can("history")):  # posters appear on stream cards and in watch history
         raise HTTPException(403, "You do not have access to this section.")
     s = next((x for x in poller.cfg.servers if x.id == server_id), None)
     path = poller.art.get((server_id, rating_key)) or (directory.art_for(s.name, rating_key) if s else None)

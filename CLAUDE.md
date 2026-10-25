@@ -208,8 +208,13 @@ only be finished by the browser that started it. All non-GET API calls need the
 header `X-Requested-With: greystar` (CSRF guard). Tokens are write-only: the API
 reports `has_token`, never the value.
 
-Sections a viewer can be given: `streams`, `servers`, `bandwidth`, `viewing`,
-`history` (`app/auth.py`, `SECTIONS`). The page adds `gs-no-<section>` classes
+Sections a viewer can be given: `streams`, `mystreams`, `servers`, `bandwidth`, `viewing`,
+`history`, `requests` (`app/auth.py`, `SECTIONS`). Defaults: `mystreams`, `history`, `requests`
+(each added once to saved defaults and custom lists by `add_section_once`; turning it off sticks).
+`mystreams` ("My streams") shows the streams card with only that person's own streams: `/api/streams`
+filters by `user_id`, and a server's local account `1` counts when that person owns the server
+(`own_streams` in `main.py`). `streams` (everyone's) wins when both are on. The page treats `mystreams`
+as `streams` (`dash.can`, `dash.ownStreams()`), titles it "Your streams" and hides the server count line. The page adds `gs-no-<section>` classes
 to hide what a viewer cannot see; the API enforces it independently.
 
 ## Design
@@ -319,6 +324,9 @@ design system). The dashboard adds its own patterns:
   browsers asking to save data. Placement per style: Classic over the poster with
   the same shade, Poster beside and Poster on top in the poster area, Banner on
   the right with a fade, Tiles full tile with the bottom shade.
+- Requests nav button (desktop and phone tab) and the Requests search pill pulse a slow lime ring
+  (`rq-pulse`, 2.8 s, end of `requests.css`; Glenn's ask): not while on Requests or typing, not for
+  reduced motion; a deeper green edge in the light theme.
 - Status is always a word plus a shape, never color alone. No emoji.
 - Light theme (`web/light.css`, Glenn's reference picture): deeper shadows on
   cards, pills, the top bar and stream cards, and light Servers and Server

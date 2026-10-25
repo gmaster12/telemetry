@@ -33,7 +33,16 @@
   }
 
   function can(section) {
-    return !!me && (me.role === 'admin' || (me.sections || []).indexOf(section) >= 0);
+    if (!me) return false;
+    if (me.role === 'admin') return true;
+    var mine = me.sections || [];
+    // "My streams" shows the streams card too; the server sends only that person's own streams.
+    if (section === 'streams' && mine.indexOf('mystreams') >= 0) return true;
+    return mine.indexOf(section) >= 0;
+  }
+  function ownStreams() {
+    var mine = (me && me.sections) || [];
+    return !!me && me.role !== 'admin' && mine.indexOf('streams') < 0 && mine.indexOf('mystreams') >= 0;
   }
 
   function toLogin() {
@@ -122,6 +131,7 @@
     refresh: function () { return refresh(); },
     me: function () { return me; },
     can: can,
+    ownStreams: ownStreams,
     isAdmin: function () { return !!me && me.role === 'admin'; },
     loaded: function () { return loaded; },
     isSample: function () {

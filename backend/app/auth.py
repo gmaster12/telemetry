@@ -28,6 +28,7 @@ SESSION_TTL = 30 * 86400
 
 SECTIONS = [
     {"key": "streams", "label": "Live streams", "hint": "Every live stream, with viewer names and what they are watching"},
+    {"key": "mystreams", "label": "My streams", "hint": "Stream cards for what is playing on their own account right now"},
     {"key": "servers", "label": "Servers", "hint": "Server status, stream slots, throughput and capacity"},
     {"key": "bandwidth", "label": "Bandwidth", "hint": "Total bandwidth over the last hour"},
     {"key": "viewing", "label": "When people watch", "hint": "Busiest hours of the week"},
@@ -35,7 +36,7 @@ SECTIONS = [
     {"key": "requests", "label": "Requests", "hint": "Find movies and shows and request them through Seerr"},
 ]
 SECTION_KEYS = [s["key"] for s in SECTIONS]
-DEFAULT_SECTIONS = ["history", "requests"]
+DEFAULT_SECTIONS = ["mystreams", "history", "requests"]
 
 
 def admin_plex_email() -> str | None:
@@ -90,17 +91,17 @@ class Principal:
                 "sections": SECTION_KEYS if self.is_admin else self.sections, "email": self.email, "thumb": self.thumb}
 
 
-def add_requests_section(store: Store) -> None:
-    """Requests arrived after people already had access saved. Everyone gets it once (Glenn's call);
-    turning it off afterwards sticks."""
-    if store.get_setting("requests_section_added"):
+def add_section_once(store: Store, key: str, flag: str) -> None:
+    """A section that arrived after people already had access saved. Everyone gets it once (Glenn's call):
+    the stored defaults and every custom list. Turning it off afterwards sticks."""
+    if store.get_setting(flag):
         return
     raw = store.get_setting("default_sections")
     if raw is not None:
         try:
             cur = json.loads(raw)
-            if "requests" not in cur:
-                store.set_setting("default_sections", json.dumps(cur + ["requests"]))
+            if key not in cur:
+                store.set_setting("default_sections", json.dumps(cur + [key]))
         except ValueError:
             pass
     with store.lock:
@@ -110,10 +111,18 @@ def add_requests_section(store: Store) -> None:
                 cur = json.loads(r["sections"])
             except ValueError:
                 continue
-            if "requests" not in cur:
-                store.db.execute("UPDATE users SET sections = ? WHERE plex_id = ?", (json.dumps(cur + ["requests"]), r["plex_id"]))
+            if key not in cur:
+                store.db.execute("UPDATE users SET sections = ? WHERE plex_id = ?", (json.dumps(cur + [key]), r["plex_id"]))
         store.db.commit()
-    store.set_setting("requests_section_added", "1")
+    store.set_setting(flag, "1")
+
+
+def add_requests_section(store: Store) -> None:
+    add_section_once(store, "requests", "requests_section_added")
+
+
+def add_mystreams_section(store: Store) -> None:
+    add_section_once(store, "mystreams", "mystreams_section_added")
 
 
 def default_sections(store: Store) -> list[str]:

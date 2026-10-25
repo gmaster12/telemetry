@@ -352,3 +352,5 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .sd-back__title { -webkit-line-clamp: 3; }
 .sd-scard__name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .st-preview__stage { overflow: hidden; }
+/* My streams: a viewer who sees only their own streams gets "Your streams" and no server count line. */
+.gs-own-streams #takeaway { display: none; }

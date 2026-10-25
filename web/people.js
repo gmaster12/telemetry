@@ -71,7 +71,7 @@
     return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
-  var SECTION_LABEL = { streams: 'Live streams', servers: 'Servers', bandwidth: 'Bandwidth', viewing: 'When people watch', history: 'My history' };
+  var SECTION_LABEL = { streams: 'Live streams', mystreams: 'My streams', requests: 'Requests', servers: 'Servers', bandwidth: 'Bandwidth', viewing: 'When people watch', history: 'My history' };
 
   // ---------- loading splash ----------
   var splash = document.getElementById('splash');
@@ -91,6 +91,10 @@
     ALL.forEach(function (s) { root.classList.toggle('gs-no-' + s, !window.dash.can(s)); });
     var dashSections = ['streams', 'servers', 'bandwidth', 'viewing'].filter(window.dash.can);
     root.classList.toggle('gs-only-history', dashSections.length === 0);
+    var own = !!(window.dash.ownStreams && window.dash.ownStreams());
+    root.classList.toggle('gs-own-streams', own);
+    var t = document.getElementById('title');
+    if (t) t.textContent = own ? 'Your streams' : 'Active streams';
     var gear = document.getElementById('gear');
     if (gear) gear.hidden = !(me.role === 'admin' || window.dash.can('streams'));
   }

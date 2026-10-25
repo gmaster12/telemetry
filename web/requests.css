@@ -250,3 +250,32 @@ body.rq-noscroll { overflow: hidden; }
 .rq-pick img, .rq-pick__none { flex: none; width: 40px; height: 60px; border-radius: 8px; object-fit: cover; background: var(--surface-card); }
 .rq-pick > span:nth-child(2) { display: flex; flex-direction: column; flex: 1; min-width: 0; font-size: 14px; }
 .rq-pick .gs-badge { flex: none; height: 24px; font-size: 11px; }
+
+/* Slow green pulse: the Requests button in the nav and phone tab bar, and the Requests search pill.
+   A soft lime ring breathes out from the edge every 2.8 s. Stops while you are on Requests (button)
+   or typing (search), and for reduced motion. */
+@keyframes rq-pulse {
+  0%   { box-shadow: 0 0 0 0 rgba(184, 252, 100, 0.85), 0 0 0 0 rgba(184, 252, 100, 0.45); }
+  70%  { box-shadow: 0 0 0 3px rgba(184, 252, 100, 0), 0 0 0 12px rgba(184, 252, 100, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(184, 252, 100, 0), 0 0 0 0 rgba(184, 252, 100, 0); }
+}
+@keyframes rq-pulse-pill {
+  0%   { box-shadow: inset 0 0 0 1px var(--hairline), 0 0 0 0 rgba(184, 252, 100, 0.85), 0 0 0 0 rgba(184, 252, 100, 0.45); }
+  70%  { box-shadow: inset 0 0 0 1px var(--hairline), 0 0 0 3px rgba(184, 252, 100, 0), 0 0 0 14px rgba(184, 252, 100, 0); }
+  100% { box-shadow: inset 0 0 0 1px var(--hairline), 0 0 0 0 rgba(184, 252, 100, 0), 0 0 0 0 rgba(184, 252, 100, 0); }
+}
+.sd-navbtn[aria-label="Requests"]:not([aria-current="true"]),
+.sd-tab[aria-label="Requests"]:not([aria-current="true"]) { animation: rq-pulse 2.8s ease-out infinite; }
+.rq-search:not(:focus-within) { animation: rq-pulse-pill 2.8s ease-out infinite; }
+/* On light pages lime alone is faint: add a deeper green edge. */
+.gs-app[data-look="light"] .sd-navbtn[aria-label="Requests"]:not([aria-current="true"]),
+.gs-app[data-look="light"] .rq-search:not(:focus-within) { outline: 1px solid rgba(110, 190, 40, 0.55); outline-offset: 0; }
+@media (prefers-color-scheme: light) {
+  .gs-app:not([data-look="dark"]) .sd-navbtn[aria-label="Requests"]:not([aria-current="true"]),
+  .gs-app:not([data-look="dark"]) .rq-search:not(:focus-within) { outline: 1px solid rgba(110, 190, 40, 0.55); outline-offset: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sd-navbtn[aria-label="Requests"], .sd-tab[aria-label="Requests"], .rq-search { animation: none !important; }
+  .sd-navbtn[aria-label="Requests"]:not([aria-current="true"]),
+  .sd-tab[aria-label="Requests"]:not([aria-current="true"]) { box-shadow: 0 0 0 2px rgba(184, 252, 100, 0.7); }
+}

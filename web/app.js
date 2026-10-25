@@ -958,7 +958,9 @@
     const sub = !list.length ? 'New streams show up here within 10 seconds.'
       : on === list.length ? (list.length === 1 ? 'Your server is online and idle.' : 'All ' + list.length + ' servers are online and idle.') + ' New streams show up here within 10 seconds.'
       : on + ' of ' + list.length + ' servers are online. New streams show up here within 10 seconds.';
-    box.append(el('b', null, 'Nothing playing right now'), el('span', null, sub));
+    const own = window.dash.ownStreams && window.dash.ownStreams();
+    box.append(el('b', null, own ? 'You are not watching anything right now' : 'Nothing playing right now'),
+      el('span', null, own ? 'Start something in Plex and it shows up here within 10 seconds.' : sub));
     return box;
   }
   function renderStreams() {
@@ -984,7 +986,7 @@
     dots.hidden = view !== 'carousel';
     const keepLeft = car.scrollLeft;
     list.replaceChildren(); car.replaceChildren(); dots.replaceChildren();
-    document.getElementById('str-title').textContent = p.server ? 'Streams on ' + p.server : 'Live streams';
+    document.getElementById('str-title').textContent = p.server ? 'Streams on ' + p.server : (window.dash.ownStreams && window.dash.ownStreams() ? 'Your streams' : 'Live streams');
     document.getElementById('view-cards').setAttribute('aria-pressed', view === 'cards' ? 'true' : 'false');
     document.getElementById('view-table').setAttribute('aria-pressed', view === 'table' ? 'true' : 'false');
     cards.hidden = view !== 'cards';
