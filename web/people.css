@@ -346,3 +346,9 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .sd-stop__err { margin: 0; font-size: 12px; color: #ffb3b9; }
 .sd-stop__note { margin: 0; font-size: 13px; color: rgba(246, 246, 244, 0.8); }
 .sd-back--tile .sd-stop__q { font-size: 12px; }
+
+/* Long titles: at most two lines (three on the back), cut with an ellipsis. File-name titles have no spaces, so allow breaks anywhere. */
+.sd-scard__title, .sd-back__title { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
+.sd-back__title { -webkit-line-clamp: 3; }
+.sd-scard__name { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.st-preview__stage { overflow: hidden; }

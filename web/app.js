@@ -658,12 +658,14 @@
     prog.appendChild(text);
     return prog;
   };
+  // Long titles (often a file name when Plex has not matched it) are cut to two lines; hover shows all of it.
+  function withTip(node, text) { node.title = text || ''; return node; }
   function whoEl(r) {
     const who = el('div', 'sd-scard__who');
     const nameEl = el('h3', 'sd-scard__name');
     const nb = window.gsPeople && window.gsPeople.nameButton(r);
     if (nb) nameEl.appendChild(nb); else nameEl.textContent = r.user;
-    who.append(nameEl, el('p', 'sd-scard__title', r.title));
+    who.append(nameEl, withTip(el('p', 'sd-scard__title', r.title), r.title));
     return who;
   }
   function tagsEl(r, withMethod) {
@@ -719,7 +721,7 @@
     const nameEl = el('h3', 'sd-scard__name');
     const nb = window.gsPeople && window.gsPeople.nameButton(r);
     if (nb) nameEl.appendChild(nb); else nameEl.textContent = r.user;
-    who.append(nameEl, el('p', 'sd-scard__title', r.title));
+    who.append(nameEl, withTip(el('p', 'sd-scard__title', r.title), r.title));
     const foot = el('div', 'sd-scard__foot');
     const left = el('div');
     left.appendChild(el('span', 'sd-micro', 'Playing on'));
@@ -750,7 +752,7 @@
     const nb = window.gsPeople && window.gsPeople.nameButton(r);
     // Tiles are narrow: leave out the session id there.
     sub.append(nb || document.createTextNode(r.user), document.createTextNode(cardStyle === 'tiles' ? ' \u00b7 ' + r.location : ' \u00b7 ' + r.id + ' \u00b7 ' + r.location));
-    head.append(el('p', 'sd-back__eyebrow', 'Playback details'), el('h3', 'sd-back__title', r.title), sub);
+    head.append(el('p', 'sd-back__eyebrow', 'Playback details'), withTip(el('h3', 'sd-back__title', r.title), r.title), sub);
     const tags = el('div', 'sd-tags');
     tags.appendChild(badge(METHOD_TONE[r.method] || 'neutral', r.method));
     tags.appendChild(el('span', 'sd-tag', r.quality));
