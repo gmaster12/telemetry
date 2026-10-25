@@ -110,7 +110,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 """
 
-SECRET_SETTINGS = {"netdata_token", "plex_account_token", "stripe_key"}
+SECRET_SETTINGS = {"netdata_token", "plex_account_token", "stripe_key", "seerr_key"}
 SERVER_FIELDS = ("name", "plex_url", "max_streams", "capacity_mbps", "netdata_node", "netdata_agent_url", "machine_id", "enabled", "owner_plex_id")
 
 

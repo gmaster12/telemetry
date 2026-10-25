@@ -32,9 +32,10 @@ SECTIONS = [
     {"key": "bandwidth", "label": "Bandwidth", "hint": "Total bandwidth over the last hour"},
     {"key": "viewing", "label": "When people watch", "hint": "Busiest hours of the week"},
     {"key": "history", "label": "My history", "hint": "Their own playback history"},
+    {"key": "requests", "label": "Requests", "hint": "Find movies and shows and request them through Seerr"},
 ]
 SECTION_KEYS = [s["key"] for s in SECTIONS]
-DEFAULT_SECTIONS = ["history"]
+DEFAULT_SECTIONS = ["history", "requests"]
 
 
 def admin_plex_email() -> str | None:
@@ -87,6 +88,32 @@ class Principal:
     def public(self) -> dict:
         return {"kind": self.kind, "id": self.subject, "name": self.name, "role": self.role,
                 "sections": SECTION_KEYS if self.is_admin else self.sections, "email": self.email, "thumb": self.thumb}
+
+
+def add_requests_section(store: Store) -> None:
+    """Requests arrived after people already had access saved. Everyone gets it once (Glenn's call);
+    turning it off afterwards sticks."""
+    if store.get_setting("requests_section_added"):
+        return
+    raw = store.get_setting("default_sections")
+    if raw is not None:
+        try:
+            cur = json.loads(raw)
+            if "requests" not in cur:
+                store.set_setting("default_sections", json.dumps(cur + ["requests"]))
+        except ValueError:
+            pass
+    with store.lock:
+        rows = store.db.execute("SELECT plex_id, sections FROM users WHERE sections IS NOT NULL").fetchall()
+        for r in rows:
+            try:
+                cur = json.loads(r["sections"])
+            except ValueError:
+                continue
+            if "requests" not in cur:
+                store.db.execute("UPDATE users SET sections = ? WHERE plex_id = ?", (json.dumps(cur + ["requests"]), r["plex_id"]))
+        store.db.commit()
+    store.set_setting("requests_section_added", "1")
 
 
 def default_sections(store: Store) -> list[str]:

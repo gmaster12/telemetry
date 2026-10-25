@@ -13,6 +13,7 @@
 <meta name="apple-mobile-web-app-title" content="Telemetry">
 <link rel="stylesheet" href="system.css">
 <link rel="stylesheet" href="settings.css">
+<link rel="stylesheet" href="requests.css">
 <link rel="stylesheet" href="people.css">
 <script src="vendor/d3-7.9.0.min.js"></script>
 <script src="dash-shim.js"></script>
@@ -634,6 +635,7 @@
         <div class="st-pane" id="st-pane-alerts" hidden></div>
         <div class="st-pane" id="st-pane-access" hidden></div>
         <div class="st-pane" id="st-pane-billing" hidden></div>
+        <div class="st-pane" id="st-pane-requests" hidden></div>
       </section>
     </div>
     <div class="sd-top">
@@ -799,6 +801,7 @@
       <div class="sd-alertlist" id="alertlist" data-source="streams server_load"></div>
     </section>
 
+    <section class="rq" id="requests-page" aria-label="Requests" hidden></section>
     <nav class="sd-tabbar" id="tabbar" aria-label="Sections"></nav>
   </div>
   <div class="gp-drawer" id="hist" hidden role="dialog" aria-modal="true" aria-labelledby="hist-title">
@@ -910,7 +913,14 @@
     users: ['M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z', 'M2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1', 'M16 3.1a4 4 0 0 1 0 7.8', 'M22 21v-1a6 6 0 0 0-4-5.6'],
     history: ['M3 12a9 9 0 1 0 3-6.7L3 8', 'M3 3v5h5', 'M12 7v5l3 2'],
     logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'm16 17 5-5-5-5', 'M21 12H9'],
-    down: ['m6 9 6 6 6-6']
+    down: ['m6 9 6 6 6-6'],
+    film: ['M3 4h18v16H3z', 'M7 4v16', 'M17 4v16', 'M3 8h4', 'M3 12h4', 'M3 16h4', 'M17 8h4', 'M17 12h4', 'M17 16h4'],
+    plus: ['M12 5v14', 'M5 12h14'],
+    check: ['m5 12 5 5 9-10'],
+    bookmark: ['M6 3h12v18l-6-4-6 4z'],
+    flag: ['M5 21V4', 'M5 4h11l-2 4 2 4H5'],
+    left: ['M19 12H5', 'm11 6-6 6 6 6'],
+    external: ['M14 4h6v6', 'M20 4 11 13', 'M18 14v6H4V6h6']
   };
   function icon(name, size) {
     const s = document.createElementNS(svgNS, 'svg');
@@ -994,7 +1004,8 @@
     { id: 'servers-card', label: 'Servers', icon: 'server', ok: () => can('servers') },
     { id: 'streams-card', label: 'Streams', icon: 'play', ok: () => can('streams') },
     { id: 'people-card', label: 'Users', icon: 'users', ok: () => isAdmin() },
-    { id: 'people-card', label: 'My history', icon: 'history', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') }
+    { id: 'people-card', label: 'My history', icon: 'history', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') },
+    { id: 'requests', label: 'Requests', icon: 'film', ok: () => window.dash.me && window.dash.me() && can('requests') }
   ];
   let navActive = 'summary';
   function renderNav() {
@@ -1008,9 +1019,15 @@
     NAV.filter((n) => n.ok()).forEach((n) => {
       const b = el('button', 'sd-navbtn');
       b.type = 'button'; b.title = n.label; b.setAttribute('aria-label', n.label);
-      b.setAttribute('aria-current', navActive === n.id ? 'true' : 'false');
+      const onRequests = root.dataset.page === 'requests';
+      b.setAttribute('aria-current', (onRequests ? n.id === 'requests' : navActive === n.id) ? 'true' : 'false');
       b.appendChild(icon(n.icon, 22));
-      b.addEventListener('click', () => { navActive = n.id; renderNav(); goTo(n.id); });
+      b.addEventListener('click', () => {
+        if (n.id === 'requests') { if (window.gsRequests) window.gsRequests.open(); return; }
+        navActive = n.id;
+        if (onRequests && window.gsRequests) window.gsRequests.close();
+        renderNav(); requestAnimationFrame(() => goTo(n.id));
+      });
       nav.appendChild(b);
     });
   }
@@ -1908,11 +1925,14 @@
     { id: 'streams', label: 'Streams', icon: 'play', link: 'streams-card', ok: () => can('streams') },
     { id: 'alerts', label: 'Alerts', icon: 'bell', link: 'alerts', ok: () => can('streams') && can('servers') },
     { id: 'people', label: 'Users', icon: 'users', link: 'people-card', ok: () => isAdmin() },
-    { id: 'people', label: 'History', icon: 'history', link: 'people-card', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') }
+    { id: 'people', label: 'History', icon: 'history', link: 'people-card', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') },
+    { id: 'requests', label: 'Requests', icon: 'film', link: 'requests', ok: () => window.dash.me && window.dash.me() && can('requests') }
   ];
   const okTabs = () => TABS.filter((t) => t.ok());
   window.sdGoTab = (id) => { if (isMobile()) goTab(id); };
   function goTab(id) {
+    if (id === 'requests') { if (window.gsRequests) window.gsRequests.open(); return; }
+    if (root.dataset.page === 'requests' && window.gsRequests) window.gsRequests.close();
     mtab = id;
     root.dataset.mtab = id;
     renderAll();
@@ -1927,7 +1947,7 @@
     bar.classList.toggle('is-single', tabs.length < 2);
     tabs.forEach((t) => {
       const b = el('button', 'sd-tab'); b.type = 'button';
-      b.setAttribute('aria-current', mtab === t.id ? 'true' : 'false');
+      b.setAttribute('aria-current', (root.dataset.page === 'requests' ? t.id === 'requests' : mtab === t.id) ? 'true' : 'false');
       b.setAttribute('aria-label', t.label + (t.id === 'alerts' && alertCount ? ', ' + alertCount + ' alerts' : ''));
       b.append(icon(t.icon, 20), el('span', null, t.label));
       if (t.id === 'alerts' && alertCount) b.appendChild(el('span', 'sd-tab__count', String(alertCount)));
@@ -2199,7 +2219,8 @@
   gear.addEventListener('click', () => openSettings(dock.hidden, true));
   document.getElementById('set-close').addEventListener('click', () => openSettings(false));
   document.getElementById('set-scrim').addEventListener('click', () => openSettings(false));
-  document.getElementById('settings').addEventListener('keydown', (e) => { if (e.key === 'Escape') openSettings(false); });
+  // Escape closes Settings wherever focus is (a section re-render can drop focus to the page).
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !dock.hidden && !document.querySelector('.rq-modal')) openSettings(false); });
   sizeInput.addEventListener('input', () => applySize(Number(sizeInput.value)));
   sizeInput.addEventListener('change', () => dash.setParams({ cardsize: Number(sizeInput.value) }));
   clipSwitch.addEventListener('change', () => { const v = clipSwitch.checked ? 'on' : 'off'; dash.setParams({ clips: v }); applyClipMode(v); });
@@ -2278,6 +2299,7 @@
     if (!dock.hidden) renderPreviews();
   }
   mq.addEventListener('change', renderAll);
+  window.sdNavChanged = () => { renderNav(); renderTabbar(renderAlerts()); };
   dash.onData(renderAll);
 })();
 </script>
@@ -2285,5 +2307,6 @@
 <script src="user-picker.js"></script>
 <script src="people.js"></script>
 <script src="settings.js"></script>
+<script src="requests.js"></script>
 </body>
 </html>

@@ -18,6 +18,9 @@ A single Docker service (FastAPI + static page) that:
 - shows each person their Stripe subscription (`app/billing.py`): a read-only
   restricted key saved in Settings, Billing; customers, subscriptions,
   products and the last 400 days of charges are copied every 15 minutes,
+- lets people request movies and series through Glenn's Seerr
+  (https://perseus.greystarnetworks.com) from a Requests page (`app/seerr.py`,
+  `app/requests_api.py`, `web/requests.js`), without signing in to Seerr,
 - serves the dashboard page and its API on `127.0.0.1:8791`.
 
 Plex servers and the Netdata connection are managed from the dashboard's
@@ -112,6 +115,32 @@ files to add servers. Keep it that way.
     come through so search by email works.
   - `import_history` maps `accountID` from `/status/sessions/history/all`
     through `/accounts`. Spot-check one person's imported plays.
+
+## Requests (Seerr)
+
+- Connected in Settings, Requests: Seerr address and API key (saved encrypted as
+  `seerr_key`; write-only like every token). Calls go server to server with
+  `X-Api-Key` plus `X-API-User: <their Seerr id>` (Seerr's own middleware, verified in
+  its source), so Seerr applies that person's permissions, quotas, auto-approve and
+  notifications. Never send `userId` or `ignoreQuota`; advanced options
+  (server, profile, folder) only when Seerr gives the person REQUEST_ADVANCED.
+- People are linked once (`seerr_links`): found by email or Plex username, else
+  imported from Plex (`/user/import-from-plex`), else made by Plex email (`POST /user`,
+  random password) because Seerr's Plex check only sees servers its own Plex account
+  shares and Glenn's servers have different owners. Local admin logins act as
+  Seerr user 1. Settings, Requests lists links with Relink.
+- Nothing from Seerr reaches the browser raw: routes shape each reply and drop
+  other people's emails and tokens (`tests/test_requests.py` checks this).
+- `requests` is an access section, on for everyone by default (a one-time
+  migration added it to saved defaults and custom lists, `add_requests_section`);
+  turn it off per person or in the defaults like the rest.
+- Page: `#/requests/...` (discover, movies, tv, search, movie/ID, series/ID,
+  person/ID, collection/ID, browse/KIND/DATA, mine, watchlist, issues, manage).
+  Discover follows Seerr's own slider settings. TV requests pick seasons; 4K when
+  Seerr has it on and the person may; report a problem; watchlist; approve and
+  decline for people Seerr lets manage requests. Posters come from TMDB
+  (`SEERR_IMAGE_BASE` overrides for tests). `tests/mock_seerr.py` is a stand-in
+  Seerr for tests and local browser checks.
 
 ## Polling (backend/app/poller.py)
 

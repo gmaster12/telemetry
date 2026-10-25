@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import sample
-from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, admin_plex_email, check_password, default_sections,
+from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, add_requests_section, admin_plex_email, check_password, default_sections,
                    end_session, hash_password, new_session, password_problem, plex_principal, principal_for, record_failure,
                    set_cookie, throttled, user_sections)
 from .config import DB_PATH, WEB_DIR, ServerCfg, env
@@ -24,7 +24,9 @@ from .billing import StripeClient
 from .netdata import NetdataClient
 from .plex import PlexAccount, PlexClient
 from .poller import Poller
+from .requests_api import make_router
 from .secrets import SecretBox
+from .seerr import Requests, SeerrError
 from .store import Directory, Store
 
 logging.basicConfig(level=env("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -34,6 +36,8 @@ box = SecretBox()
 store = Store(DB_PATH, box)
 directory = Directory(store)
 poller = Poller(store)
+seerr = Requests(store, poller.http)
+add_requests_section(store)
 
 
 def client_id() -> str:
@@ -323,7 +327,7 @@ def get_settings():
 
 
 @app.get("/api/settings/summary")
-def settings_summary():
+async def settings_summary():
     """One small call for the Settings home: what is set up, what is working and what needs a look."""
     cfg = poller.cfg
     rows = store.list_servers()
@@ -356,7 +360,20 @@ def settings_summary():
                    "sync_error": poller.users_sync_error, "history_imported_at": int(imported) if imported else None},
         "billing": {"connected": has_key, "synced_at": poller.billing_synced_at or None, "error": poller.billing_error,
                     "customers": counts.get("customers", 0), "unmatched": counts.get("unmatched", 0)},
+        "requests": await requests_summary(),
     }
+
+
+async def requests_summary() -> dict:
+    if not seerr.configured():
+        return {"connected": False, "error": None, "pending": None, "links": 0}
+    pending = None
+    try:
+        pending = (await asyncio.wait_for(seerr.get("/request/count", ttl=60), 6) or {}).get("pending")
+        seerr.last_error = None
+    except (SeerrError, asyncio.TimeoutError) as e:
+        seerr.last_error = getattr(e, "message", None) or "Seerr did not answer in time."
+    return {"connected": True, "error": seerr.last_error, "pending": pending, "links": len(seerr.links())}
 
 
 @app.post("/api/settings/servers/test")
@@ -865,6 +882,75 @@ async def import_history():
     r = await poller.import_history()
     store.set_setting("history_imported_at", str(int(time.time())))
     return r
+
+
+
+# ---------- Requests (Seerr) ----------
+class SeerrIn(BaseModel):
+    url: str = Field(min_length=8, max_length=300)
+    key: str | None = Field(default=None, max_length=300)
+
+
+@app.get("/api/settings/requests")
+async def get_requests_settings():
+    return {"url": store.get_setting("seerr_url"), "has_key": bool(store.get_setting("seerr_key")),
+            "error": seerr.last_error, "links": len(seerr.links())}
+
+
+@app.put("/api/settings/requests")
+async def put_requests_settings(body: SeerrIn):
+    url = body.url.strip().rstrip("/")
+    if not url.startswith(("http://", "https://")):
+        raise HTTPException(422, "Use the full address, for example https://requests.example.com")
+    old_url, old_key = store.get_setting("seerr_url"), store.get_setting("seerr_key")
+    store.set_setting("seerr_url", url)
+    if body.key:
+        store.set_setting("seerr_key", body.key.strip())
+    seerr.clear_cache()
+    try:
+        info = await seerr.test()
+    except SeerrError as e:
+        store.set_setting("seerr_url", old_url)  # keep the working connection
+        store.set_setting("seerr_key", old_key)
+        raise HTTPException(422, "Seerr did not accept that: " + e.message)
+    seerr.last_error = None
+    return {"ok": True, **info}
+
+
+@app.post("/api/settings/requests/test")
+async def test_requests_settings():
+    try:
+        info = await seerr.test()
+    except SeerrError as e:
+        seerr.last_error = e.message
+        raise HTTPException(e.status if 400 <= e.status < 600 else 502, e.message)
+    seerr.last_error = None
+    return {"ok": True, **info, "links": len(seerr.links())}
+
+
+@app.delete("/api/settings/requests")
+def delete_requests_settings():
+    store.set_setting("seerr_key", None)
+    seerr.clear_cache()
+    return {"ok": True}
+
+
+@app.get("/api/settings/requests/links")
+def requests_links():
+    out = []
+    for l in seerr.links():
+        u = directory.get_user(l["plex_id"]) or {}
+        out.append({**l, "name": u.get("title") or u.get("username") or l["plex_id"], "username": u.get("username")})
+    return {"rows": out}
+
+
+@app.delete("/api/settings/requests/links/{plex_id}")
+def requests_unlink(plex_id: str):
+    seerr.drop_link(plex_id)
+    return {"ok": True}
+
+
+app.include_router(make_router(seerr, directory, need))
 
 
 # ---------- static dashboard ----------

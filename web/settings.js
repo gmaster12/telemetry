@@ -146,7 +146,8 @@
     netdata: { title: 'Netdata', scope: 'all', lead: 'CPU and upload speed for each server, read from Netdata. They drive the capacity rings, server status and the bandwidth chart.' },
     alerts: { title: 'Alerts', scope: 'all', lead: 'When a server counts as running hot. A hot server turns amber on the capacity rings and shows up under Alerts.' },
     access: { title: 'Access', scope: 'all', lead: 'Who can sign in and what each person can see. Anyone you share a Plex server with can sign in with Plex.' },
-    billing: { title: 'Billing', scope: 'all', lead: 'Shows each person their own Stripe subscription. The key is read-only: nothing is ever charged or changed from here.' }
+    billing: { title: 'Billing', scope: 'all', lead: 'Shows each person their own Stripe subscription. The key is read-only: nothing is ever charged or changed from here.' },
+    requests: { title: 'Requests', scope: 'all', lead: 'Connects your Seerr so people can find movies and series and request them here, without signing in to Seerr. Each person acts as their own Seerr account, so its permissions, limits and approvals still apply.' }
   };
   var summary = null;
   var summaryAt = 0;
@@ -183,6 +184,7 @@
       summaryTimer = setInterval(function () { if (!document.getElementById('settings-dock').hidden && tab === 'home') loadSummary(); }, 20000);
     } else if (t === 'access') loadAccess();
     else if (t === 'billing') loadBilling();
+    else if (t === 'requests') loadRequests();
     else if (t !== 'display') loadState();
     if (window.sdRenderPreviews) window.sdRenderPreviews();
   }
@@ -244,6 +246,8 @@
     if (s.access.sync_error) out.push({ view: 'access', tone: 'danger', text: 'Loading people from Plex failed.' });
     else if (s.accounts && !s.access.synced_at) out.push({ view: 'access', tone: 'warning', text: 'People have not been loaded from Plex yet.' });
     if (s.billing.connected && s.billing.error) out.push({ view: 'billing', tone: 'danger', text: 'Stripe: the last sync failed.' });
+    if (s.requests && s.requests.connected && s.requests.error) out.push({ view: 'requests', tone: 'danger', text: 'Seerr: ' + s.requests.error });
+    if (s.requests && s.requests.pending) out.push({ view: 'requests', tone: 'warning', text: s.requests.pending + (s.requests.pending === 1 ? ' request is' : ' requests are') + ' waiting for approval.', go: '#/requests/manage' });
     if (s.billing.connected && s.billing.unmatched) out.push({ view: 'billing', tone: 'warning', text: s.billing.unmatched + ' Stripe ' + (s.billing.unmatched === 1 ? 'customer is' : 'customers are') + ' not matched to a Plex user.' });
     return out;
   }
@@ -297,7 +301,10 @@
     var attn = homeCard(issues.length ? issues[0].view : 'plex', { cls: 'st-hcard--attn', goLabel: issues.length ? 'Open ' + VIEWS[issues[0].view].title : 'Open Plex servers',
       title: issues.length ? (issues.length === 1 ? '1 thing needs a look' : issues.length + ' things need a look') : 'Nothing needs a look',
       body: issues.length ? [el('ul', { class: 'st-issues' }, issues.slice(0, 4).map(function (p) {
-        return el('li', null, el('button', { type: 'button', onclick: function () { go(p.view); } }, badgeEl(p.tone, VIEWS[p.view].title), el('span', { text: p.text })));
+        return el('li', null, el('button', { type: 'button', onclick: function () {
+          if (p.go) { if (window.sdOpenSettings) window.sdOpenSettings(false); location.hash = p.go; return; }
+          go(p.view);
+        } }, badgeEl(p.tone, VIEWS[p.view].title), el('span', { text: p.text })));
       })), issues.length > 4 ? el('p', { class: 'st-hcard__what', text: 'And ' + (issues.length - 4) + ' more.' }) : null]
         : [el('p', { class: 'st-hcard__what', text: 'Servers, Netdata, people and billing all look fine. This card lists anything that needs fixing.' })] });
     cards.push(attn);
@@ -313,6 +320,10 @@
     cards.push(homeCard('billing', { scope: 'all', what: bl.connected ? 'Shows each person their own Stripe subscription. Read-only key.' : 'Optional. Connect Stripe to show each person their own subscription.',
       status: !bl.connected ? ['neutral', 'Not connected'] : bl.error ? ['danger', 'Last sync failed'] : bl.unmatched ? ['warning', bl.unmatched + ' not matched'] : ['success', 'Synced ' + (since(bl.synced_at) || 'soon')],
       facts: bl.connected ? [[bl.customers, bl.customers === 1 ? 'customer' : 'customers']] : [] }));
+    var rq = s.requests || {};
+    cards.push(homeCard('requests', { scope: 'all', what: rq.connected ? 'People find movies and series and request them here, through your Seerr.' : 'Optional. Connect your Seerr so people can request from this site.',
+      status: !rq.connected ? ['neutral', 'Not connected'] : rq.error ? ['danger', 'Seerr not answering'] : rq.pending ? ['warning', rq.pending + ' waiting'] : ['success', 'Connected'],
+      facts: rq.connected ? [[rq.pending == null ? '?' : rq.pending, 'waiting for approval'], [rq.links, rq.links === 1 ? 'person linked' : 'people linked']] : [] }));
     box.replaceChildren(el('div', { class: 'st-homegrid' }, cards));
     if (window.sdRenderPreviews) window.sdRenderPreviews();
   }
@@ -1115,6 +1126,84 @@
       el('p', { class: 'st-note', text: 'Not connected yet. PayPal subscriptions will show on the same card once it is set up.' })));
   }
 
+  // ---------- Requests: the Seerr connection ----------
+  var rqs = null;
+  var rqLinks = null;
+  var rqEditing = false;
+  function loadRequests() {
+    if (!isAdmin()) return Promise.resolve();
+    return Promise.all([api('GET', '/api/settings/requests'), api('GET', '/api/settings/requests/links'), state ? null : api('GET', '/api/settings')]).then(function (r) {
+      rqs = r[0]; rqLinks = r[1].rows || [];
+      if (r[2]) state = r[2];
+    }).then(render).catch(function (e) { setMsg('load', 'error', e.message); });
+  }
+  function renderRequests(pane) {
+    if (!rqs) { pane.appendChild(el('p', { class: 'st-note', text: 'Loading…' })); return; }
+    var url = input({ value: rqs.url || '', placeholder: 'https://requests.example.com', class: 'st-input is-mono' }, 'rq-url');
+    var key = input({ type: 'password', placeholder: rqs.has_key ? 'Saved. Leave blank to keep it.' : 'Seerr API key', autocomplete: 'new-password' }, 'rq-key');
+    var connected = rqs.url && rqs.has_key;
+    var sec = el('section', { class: 'st-section' }, el('h3', { text: 'Seerr' }));
+    if (connected && !rqEditing) {
+      sec.append(
+        el('p', { class: 'st-note' }, 'Connected to ', el('b', { text: rqs.url }), '. ' + (rqs.links ? rqs.links + (rqs.links === 1 ? ' person has' : ' people have') + ' used Requests so far.' : 'Nobody has used Requests yet.')),
+        rqs.error ? el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), rqs.error) : document.createDocumentFragment(),
+        el('div', { class: 'st-row' },
+          el('button', { type: 'button', class: 'st-btn', text: busy['rq-test'] ? 'Testing…' : 'Test connection', disabled: busy['rq-test'], onclick: function () {
+            withBusy('rq-test', api('POST', '/api/settings/requests/test').then(function (r) {
+              msgs.rq = { kind: 'ok', text: 'Connected to ' + (r.title || 'Seerr') + ' ' + (r.version || '') + ' as ' + (r.admin || 'its administrator') + '. 4K: movies ' + (r.movie4k ? 'on' : 'off') + ', series ' + (r.series4k ? 'on' : 'off') + '.' };
+              return loadRequests();
+            }).catch(function (e) { setMsg('rq', 'error', e.message); }));
+          } }),
+          el('a', { class: 'st-btn', href: '#/requests', text: 'Open Requests', onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } }),
+          el('span', { class: 'st-spacer' }),
+          el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Change', onclick: function () { rqEditing = true; render(); } }),
+          el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Disconnect', onclick: function () {
+            api('DELETE', '/api/settings/requests').then(function () { msgs.rq = { kind: 'ok', text: 'Disconnected. People see "Requests are not set up yet" until you connect again.' }; return loadRequests(); })
+              .catch(function (e) { setMsg('rq', 'error', e.message); });
+          } })));
+    } else {
+      sec.append(
+        el('p', { class: 'st-note', text: 'Use the address people open Seerr at, and the API key from Seerr: Settings, General, API Key. The key stays on this server and is saved encrypted.' }),
+        el('div', { class: 'st-form' },
+          el('div', { class: 'st-wide' }, field('Seerr address', url, 'For example https://perseus.greystarnetworks.com')),
+          el('div', { class: 'st-wide' }, field('API key', key)),
+          el('div', { class: 'st-wide st-row' },
+            el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['rq-save'] ? 'Checking…' : 'Connect', disabled: busy['rq-save'], onclick: function () {
+              var b = { url: url.value.trim() };
+              if (key.value.trim()) b.key = key.value.trim();
+              withBusy('rq-save', api('PUT', '/api/settings/requests', b).then(function (r) {
+                rqEditing = false; clearDrafts('rq');
+                msgs.rq = { kind: 'ok', text: 'Connected to ' + (r.title || 'Seerr') + ' ' + (r.version || '') + '. People can now use Requests.' };
+                if (window.dash && window.dash.refresh) window.dash.refresh();
+                return loadRequests();
+              }).catch(function (e) { setMsg('rq', 'error', e.message); }));
+            } }),
+            connected ? el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Cancel', onclick: function () { rqEditing = false; render(); } }) : null)));
+    }
+    sec.appendChild(message('rq'));
+    pane.appendChild(sec);
+
+    pane.appendChild(el('section', { class: 'st-section' }, el('h3', { text: 'How people get a Seerr account' }),
+      el('p', { class: 'st-note', text: 'The first time someone opens Requests, this site finds their Seerr account by email or Plex username. If they have none, it imports them from Plex, the same as Seerr\u2019s Import Plex users. If Seerr\u2019s own Plex account cannot see them (their server belongs to another Plex account), it makes the account with their Plex email, so signing in to Seerr with Plex later lands on the same account.' }),
+      el('p', { class: 'st-note', text: 'New accounts get Seerr\u2019s default permissions. Change limits, 4K and auto-approve in Seerr, under Users. Turn Requests off for someone in Access, like any other section.' })));
+
+    var list = el('ul', { class: 'st-list' });
+    (rqLinks || []).forEach(function (l) {
+      list.appendChild(el('li', { class: 'st-item' },
+        el('div', { class: 'st-item__top' },
+          el('span', { class: 'st-item__name', text: l.name }),
+          el('span', { class: 'st-tag', text: { matched: 'Found in Seerr', imported: 'Imported from Plex', created: 'Made by email' }[l.how] || l.how }),
+          el('span', { class: 'st-spacer' }),
+          el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Relink', title: 'Forget this link; it is looked up again next time they open Requests.', onclick: function () {
+            api('DELETE', '/api/settings/requests/links/' + encodeURIComponent(l.plex_id)).then(loadRequests).catch(function (e) { setMsg('rq', 'error', e.message); });
+          } })),
+        el('div', { class: 'st-item__meta', text: (l.username ? '@' + l.username + ' · ' : '') + 'Seerr user ' + l.seerr_id + ' · since ' + ago(l.created) })));
+    });
+    pane.appendChild(el('details', { class: 'st-section st-details' },
+      el('summary', { text: 'People linked to Seerr (' + (rqLinks || []).length + ')' }),
+      (rqLinks || []).length ? list : el('p', { class: 'st-note', text: 'Nobody yet.' })));
+  }
+
   function statusLabel(st) {
     return { active: 'Active', trialing: 'Trial', past_due: 'Past due', unpaid: 'Unpaid', canceled: 'Canceled', incomplete: 'Incomplete',
       incomplete_expired: 'Expired', paused: 'Paused' }[st] || st;
@@ -1148,6 +1237,8 @@
       renderAlerts(pane);
     } else if (tab === 'billing') {
       renderBilling(pane);
+    } else if (tab === 'requests') {
+      renderRequests(pane);
     } else if (tab === 'access') {
       renderAccess(pane);
     }
