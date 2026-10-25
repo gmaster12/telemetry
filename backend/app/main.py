@@ -59,6 +59,22 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Greystar Telemetry", lifespan=lifespan, docs_url=None, redoc_url=None)
 
 
+# ---------- security headers ----------
+# Scripts only from this site (no inline scripts, no eval). Inline styles stay allowed: the page sets
+# many style attributes, and styles cannot run code. Posters come from TMDB for Requests.
+def _origin(url: str | None) -> str | None:
+    from urllib.parse import urlparse
+    u = urlparse(url or "")
+    return f"{u.scheme}://{u.netloc}" if u.scheme and u.netloc else None
+
+
+_IMG_EXTRA = " ".join(sorted({"https://image.tmdb.org", _origin(env("SEERR_IMAGE_BASE")) or "https://image.tmdb.org"}))
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
+       f"img-src 'self' data: blob: {_IMG_EXTRA}; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; "
+       "object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+
+
 # ---------- auth ----------
 PUBLIC_PATHS = {"/healthz", "/login.html", "/login.js", "/system.css", "/manifest.webmanifest", "/favicon.ico"}
 PUBLIC_PREFIXES = ("/assets/", "/vendor/", "/api/auth/")
@@ -84,6 +100,9 @@ async def session_auth(request: Request, call_next):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "same-origin")
     resp.headers.setdefault("X-Frame-Options", "DENY")
+    resp.headers.setdefault("Content-Security-Policy", CSP)
+    resp.headers.setdefault("Permissions-Policy", PERMISSIONS)
+    resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")  # the Plex sign-in opens in a popup
     if path.startswith("/api/"):
         resp.headers.setdefault("Cache-Control", "no-store")
     elif path == "/" or path.endswith((".html", ".js", ".css", ".webmanifest")):
@@ -206,7 +225,9 @@ def api_clip(request: Request, server_id: int, rating_key: str):
 
 @app.get("/api/poster/{server_id}/{rating_key}")
 async def api_poster(request: Request, server_id: int, rating_key: str):
-    me(request)
+    p = me(request)
+    if not (p.can("streams") or p.can("history")):  # posters appear on stream cards and in watch history
+        raise HTTPException(403, "You do not have access to this section.")
     s = next((x for x in poller.cfg.servers if x.id == server_id), None)
     path = poller.art.get((server_id, rating_key)) or (directory.art_for(s.name, rating_key) if s else None)
     if not path or not s:
@@ -541,6 +562,14 @@ class LocalLogin(BaseModel):
 
 
 def _client_ip(request: Request) -> str:
+    """The address of whoever is signing in. The container only listens on 127.0.0.1, so requests come
+    through the site's own proxy, which adds the real address as the LAST X-Forwarded-For entry
+    (nginx appends to what the client sent; Caddy replaces it). Earlier entries are whatever the
+    client typed, so they are never used: trusting them let anyone dodge the sign-in limits."""
+    xff = request.headers.get("x-forwarded-for", "")
+    last = xff.split(",")[-1].strip() if xff else ""
+    if last:
+        return last
     return request.client.host if request.client else "?"
 
 
@@ -602,11 +631,14 @@ async def auth_plex_check(pin_id: int, request: Request):
 @app.post("/api/auth/local")
 def auth_local(body: LocalLogin, request: Request):
     key = "local:" + _client_ip(request)
-    if throttled(key):
+    # Also per username, so guesses spread over many addresses still hit a limit.
+    ukey = "local-user:" + body.username.strip().lower()
+    if throttled(key) or throttled(ukey, limit=20, window=900):
         raise HTTPException(429, "Too many failed sign-ins. Wait a few minutes.")
     a = directory.get_admin(body.username.strip())
     if not a or not check_password(body.password, a["pw_hash"]):
         record_failure(key)
+        record_failure(ukey)
         raise HTTPException(401, "Wrong username or password.")
     session = new_session(directory, "local", str(a["id"]))
     resp = JSONResponse({"ok": True, "role": "admin"})
@@ -848,7 +880,11 @@ def change_password(body: PasswordIn, request: Request):
     if p.kind != "local":
         raise HTTPException(409, "Your Plex account's password is managed by Plex.")
     a = directory.get_admin_by_id(int(p.subject))
+    pkey = "pwchange:" + str(p.subject)
+    if throttled(pkey, limit=5, window=900):
+        raise HTTPException(429, "Too many wrong passwords. Wait a few minutes.")
     if not a or not check_password(body.current, a["pw_hash"]):
+        record_failure(pkey)
         raise HTTPException(401, "Current password is wrong.")
     problem = password_problem(body.new)
     if problem:

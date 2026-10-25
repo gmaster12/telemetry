@@ -57,6 +57,16 @@ files to add servers. Keep it that way.
   servers), and map Plex's local account `1` to the owner of *that* server
   (`servers.owner_plex_id`, `Poller.owner_for`).
 
+- Security headers (`main.py`, `CSP`): scripts only from this site, so no inline
+  `<script>` and no `eval` (the page's code lives in `web/app.js`); inline styles
+  are allowed; images from this site, `data:`/`blob:` and image.tmdb.org. Add any
+  new outside host to `CSP` deliberately. No CORS headers are sent, on purpose.
+- Sign-in limits use the LAST `X-Forwarded-For` entry (`_client_ip`): that is the
+  one the site's proxy adds. Never use the first entry; the client writes it.
+  Local admin sign-in is also limited per username, and password changes per login.
+- Every `/api/settings/*` route is admin-only in the middleware; `/api/users*` and
+  `/api/status` call `admin()`. `tests/test_security.py` checks viewers get 403.
+
 ## First-time setup checklist
 
 1. `cp .env.example .env`, generate `SECRET_KEY` (see README), keep
