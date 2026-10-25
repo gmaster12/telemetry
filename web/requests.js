@@ -71,7 +71,7 @@
   function forget() { cache = {}; meAt = 0; }
   function img(path, size) {
     if (!path) return null;
-    if (/^https?:/.test(path)) return path;
+    if (/^(https?:|data:)/.test(path)) return path;
     return ((me && me.images) || 'https://image.tmdb.org/t/p/') + size + path;
   }
   function qs(o) {

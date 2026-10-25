@@ -931,6 +931,7 @@
     return s;
   }
   window.sdIcon = icon;
+  window.sdArtFor = (r) => artFor(r);
   function el(tag, cls, text) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -1005,7 +1006,7 @@
     { id: 'streams-card', label: 'Streams', icon: 'play', ok: () => can('streams') },
     { id: 'people-card', label: 'Users', icon: 'users', ok: () => isAdmin() },
     { id: 'people-card', label: 'My history', icon: 'history', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') },
-    { id: 'requests', label: 'Requests', icon: 'film', ok: () => window.dash.me && window.dash.me() && can('requests') }
+    { id: 'requests', label: 'Requests', icon: 'film', ok: () => can('requests') }
   ];
   let navActive = 'summary';
   function renderNav() {
@@ -1926,7 +1927,7 @@
     { id: 'alerts', label: 'Alerts', icon: 'bell', link: 'alerts', ok: () => can('streams') && can('servers') },
     { id: 'people', label: 'Users', icon: 'users', link: 'people-card', ok: () => isAdmin() },
     { id: 'people', label: 'History', icon: 'history', link: 'people-card', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') },
-    { id: 'requests', label: 'Requests', icon: 'film', link: 'requests', ok: () => window.dash.me && window.dash.me() && can('requests') }
+    { id: 'requests', label: 'Requests', icon: 'film', link: 'requests', ok: () => can('requests') }
   ];
   const okTabs = () => TABS.filter((t) => t.ok());
   window.sdGoTab = (id) => { if (isMobile()) goTab(id); };
