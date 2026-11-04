@@ -177,27 +177,27 @@
   .vh-seg { width: 100%; }
   .vh-seg__b { flex: 1; padding: 0 8px; }
 }
-/* Sweep in (Glenn's pick C): on opening the home, each card fades in while a border sweeps once around it like a
-   clock hand, one card after another (home.js sweepIn sets --vh-d and removes the classes when done). Hover: the card
-   grows a little, brightens, and the border shows in full until the pointer leaves. A tap presses it in. */
+/* Sweep in (Glenn's pick C): on opening the home the cards fade in one after another (home.js sweepIn sets --vh-d
+   and removes the class when done). Hover: the card grows a little and brightens while a border sweeps once around
+   it like a clock hand and stays until the pointer leaves; leaving only fades the border, nothing replays.
+   A tap presses the card in. */
 @property --vh-a { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
 .vh-door, .vh-stage, .vh-tile, .vh-panel { --vh-ring: var(--volt); --vh-grow: 1.025; position: relative;
   transition: transform 0.24s cubic-bezier(0.2, 0.7, 0.2, 1), filter 0.24s; }
 .vh-panel { --vh-grow: 1.01; }
 .vh-door--req, .vh-stage--ready, .vh-tile--lime { --vh-ring: #0b0b0d; }
-.vh-door::before, .vh-stage::before, .vh-tile::before, .vh-panel::before, .vh-in::after { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit;
+.vh-door::before, .vh-stage::before, .vh-tile::before, .vh-panel::before { content: ''; position: absolute; inset: 0; z-index: 1; border-radius: inherit;
   padding: 3px; pointer-events: none; opacity: 0; --vh-a: 360deg;
   background: conic-gradient(from -90deg, var(--vh-ring) var(--vh-a), transparent var(--vh-a));
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor;
   mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); mask-composite: exclude; transition: opacity 0.2s; }
 @keyframes vh-fade { from { opacity: 0; } to { opacity: 1; } }
-@keyframes vh-sweep { 0% { --vh-a: 0deg; opacity: 1; } 66% { --vh-a: 360deg; opacity: 1; } 100% { --vh-a: 360deg; opacity: 0; } }
+@keyframes vh-sweep { from { --vh-a: 0deg; } to { --vh-a: 360deg; } }
 .vh-in, .vh-in-plain { animation: vh-fade 0.45s ease-out both; animation-delay: var(--vh-d, 0ms); }
-.vh-in::after { --vh-a: 0deg; transition: none; animation: vh-sweep 1.15s linear both; animation-delay: var(--vh-d, 0ms); }
-.vh-wait :is(.vh-in, .vh-in-plain), .vh-wait .vh-in::after { animation-play-state: paused; }
+.vh-wait :is(.vh-in, .vh-in-plain) { animation-play-state: paused; }
 @media (hover: hover) {
   .vh-door:hover, .vh-stage:hover, .vh-tile:hover, .vh-panel:hover { transform: scale(var(--vh-grow)); filter: brightness(1.08) drop-shadow(0 16px 26px rgba(0, 0, 0, 0.32)); z-index: 1; }
-  .vh-door:hover::before, .vh-stage:hover::before, .vh-tile:hover::before, .vh-panel:hover::before { opacity: 1; }
+  .vh-door:hover::before, .vh-stage:hover::before, .vh-tile:hover::before, .vh-panel:hover::before { opacity: 1; transition: none; animation: vh-sweep 0.6s cubic-bezier(0.4, 0, 0.2, 1) both; }
 }
 .vh-door:focus-within::before, .vh-stage:focus-visible::before { opacity: 1; }
 .vh-door:active, .vh-stage:active { transform: scale(0.97); transition-duration: 0.08s; }
@@ -209,7 +209,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .vh-search--hero { animation: none; }
-  .vh-in, .vh-in-plain, .vh-in::after { animation: none; }
+  .vh-in, .vh-in-plain, .vh-door::before, .vh-stage::before, .vh-tile::before, .vh-panel::before { animation: none !important; }
   .vh-door, .vh-stage, .vh-tile, .vh-panel { transition: none; }
   .vh-door:hover, .vh-stage:hover, .vh-tile:hover, .vh-panel:hover, .vh-door:active, .vh-stage:active { transform: none; }
 }

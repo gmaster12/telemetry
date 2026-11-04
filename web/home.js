@@ -328,7 +328,7 @@
     return [head, body];
   }
 
-  // ---------- Sweep in: cards fade in one at a time while a border sweeps once around each ----------
+  // ---------- Sweep in: cards fade in one at a time (the border sweep plays on hover, in home.css) ----------
   var CARDS = '.vh-door, .vh-stage, .vh-tile, .vh-panel';
   var ready = false, watch = null;
   function finishWait() { ready = true; root.classList.remove('vh-wait'); }
@@ -336,7 +336,7 @@
   setTimeout(finishWait, 5000);  // never leave the cards hidden if the splash event is missed
   function tidy(e) {
     var n = e.currentTarget;
-    if (n.classList.contains('vh-in') && e.pseudoElement !== '::after') return;  // wait for the sweep, not the fade
+    if (e.target !== n || e.animationName !== 'vh-fade') return;
     n.classList.remove('vh-in', 'vh-in-plain');
     n.style.removeProperty('--vh-d');
     n.removeEventListener('animationend', tidy);
