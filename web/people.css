@@ -356,3 +356,29 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .gs-own-streams #takeaway { display: none; }
 /* History covers: the play icon shows until the cover has loaded, then the cover replaces it. */
 .gp-play__thumb.has-art svg { display: none; }
+
+/* Your servers (viewers): a word plus a shape per server, and how long it has been up or down. */
+.gp-srvsec[hidden], .gp-srvcard[hidden] { display: none; }
+.gp-srvcard { position: relative; display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; border-radius: 28px; background: var(--surface-card); }
+.gp-srvlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.gp-srvcard--compact .gp-srvlist { grid-template-columns: 1fr; }
+.gp-srv { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-radius: 20px; background: var(--surface-raised); min-width: 0; }
+.gp-srv.is-down { background: color-mix(in srgb, var(--danger) 12%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 60%, transparent); }
+.gp-srv__name { font-weight: 600; overflow-wrap: anywhere; }
+.gp-srv__state { display: flex; align-items: center; gap: 10px; font-size: 26px; line-height: 30px; font-weight: 300; }
+.gp-srv__dot { width: 13px; height: 13px; border-radius: 50%; background: var(--volt); flex: none; }
+.gp-srv__dot.is-unknown { background: transparent; box-shadow: inset 0 0 0 2px var(--ink-muted); }
+.gp-srv__sq { width: 12px; height: 12px; background: var(--danger); flex: none; }
+.gp-srv__for { font-size: 13px; color: var(--ink-muted); }
+.gp-srv.is-down .gp-srv__for { color: var(--danger); font-weight: 600; }
+.gp-srv__note { font-size: 12px; line-height: 16px; color: var(--ink-muted); }
+.gp-srvcard__foot { margin: 0; font-size: 12px; color: var(--ink-muted); }
+.gs-app[data-look="light"] .gp-srv__dot { background: #5f9e1f; }
+@media (prefers-color-scheme: light) { .gs-app:not([data-look="dark"]) .gp-srv__dot { background: #5f9e1f; } }
+@media (max-width: 760px) {
+  .gs-app:not([data-mtab="home"]):not([data-mtab="people"]) #srv-card { display: none; }
+  .gp-srvlist { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gp-srvcard--compact .gp-srvlist { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .gp-srv__state { font-size: 21px; line-height: 26px; }
+  .gp-srv__note { display: none; }
+}

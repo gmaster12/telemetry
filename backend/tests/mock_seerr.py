@@ -105,7 +105,8 @@ def all_results():
 def full_req(r):
     by = next(u for u in state["users"] if u["id"] == r["by"])
     return {"id": r["id"], "status": r["status"], "type": r["type"], "is4k": r["is4k"], "createdAt": r["created"], "updatedAt": r["created"],
-            "media": {"tmdbId": r["media"]["tmdbId"], "mediaType": r["type"], "status": 2, "status4k": 1},
+            "media": {"tmdbId": r["media"]["tmdbId"], "mediaType": r["type"], "status": r.get("media_status", 2), "status4k": 1,
+                      "downloadStatus": r.get("downloading", [])},
             "seasons": [{"seasonNumber": n, "status": r["status"]} for n in r.get("seasons", [])],
             "requestedBy": dict(by), "modifiedBy": None}
 
@@ -249,7 +250,7 @@ def movie(request: Request, tmdb: int):
                         "crew": [{"id": 9339, "name": "Lana Wachowski", "job": "Director"}]},
             "relatedVideos": [{"site": "YouTube", "type": "Trailer", "url": "https://www.youtube.com/watch?v=abc"}],
             "collection": {"id": 2344, "name": "The Matrix Collection", "posterPath": "/c.jpg"} if tmdb == 603 else None,
-            "releases": {"results": [{"iso_3166_1": "US", "release_dates": [{"certification": "R"}]}]}, "productionCompanies": [{"id": 174, "name": "Warner Bros. Pictures"}]}
+            "releases": {"results": [{"iso_3166_1": "US", "release_dates": [{"certification": "R"}] + MOVIES[tmdb].get("home", [])}]}, "productionCompanies": [{"id": 174, "name": "Warner Bros. Pictures"}]}
 
 
 @app.get("/api/v1/tv/{tmdb}")
@@ -260,10 +261,11 @@ def tv(request: Request, tmdb: int):
     s = SHOWS[tmdb]
     r = result("tv", tmdb)
     return {**r, "seasons": [{"seasonNumber": 0, "name": "Specials", "episodeCount": 3}] +
-            [{"seasonNumber": n, "name": f"Season {n}", "episodeCount": 10, "airDate": f"{2010 + n}-04-01", "posterPath": f"/s{n}.jpg"} for n in range(1, s["seasons"] + 1)],
+            [{"seasonNumber": n, "name": f"Season {n}", "episodeCount": 10, "airDate": s.get("air", {}).get(n, f"{2010 + n}-04-01"), "posterPath": f"/s{n}.jpg"} for n in range(1, s["seasons"] + 1)],
             "genres": [{"id": 18, "name": "Drama"}], "networks": [{"id": 49, "name": "HBO"}], "externalIds": {"tvdbId": 121361},
             "credits": {"cast": [{"id": 22970, "name": "Peter Dinklage", "character": "Tyrion", "profilePath": "/pd.jpg"}], "crew": []},
-            "contentRatings": {"results": [{"iso_3166_1": "US", "rating": "TV-MA"}]}, "status": "Ended", "episodeRunTime": [60]}
+            "contentRatings": {"results": [{"iso_3166_1": "US", "rating": "TV-MA"}]}, "status": "Ended", "episodeRunTime": [60],
+            "nextEpisodeToAir": s.get("next")}
 
 
 @app.get("/api/v1/tv/{tmdb}/season/{n}")
@@ -315,6 +317,10 @@ def list_requests(request: Request, requestedBy: int | None = None, filter: str 
         rows = [r for r in rows if r["by"] == requestedBy]
     if filter == "pending":
         rows = [r for r in rows if r["status"] == 1]
+    elif filter == "failed":
+        rows = [r for r in rows if r["status"] == 4]
+    elif filter in ("unavailable", "processing"):
+        rows = [r for r in rows if r["status"] in ((1, 2) if filter == "unavailable" else (2,)) and r.get("media_status", 2) in (1, 2, 3, 4)]
     rows = list(reversed(rows))
     return {"pageInfo": {"page": skip // take + 1, "pages": max(1, -(-len(rows) // take)), "results": len(rows)},
             "results": [full_req(r) for r in rows[skip:skip + take]]}
@@ -332,6 +338,26 @@ async def new_request(request: Request):
          "created": time.strftime("%Y-%m-%dT%H:%M:%SZ"), "media": {"tmdbId": b["mediaId"]},
          "seasons": (list(range(1, SHOWS[b["mediaId"]]["seasons"] + 1)) if b.get("seasons") == "all" else b.get("seasons") or []) if b["mediaType"] == "tv" else []}
     state["requests"].append(r)
+    return full_req(r)
+
+
+@app.get("/api/v1/request/{rid}")
+def one_request(request: Request, rid: int):
+    u = me(request)
+    r = next((r for r in state["requests"] if r["id"] == rid), None)
+    if not r or (not can(u, MANAGE) and r["by"] != u["id"]):
+        raise HTTPException(404, "Request not found.")
+    return full_req(r)
+
+
+@app.post("/api/v1/request/{rid}/retry")
+def retry(request: Request, rid: int):
+    u = me(request)
+    if not can(u, MANAGE):  # like Seerr: only request managers
+        raise HTTPException(403, "You do not have permission to access this endpoint")
+    r = next(r for r in state["requests"] if r["id"] == rid)
+    r["status"] = 2
+    state.setdefault("retried", []).append(rid)
     return full_req(r)
 
 

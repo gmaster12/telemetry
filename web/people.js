@@ -300,6 +300,7 @@
   }
   var mySub = null;
   function loadMySubscription() {
+    startServers();
     if (!me || me.kind !== 'plex') return;
     api('GET', '/api/me/subscription').then(function (r) { mySub = r; renderMySub(); }).catch(function () {});
   }
@@ -312,6 +313,69 @@
     box.hidden = !show;
     if (show) box.appendChild(subscriptionCard(mySub, 'self'));
   }
+
+  // ---------- your servers (viewers): Online or Offline, and for how long ----------
+  var srvData = null, srvSkew = 0, srvBoxes = [], srvTimer = null;
+  function ago2(sec) {
+    sec = Math.max(0, sec);
+    if (sec < 60) return 'under a minute';
+    var m = Math.floor(sec / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
+    if (d >= 2) return d + ' days';
+    if (h >= 1) return h + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
+    return m + ' min';
+  }
+  function serverTile(s) {
+    var nowSec = (Date.now() + srvSkew) / 1000;
+    var down = s.online === false, known = s.online != null;
+    var shape = down ? el('span', { class: 'gp-srv__sq', 'aria-hidden': 'true' }) : el('span', { class: 'gp-srv__dot' + (known ? '' : ' is-unknown'), 'aria-hidden': 'true' });
+    var tile = el('li', { class: 'gp-srv' + (down ? ' is-down' : '') },
+      el('span', { class: 'gp-srv__name', text: s.name }),
+      el('span', { class: 'gp-srv__state' }, shape, down ? 'Offline' : known ? 'Online' : 'Checking'));
+    if (s.since && known) {
+      tile.appendChild(el('span', { class: 'gp-srv__for', text: (down ? 'Down for ' : 'Up for ') + ago2(nowSec - s.since) }));
+      if (down) {
+        var at = new Date(s.since * 1000);
+        var sameDay = new Date().toDateString() === at.toDateString();
+        tile.appendChild(el('span', { class: 'gp-srv__note', text: 'Since ' + (sameDay ? '' : at.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ')
+          + at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) + '. Titles on ' + s.name + ' will not play until it is back.' }));
+      }
+    }
+    return tile;
+  }
+  function serversCard(compact) {
+    var box = el('div', { class: 'gp-srvcard' + (compact ? ' gp-srvcard--compact' : '') });
+    srvBoxes.push(box);
+    paintServers(box);
+    loadServers();
+    return box;
+  }
+  function paintServers(box) {
+    var list = (srvData && srvData.servers) || [];
+    box.hidden = !list.length;
+    box.replaceChildren(el('p', { class: 'gp-eyebrow', text: list.length === 1 ? 'Your server' : 'Your servers' }),
+      el('ul', { class: 'gp-srvlist' }, list.map(serverTile)),
+      el('p', { class: 'gp-srvcard__foot', text: 'Only the servers shared with you.' }));
+  }
+  function loadServers() {
+    if (!me || me.role === 'admin') return Promise.resolve();
+    return api('GET', '/api/me/servers').then(function (r) {
+      srvData = r;
+      srvSkew = r.now ? r.now * 1000 - Date.now() : 0;
+      srvBoxes = srvBoxes.filter(function (b) { return b.isConnected || b === homeSrv; });
+      srvBoxes.forEach(paintServers);
+      var sec = document.getElementById('srv-card');
+      if (sec) sec.hidden = !(r.servers || []).length;
+    }).catch(function () {});
+  }
+  var homeSrv = null;
+  function startServers() {
+    var sec = document.getElementById('srv-card');
+    if (!sec || !me || me.role === 'admin' || me.kind !== 'plex') return;
+    homeSrv = serversCard(false);
+    sec.replaceChildren(homeSrv);
+    if (!srvTimer) srvTimer = setInterval(loadServers, 60000);
+  }
+  window.gsServersCard = function () { return me && me.role !== 'admin' && me.kind === 'plex' ? serversCard(true) : null; };
 
   // ---------- history drawer ----------
   var drawer = document.getElementById('hist');

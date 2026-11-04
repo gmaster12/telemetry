@@ -141,6 +141,16 @@ files to add servers. Keep it that way.
   Seerr user 1. Settings, Requests lists links with Relink.
 - Nothing from Seerr reaches the browser raw: routes shape each reply and drop
   other people's emails and tokens (`tests/test_requests.py` checks this).
+- My requests (own, All) shows failed requests in a red box (Try again, Remove, "Try both again") and
+  approved ones not downloading yet in an amber "waiting for a download" box with the reason
+  (`GET /api/requests/attention`, `waiting_reason`): not out yet (digital or physical release date, or
+  season air date, from TMDB through Seerr), next episode airs on a date, or out but no copy found
+  ("Searching"). Seerr only lets owners delete pending requests and only managers retry, so for a
+  person's OWN FAILED request the dashboard retries (`POST /request/{id}/retry`) or removes
+  (`DELETE /request/{id}?failed=true`) with its own key after `own_failed` checks owner and status.
+  Glenn chose not to connect Radarr and Sonarr, so there is no "last searched" time.
+- A red floating "Report issue" button (`.rq-report`, Glenn's pick, option 2) on every Requests page opens
+  the title picker; the list tab is "Reported issues".
 - `requests` is an access section, on for everyone by default (a one-time
   migration added it to saved defaults and custom lists, `add_requests_section`);
   turn it off per person or in the defaults like the rest.
@@ -339,6 +349,12 @@ design system). The dashboard adds its own patterns:
 - Requests nav button (desktop and phone tab) and the Requests search pill pulse a slow lime ring
   (`rq-pulse`, 2.8 s, end of `requests.css`; Glenn's ask): not while on Requests or typing, not for
   reduced motion; a deeper green edge in the light theme.
+- Your servers (viewers, Plex sign-ins): `GET /api/me/servers` lists only the servers shared with them
+  (`users.servers`, old names through `server_aliases`), each Online or Offline and since when, nothing
+  else. `Poller._mark` saves the time each server went up or down in setting `server_since` (a server
+  counts as down after 3 failed polls in a row, so a blip keeps its up time). Shown as `#srv-card` on the
+  home page and beside My requests (`gsServersCard` in `people.js`): "Up for 12 days", or red "Down for
+  2 h 14 min, since 8:45 AM".
 - Status is always a word plus a shape, never color alone. No emoji.
 - Light theme (`web/light.css`, Glenn's reference picture): deeper shadows on
   cards, pills, the top bar and stream cards, and light Servers and Server

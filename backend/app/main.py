@@ -825,6 +825,27 @@ def api_user_history(request: Request, plex_id: str, before: int | None = None, 
     return {"rows": _history_rows(directory.history(plex_id, before, limit))}
 
 
+@app.get("/api/me/servers")
+def api_my_servers(request: Request):
+    """The servers this person is on (shared with them or streamed from), each with Online or Offline and since
+    when. Nothing else about the servers: no addresses, errors or load. Admins get every server."""
+    p = me(request)
+    servers = [s for s in poller.cfg.servers if s.enabled]
+    if not p.is_admin:
+        u = directory.get_user(p.subject) or {}
+        names = set(json.loads(u.get("servers") or "[]"))
+        alias = {a["old_name"]: a["server_id"] for a in store.aliases()}
+        ids = {s.id for s in servers if s.name in names} | {alias[n] for n in names if n in alias}
+        servers = [s for s in servers if s.id in ids]
+    out = []
+    for s in servers:
+        rec = poller.state_since(s.id) or {}
+        live = poller.server_state.get(s.name, {}).get("online")
+        online = rec.get("online") if rec else live
+        out.append({"id": s.id, "name": s.name, "online": online, "since": rec.get("since") if rec else None})
+    return {"servers": out, "now": int(time.time())}
+
+
 @app.get("/api/me/subscription")
 def api_my_subscription(request: Request):
     """The signed-in person's own Stripe subscription. Everyone may see their own."""

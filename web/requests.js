@@ -168,6 +168,7 @@
       if (token !== routeToken) return;
       if (!me.connected) return notConnected();
       updateTabs();
+      reportBtn.hidden = !(me.can && me.can.issues);
       var id = r.path[1];
       var view = {
         discover: discover, movies: function () { return browseKind('movies', r); }, tv: function () { return browseKind('tv', r); },
@@ -209,11 +210,12 @@
     { id: 'tv', label: 'Series', path: 'tv' },
     { id: 'mine', label: 'My requests', path: 'mine' },
     { id: 'watchlist', label: 'Watchlist', path: 'watchlist' },
-    { id: 'issues', label: 'Issues', path: 'issues', ok: function () { return me && me.can && me.can.viewIssues; } },
+    { id: 'issues', label: 'Reported issues', path: 'issues', ok: function () { return me && me.can && me.can.viewIssues; } },
     { id: 'manage', label: 'Approve', path: 'manage', ok: function () { return me && me.can && me.can.manage; } }
   ];
   var tabsBox = null;
   var titleEl = null;
+  var reportBtn = null;
   function build() {
     if (built) return;
     built = true;
@@ -233,7 +235,8 @@
     searchInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { searchInput.value = ''; searchInput.dispatchEvent(new Event('input')); } });
     tabsBox = el('nav', { class: 'rq-tabs', 'aria-label': 'Requests sections' });
     body = el('div', { class: 'rq-body' });
-    page.replaceChildren(
+    reportBtn = el('button', { type: 'button', class: 'rq-report', hidden: true, onclick: function () { pickForIssue(); } }, icon('flag', 18), 'Report issue');
+    page.replaceChildren(reportBtn,
       el('header', { class: 'rq-top' },
         el('div', { class: 'rq-titles' }, el('span', { class: 'rq-eyebrow', text: 'Requests' }), titleEl),
         el('label', { class: 'rq-search' }, icon('search', 18), searchInput)),
@@ -784,6 +787,7 @@
         el('button', { type: 'button', class: 'rq-btn rq-btn--accent rq-btn--sm', onclick: function (e) { decide(q, 'approve', e.currentTarget, onChange); } }, icon('check', 16), 'Approve'),
         el('button', { type: 'button', class: 'rq-btn rq-btn--sm', onclick: function (e) { decide(q, 'decline', e.currentTarget, onChange); } }, icon('close', 16), 'Decline'));
     }
+    if (q.canRetry) actions.append(retryBtn(q, onChange), removeBtn(q, onChange));
     if (q.canCancel && q.status === 'pending') {
       var cancel = el('button', { type: 'button', class: 'rq-btn rq-btn--quiet rq-btn--sm', text: q.mine ? 'Cancel request' : 'Delete' });
       cancel.addEventListener('click', function () {
@@ -809,7 +813,76 @@
     api('POST', '/api/requests/request/' + q.id + '/' + what).then(function () { forget(); toast(q.title + (what === 'approve' ? ' approved.' : ' declined.')); onChange(); })
       .catch(function (e) { toast(e.message, 'error'); btn.disabled = false; });
   }
-  function requestList(url, emptyText, emptyHint) {
+  // ---------- failed and waiting requests ----------
+  function retryBtn(q, onChange, accent) {
+    var b = el('button', { type: 'button', class: 'rq-btn rq-btn--sm' + (accent ? ' rq-btn--accent' : '') }, icon('refresh', 16), 'Try again');
+    b.addEventListener('click', function () {
+      b.disabled = true;
+      api('POST', '/api/requests/request/' + q.id + '/retry').then(function () { forget(); toast(q.title + ' was sent again.'); onChange(); })
+        .catch(function (e) { toast(e.message, 'error'); b.disabled = false; });
+    });
+    return b;
+  }
+  function removeBtn(q, onChange) {
+    var b = el('button', { type: 'button', class: 'rq-iconbtn rq-iconbtn--sm', 'aria-label': 'Remove ' + q.title + ' from your list', title: 'Remove from your list' }, icon('trash', 16));
+    b.addEventListener('click', function () {
+      if (b.dataset.sure !== '1') { b.dataset.sure = '1'; b.classList.add('is-sure'); b.replaceChildren(document.createTextNode('Remove?')); return; }
+      b.disabled = true;
+      api('DELETE', '/api/requests/request/' + q.id + '?failed=true').then(function () { forget(); toast(q.title + ' was removed from your list.'); onChange(); })
+        .catch(function (e) { toast(e.message, 'error'); b.disabled = false; });
+    });
+    return b;
+  }
+  function waitText(q) {
+    var w = q.wait || {};
+    var d = w.date ? fmtDate(w.date, { month: 'short', day: 'numeric' }) : '';
+    if (w.reason === 'airing') return { text: 'Episode ' + w.episode + ' of season ' + w.season + ' airs ' + d + '. Each episode downloads once it has aired.', tag: 'Airs ' + d, shape: 'clock' };
+    if (w.reason === 'unreleased' && w.what === 'cinema') return { text: 'In cinemas ' + d + '. It downloads once it is out to watch at home.', tag: 'Not out yet', shape: 'clock' };
+    if (w.reason === 'unreleased' && w.what === 'home') return { text: 'Not out yet. Out to watch at home ' + d + ', and it downloads then.', tag: 'Out ' + d, shape: 'clock' };
+    if (w.reason === 'unreleased') return { text: d ? 'Not out yet. ' + (q.seasons && q.seasons.length === 1 ? 'Season ' + q.seasons[0] : 'It') + ' airs ' + d + ', and it downloads then.' : 'Not out yet, and no date has been announced. It downloads once it airs.', tag: d ? 'Airs ' + d : 'Not out yet', shape: 'clock' };
+    return { text: 'Out, but no copy can be downloaded yet. It keeps looking and downloads as soon as one turns up.', tag: 'Searching', shape: 'search' };
+  }
+  function attnItem(q, extra) {
+    return el('li', { class: 'rq-attn__item' },
+      el('a', { class: 'rq-rrow__poster', href: link((q.kind === 'tv' ? 'series/' : 'movie/') + q.tmdbId), 'aria-hidden': 'true', tabindex: '-1' },
+        q.poster ? el('img', { src: img(q.poster, 'w185'), alt: '', loading: 'lazy' }) : null),
+      el('div', { class: 'rq-attn__main' },
+        el('a', { class: 'rq-rrow__title', href: link((q.kind === 'tv' ? 'series/' : 'movie/') + q.tmdbId) }, q.title, q.year ? el('span', { class: 'rq-muted', text: ' (' + q.year + ')' }) : null),
+        el('span', { class: 'rq-rrow__meta', text: [KIND_NAME[q.kind], q.is4k ? '4K' : null, seasonText(q.seasons), fmtDate(q.created)].filter(Boolean).join(' · ') }),
+        extra.text ? el('span', { class: 'rq-attn__why', text: extra.text }) : null),
+      extra.end);
+  }
+  function attentionBoxes(d, onChange) {
+    var out = [];
+    if (d.failed.length) {
+      var all = d.failed.length > 1 ? el('button', { type: 'button', class: 'rq-btn rq-btn--accent rq-btn--sm', text: 'Try ' + (d.failed.length === 2 ? 'both' : 'all ' + d.failed.length) + ' again' }) : null;
+      if (all) all.addEventListener('click', function () {
+        all.disabled = true;
+        Promise.all(d.failed.map(function (q) { return api('POST', '/api/requests/request/' + q.id + '/retry').then(function () { return 1; }, function () { return 0; }); }))
+          .then(function (ok) { var n = ok.reduce(function (a, b) { return a + b; }, 0); forget(); toast(plural(n, 'request was', 'requests were') + ' sent again.', n < ok.length ? 'error' : null); onChange(); });
+      });
+      out.push(el('section', { class: 'rq-attn rq-attn--failed', 'aria-label': 'Failed requests' },
+        el('div', { class: 'rq-attn__head' }, el('span', { class: 'rq-attn__sq', 'aria-hidden': 'true' }),
+          el('b', { text: plural(d.failed.length, 'request', 'requests') + ' failed' }),
+          el('span', { class: 'rq-muted', text: 'Something went wrong getting ' + (d.failed.length === 1 ? 'it' : 'them') + '. Try again, or remove ' + (d.failed.length === 1 ? 'it' : 'them') + ' from your list.' }), all),
+        el('ul', { class: 'rq-attn__list' }, d.failed.map(function (q) {
+          return attnItem(q, { end: el('div', { class: 'rq-attn__actions' }, d.failed.length > 1 ? retryBtn(q, onChange) : retryBtn(q, onChange, true), removeBtn(q, onChange)) });
+        }))));
+    }
+    if (d.waiting.length) {
+      out.push(el('section', { class: 'rq-attn rq-attn--wait', 'aria-label': 'Waiting for a download' },
+        el('div', { class: 'rq-attn__head' }, icon('clock', 16),
+          el('b', { text: d.waiting.length + ' waiting for a download' }),
+          el('span', { class: 'rq-muted', text: 'Nothing to do. ' + (d.waiting.length === 1 ? 'It downloads' : 'They download') + ' on ' + (d.waiting.length === 1 ? 'its' : 'their') + ' own as soon as ' + (d.waiting.length === 1 ? 'it is' : 'they are') + ' out.' })),
+        el('ul', { class: 'rq-attn__list' }, d.waiting.map(function (q) {
+          var w = waitText(q);
+          return attnItem(q, { text: w.text, end: el('span', { class: 'rq-waittag' }, icon(w.shape === 'search' ? 'search' : 'clock', 14), w.tag) });
+        }))));
+    }
+    return out;
+  }
+
+  function requestList(url, emptyText, emptyHint, skip) {
     var list = el('ul', { class: 'rq-rlist' });
     var more = el('button', { type: 'button', class: 'rq-btn rq-more', text: 'Load more' });
     var n = 1;
@@ -817,7 +890,7 @@
     function load() {
       more.disabled = true;
       return api('GET', url + '&page=' + n).then(function (d) {
-        (d.items || []).forEach(function (q) { list.appendChild(requestRow(q, reload)); });
+        (d.items || []).forEach(function (q) { if (!skip || !skip[q.id]) list.appendChild(requestRow(q, reload)); });
         if (!list.children.length) list.replaceWith(el('div', { class: 'rq-empty' }, el('b', { text: emptyText }), emptyHint ? el('span', { text: emptyHint }) : null));
         more.hidden = !d.more; more.disabled = false; n++;
       });
@@ -832,8 +905,24 @@
       everyone ? 'No requests match' : 'You have not requested anything yet', everyone ? null : 'Find a movie or series and choose Request.');
     var top = el('div', { class: 'rq-listtop' }, filterChips('mine', q.filter, { everyone: everyone ? '1' : null }),
       me.can.viewRequests ? el('a', { class: 'rq-chip', href: link('mine', { filter: q.filter, everyone: everyone ? null : '1' }), 'aria-pressed': everyone ? 'true' : 'false', text: everyone ? 'Everyone' : 'Only mine' }) : null);
-    body.replaceChildren(quotaNote(), top, l.el);
-    return l.load();
+    if (everyone || (q.filter && q.filter !== 'all')) {
+      body.replaceChildren(quotaNote(), top, l.el);
+      return l.load();
+    }
+    // Own requests, all of them: what failed and what is waiting come first, in their own boxes; the servers
+    // this person is on sit beside (on top on phones).
+    var mainCol = el('div', { class: 'rq-mine__main' });
+    var side = window.gsServersCard ? window.gsServersCard() : null;
+    body.replaceChildren(el('div', { class: 'rq-mine' + (side ? ' has-side' : '') }, mainCol, side ? el('aside', { class: 'rq-mine__side', 'aria-label': 'Your servers' }, side) : null));
+    var reload = function () { route(); };
+    return api('GET', '/api/requests/attention').catch(function () { return { failed: [], waiting: [] }; }).then(function (d) {
+      var skip = {};
+      d.failed.concat(d.waiting).forEach(function (x) { skip[x.id] = 1; });
+      var l2 = requestList('/api/requests/mine?' + qs({ filter: 'all' }), d.failed.length + d.waiting.length ? 'Nothing else yet' : 'You have not requested anything yet',
+        d.failed.length + d.waiting.length ? null : 'Find a movie or series and choose Request.', skip);
+      [quotaNote(), top].concat(attentionBoxes(d, reload), [l2.el]).forEach(function (x) { if (x) mainCol.appendChild(x); });
+      return l2.load();
+    });
   }
   function manage(q) {
     setTitle('Approve requests');

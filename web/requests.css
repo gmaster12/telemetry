@@ -279,3 +279,44 @@ body.rq-noscroll { overflow: hidden; }
   .sd-navbtn[aria-label="Requests"]:not([aria-current="true"]),
   .sd-tab[aria-label="Requests"]:not([aria-current="true"]) { box-shadow: 0 0 0 2px rgba(184, 252, 100, 0.7); }
 }
+
+/* Report issue: a red floating button on every Requests page (Glenn's pick, option 2). */
+.rq-report { position: fixed; right: 28px; bottom: 24px; z-index: 7; display: inline-flex; align-items: center; gap: 10px; height: 56px; padding: 0 24px 0 20px; border: 0; border-radius: var(--radius-pill);
+  background: #c62f2f; color: #fff; font: inherit; font-size: 15px; font-weight: 700; cursor: pointer; box-shadow: 0 12px 30px rgba(198, 47, 47, 0.35); }
+.rq-report:hover { background: #b02424; }
+.rq-report:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.rq-report[hidden], .gs-app:not([data-page="requests"]) .rq-report { display: none; }
+@media (max-width: 760px) { .rq-report { right: 16px; bottom: 98px; height: 50px; padding: 0 18px 0 14px; font-size: 14px; } }
+
+/* My requests: boxes for failed and waiting requests, and Your servers beside. */
+.rq-mine { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); align-items: start; }
+.rq-mine.has-side { grid-template-columns: minmax(0, 1fr) 300px; }
+.rq-mine__main { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; padding-bottom: 72px; }
+.rq-mine__side { position: sticky; top: 16px; }
+@media (max-width: 1000px) { .rq-mine.has-side { grid-template-columns: minmax(0, 1fr); } .rq-mine__side { position: static; order: -1; } }
+.rq-attn { display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; border-radius: 26px; }
+.rq-attn--failed { background: color-mix(in srgb, #c62f2f 12%, var(--surface-card)); box-shadow: inset 0 0 0 1px color-mix(in srgb, #c62f2f 60%, transparent); }
+.rq-attn--wait { background: var(--surface-card); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--amber) 70%, transparent); }
+.rq-attn__head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.rq-attn__head > b { font-size: 16px; }
+.rq-attn__head > .rq-btn { margin-left: auto; }
+.rq-attn--wait .rq-attn__head > svg { color: var(--amber); }
+.rq-attn__sq { width: 12px; height: 12px; background: #c62f2f; flex: none; }
+.rq-attn__list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.rq-attn__item { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 10px; border-radius: 18px; background: color-mix(in srgb, var(--surface-page) 55%, transparent); }
+.rq-attn__item .rq-rrow__poster { width: 48px; border-radius: 9px; }
+.rq-attn__main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rq-attn__why { font-size: 13px; line-height: 18px; color: var(--ink); }
+.rq-attn--wait .rq-attn__why { color: color-mix(in srgb, var(--amber) 55%, var(--ink)); }
+.rq-attn__actions { display: flex; align-items: center; gap: 8px; }
+.rq-waittag { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: var(--amber); color: var(--on-fill); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.rq-iconbtn--sm { width: 34px; height: 34px; border: 1px solid var(--hairline); background: transparent; }
+.rq-iconbtn--sm.is-sure { width: auto; padding: 0 12px; border-radius: var(--radius-pill); background: #c62f2f; color: #fff; border-color: #c62f2f; font: inherit; font-size: 13px; font-weight: 600; }
+@media (max-width: 760px) {
+  .rq-attn__item { grid-template-columns: 40px minmax(0, 1fr); }
+  .rq-attn__item .rq-rrow__poster { width: 40px; }
+  .rq-attn__actions, .rq-attn__item > .rq-waittag { grid-column: 2; justify-self: start; }
+  .rq-attn__head > .rq-btn { margin-left: 0; }
+}
+.gs-app[data-look="light"] .rq-attn--wait .rq-attn__why { color: #7a5214; }
+@media (prefers-color-scheme: light) { .gs-app:not([data-look="dark"]) .rq-attn--wait .rq-attn__why { color: #7a5214; } }

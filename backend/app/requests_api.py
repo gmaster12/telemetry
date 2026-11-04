@@ -145,7 +145,39 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -
                 "by": {"id": by.get("id"), "name": by.get("displayName") or by.get("plexUsername") or by.get("username"), "avatar": by.get("avatar")},
                 "modifiedBy": (q.get("modifiedBy") or {}).get("displayName"), "mine": mine,
                 "canCancel": (mine and status == "pending") or manage, "canDecide": manage and status == "pending",
+                "canRetry": status == "failed" and (mine or manage), "canRemove": status == "failed" and (mine or manage),
+                "downloading": bool(m.get("downloadStatus4k" if q.get("is4k") else "downloadStatus")),
                 "media": {"status": MEDIA_STATUS.get(m.get("status4k" if q.get("is4k") else "status"), "unknown"), "tmdbId": m.get("tmdbId")}}
+
+    async def waiting_reason(row: dict) -> dict:
+        """Why an approved request has not downloaded yet: not out yet (with the date it comes out, from TMDB through
+        Seerr), or out but no copy found yet (Radarr or Sonarr keep looking on their own)."""
+        today = dt.date.today().isoformat()
+        try:
+            d = await svc.get(f"/{'movie' if row['kind'] == 'movie' else 'tv'}/{int(row['tmdbId'])}", ttl=SLOW)
+        except SeerrError:
+            return {"reason": "searching"}
+        if row["kind"] == "movie":
+            # Digital (4) or physical (5) release is when a copy can exist; a theatrical date alone is not enough.
+            dates = sorted((rd.get("release_date") or "")[:10] for c in ((d.get("releases") or {}).get("results") or [])
+                           for rd in c.get("release_dates") or [] if rd.get("type") in (4, 5) and rd.get("release_date"))
+            home = next((x for x in dates if x), None)
+            if home and home > today:
+                return {"reason": "unreleased", "date": home, "what": "home"}
+            if not home and (d.get("releaseDate") or "") > today:
+                return {"reason": "unreleased", "date": d["releaseDate"], "what": "cinema"}
+            return {"reason": "searching"}
+        wanted = set(row.get("seasons") or [])
+        future = sorted(x.get("airDate") for x in d.get("seasons") or []
+                        if x.get("seasonNumber") in wanted and x.get("airDate") and x["airDate"] > today)
+        nxt = d.get("nextEpisodeToAir") or {}
+        if nxt.get("airDate") and nxt.get("seasonNumber") in wanted and nxt["airDate"] >= today:
+            return {"reason": "airing", "date": nxt["airDate"], "season": nxt.get("seasonNumber"), "episode": nxt.get("episodeNumber")}
+        if future:
+            return {"reason": "unreleased", "date": future[0], "what": "season"}
+        if any(x.get("seasonNumber") in wanted and not x.get("airDate") for x in d.get("seasons") or []):
+            return {"reason": "unreleased", "date": None, "what": "season"}
+        return {"reason": "searching"}
 
     async def requests_page(res: dict, me_id: int | None, manage: bool) -> dict:
         rows = (res or {}).get("results") or []
@@ -413,18 +445,61 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -
         return {"ok": True, "status": REQUEST_STATUS.get((res or {}).get("status"), "pending"), "id": (res or {}).get("id")}
 
     @r.delete("/request/{request_id}")
-    async def cancel_request(request: Request, request_id: int):
+    async def cancel_request(request: Request, request_id: int, failed: bool = False):
+        """Cancel a pending request, or (failed=true) remove a failed one from the person's list."""
         _, uid = await who(request)
-        await run(svc.send("DELETE", f"/request/{request_id}", user=uid))
+        if failed:
+            await own_failed(uid, request_id)
+            await run(svc.send("DELETE", f"/request/{request_id}", user=None))
+        else:
+            await run(svc.send("DELETE", f"/request/{request_id}", user=uid))
         return {"ok": True}
 
     @r.post("/request/{request_id}/{decision}")
     async def decide(request: Request, request_id: int, decision: str):
+        if decision == "retry":  # this route is matched first; the retry route below does the work
+            return await retry_request(request, request_id)
         _, uid = await who(request)
         if decision not in ("approve", "decline"):
             raise HTTPException(404, "No such action.")
         await run(svc.send("POST", f"/request/{request_id}/{decision}", user=uid))
         return {"ok": True}
+
+    @r.get("/attention")
+    async def attention(request: Request):
+        """My requests that failed (try again or remove) and approved ones still waiting for a download."""
+        _, uid = await who(request)
+        u = await run(me_info(uid))
+        manage = has(u.get("permissions"), "MANAGE_REQUESTS")
+        base = {"take": 50, "skip": 0, "sort": "added", "sortDirection": "desc", "requestedBy": u.get("id")}
+        failed_res, open_res = await asyncio.gather(run(svc.get("/request", user=uid, params={**base, "filter": "failed"}, ttl=FAST)),
+                                                    run(svc.get("/request", user=uid, params={**base, "filter": "unavailable"}, ttl=FAST)))
+        failed = (await requests_page(failed_res, u.get("id"), manage))["items"]
+        rows = (await requests_page(open_res, u.get("id"), manage))["items"]
+        waiting = [x for x in rows if x["status"] == "approved" and not x["downloading"]
+                   and x["media"]["status"] in ("processing", "partial", "pending", "unknown")]
+        reasons = await asyncio.gather(*[waiting_reason(x) for x in waiting])
+        return {"failed": failed, "waiting": [{**x, "wait": w} for x, w in zip(waiting, reasons)]}
+
+    async def own_failed(uid: int | None, request_id: int) -> dict:
+        """A failed request this person made. Seerr only lets people delete their own requests while pending and
+        only request managers retry, so for these two actions the dashboard acts with its own Seerr key, after
+        checking here that the request is theirs and has failed."""
+        u = await run(me_info(uid))
+        q = await run(svc.get(f"/request/{request_id}", user=uid))
+        if REQUEST_STATUS.get((q or {}).get("status")) != "failed":
+            raise HTTPException(409, "Only a failed request can be tried again or removed this way.")
+        if not has(u.get("permissions"), "MANAGE_REQUESTS") and (q.get("requestedBy") or {}).get("id") != u.get("id"):
+            raise HTTPException(403, "That is not your request.")
+        return q
+
+    @r.post("/request/{request_id}/retry")
+    async def retry_request(request: Request, request_id: int):
+        """Send a failed request to Radarr or Sonarr again (Seerr's own retry)."""
+        _, uid = await who(request)
+        await own_failed(uid, request_id)
+        res = await run(svc.send("POST", f"/request/{request_id}/retry", user=None))
+        return {"ok": True, "status": REQUEST_STATUS.get((res or {}).get("status"), "approved")}
 
     @r.get("/mine")
     async def mine(request: Request, filter: str = "all", page: int = 1, everyone: bool = False):

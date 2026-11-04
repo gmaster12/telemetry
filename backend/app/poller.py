@@ -29,6 +29,11 @@ class Poller:
         self.clients: dict[int, PlexClient] = {}
         self.streams: list[dict] = []
         self.server_state: dict[str, dict] = {}
+        # When each server last went up or down ({server id: {"online", "since"}}), saved so a restart does not
+        # reset "Down for" or "Up for". A server counts as down after 3 failed polls in a row (about 30 s), so one
+        # slow answer does not reset its up time.
+        self.since: dict[str, dict] = self._load_since()
+        self._fails: dict[int, tuple[int, float]] = {}
         self.telemetry: dict[str, dict] = {}
         self.netdata_error: str | None = None
         self.netdata_ok_at: float | None = None
@@ -54,6 +59,33 @@ class Poller:
         self.billing_counts: dict = {}
         self._load_owners()
         self.directory.close_stale_plays()
+
+    def _load_since(self) -> dict[str, dict]:
+        try:
+            return json.loads(self.store.get_setting("server_since") or "{}")
+        except ValueError:
+            return {}
+
+    def _mark(self, s, ok: bool, now: float | None = None) -> None:
+        now = now or time.time()
+        key = str(s.id)
+        if ok:
+            self._fails.pop(s.id, None)
+            online = True
+            started = now
+        else:
+            n, first = self._fails.get(s.id, (0, now))
+            self._fails[s.id] = (n + 1, first)
+            if n + 1 < 3:
+                return
+            online, started = False, first
+        rec = self.since.get(key)
+        if rec is None or rec.get("online") != online:
+            self.since[key] = {"online": online, "since": int(started)}
+            self.store.set_setting("server_since", json.dumps(self.since))
+
+    def state_since(self, server_id: int) -> dict | None:
+        return self.since.get(str(server_id))
 
     def _saved_time(self, key: str) -> float:
         try:
@@ -138,10 +170,12 @@ class Poller:
                         self.clips.want(s.id, row["rating_key"])  # made in the background; shows from the next poll
                 rows.append(row)
             self.server_state[s.name] = {"online": True, "error": None, "ok_at": time.time()}
+            self._mark(s, True)
             return rows
         except Exception as e:
             prev = self.server_state.get(s.name, {})
             self.server_state[s.name] = {"online": False, "error": str(e), "ok_at": prev.get("ok_at")}
+            self._mark(s, False)
             log.warning("Plex poll failed for %s: %s", s.name, e)
             return []
 

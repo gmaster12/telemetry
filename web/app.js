@@ -109,7 +109,9 @@
     bookmark: ['M6 3h12v18l-6-4-6 4z'],
     flag: ['M5 21V4', 'M5 4h11l-2 4 2 4H5'],
     left: ['M19 12H5', 'm11 6-6 6 6 6'],
-    external: ['M14 4h6v6', 'M20 4 11 13', 'M18 14v6H4V6h6']
+    external: ['M14 4h6v6', 'M20 4 11 13', 'M18 14v6H4V6h6'],
+    refresh: ['M4 12a8 8 0 0 1 14-5.3', 'M20 4v5h-5', 'M20 12a8 8 0 0 1-14 5.3', 'M4 20v-5h5'],
+    trash: ['M5 7h14', 'M10 7V5h4v2', 'M7 7l1 13h8l1-13']
   };
   function icon(name, size) {
     const s = document.createElementNS(svgNS, 'svg');
