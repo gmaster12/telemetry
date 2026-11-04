@@ -15,7 +15,7 @@
   var REFRESH_MS = 10000;
   var me = null;
   var loaded = false;
-  var KEEP = ['look', 'cardsize', 'artlight', 'cardstyle', 'clips', 'vhome'];
+  var KEEP = ['look', 'cardsize', 'artlight', 'cardstyle', 'clips', 'clipcount', 'vhome'];
   var store = {};
   var calcs = {};
   var callbacks = [];

@@ -41,7 +41,7 @@ def test_want_queues_each_title_once_and_waits_after_a_failure(tmp_path):
 
 def test_keys_are_safe_file_names(tmp_path):
     c = Clips(tmp_path, ffmpeg="ffmpeg")
-    assert c.path(3, "../../etc/passwd").name == "3_etcpasswd.mp4"
+    assert c.path(3, "../../etc/passwd").name == "3_etcpasswd_360p.mp4"
     assert c.url(3, "12a/../b") == "/api/clip/3/12ab"
 
 
@@ -54,9 +54,11 @@ def test_prune_drops_old_clips_and_keeps_under_the_cap(tmp_path, monkeypatch):
     monkeypatch.setattr(C, "MAX_BYTES", 250)
     for i, age in enumerate([300, 200, 100]):
         p = c.path(2, str(i)); p.write_bytes(b"x" * 100); os.utime(p, (now - age,) * 2)
+    small = tmp_path / "2_9.mp4"; small.write_bytes(b"x"); os.utime(small, (now - 60,) * 2)   # an old 240p clip
     removed = c.prune(now)
     names = sorted(p.name for p in tmp_path.iterdir())
-    assert removed == 3 and names == ["2_1.mp4", "2_2.mp4"]   # 20-day-old, leftover, then the oldest over the cap
+    # 20-day-old, leftover, the old 240p one, then the oldest over the cap
+    assert removed == 4 and names == ["2_1_360p.mp4", "2_2_360p.mp4"]
     assert MAX_BYTES > 100 * 1024 * 1024
 
 
@@ -106,7 +108,7 @@ def test_makes_a_small_silent_clip_from_a_file_served_over_http(tmp_path):
     assert "tok" in seen                                     # sent as a header
     probe = subprocess.run([shutil.which("ffprobe") or "ffprobe", "-v", "error", "-show_entries", "stream=codec_type,height",
                             "-of", "csv=p=0", str(out)], capture_output=True, text=True).stdout.split()
-    assert probe == ["video,240"]                            # one video stream, 240 px tall, no audio
+    assert probe == ["video,360"]                            # one video stream, 360 px tall, no audio
     assert not list((tmp_path / "clips").glob("*.part"))
 
 

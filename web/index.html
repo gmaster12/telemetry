@@ -624,9 +624,14 @@
             </div>
             <div class="sd-field st-switchrow" id="clip-mode">
               <div><label class="st-switchrow__label" for="clip-switch">Moving clips</label>
-                <p class="sd-field__hint">Up to 6 cards play a silent 8-second loop from 10% into the show or movie, only while that person is watching. Turn it off to save data on a phone.</p></div>
+                <p class="sd-field__hint" id="clip-hint">Up to 6 cards play a silent 8-second loop from 10% into the show or movie, only while that person is watching. Turn it off to save data on a phone.</p></div>
               <input type="checkbox" class="st-switch" id="clip-switch" role="switch" checked>
               <span class="st-switchrow__state" id="clip-state" aria-hidden="true">On</span>
+            </div>
+            <div class="sd-field" id="clip-count-field">
+              <div class="sd-field__row"><label for="clip-count">Cards with moving clips</label><output id="clip-count-out" for="clip-count">6</output></div>
+              <input class="sd-range" type="range" id="clip-count" min="6" max="12" step="1" value="6">
+              <div class="sd-field__ticks"><span>6</span><span>12</span></div>
             </div>
           </div>
           <aside class="st-preview" aria-label="Live preview">

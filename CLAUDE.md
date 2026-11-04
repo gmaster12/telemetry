@@ -188,7 +188,8 @@ Moving clips (`app/clips.py`): the first time a show or movie plays, the poller
 queues it; `Clips.worker` (one at a time) asks that title's Plex server for its
 file (`/library/metadata/{ratingKey}`, `Part.key` under `/library/parts/`) and
 runs ffmpeg in this container to cut 8 silent seconds starting 10% in (Glenn's
-choice), 240p H.264, about 100 KB, saved as `data/clips/<serverId>_<ratingKey>.mp4`
+choice), 360p H.264 (`CLIP_HEIGHT`, was 240p; about 250 KB), saved as `data/clips/<serverId>_<ratingKey>_360p.mp4`
+(the height is in the name, so a new height makes new clips and `prune` removes the old ones)
 and served by `GET /api/clip/{server}/{ratingKey}` (byte ranges; Safari needs
 them). The Plex token goes to ffmpeg as a request header, never in a URL. ffmpeg
 seeks with byte-range requests, so a clip reads about its own size from Plex, not
@@ -337,7 +338,8 @@ design system). The dashboard adds its own patterns:
   load, never on the 10-second refreshes; skipped for reduced motion. The
   classes are removed when each animation ends.
 - Moving clips in stream cards (Settings, Display, `clips` on/off, default on,
-  saved per browser): up to 6 cards with a ready clip, picked at random and kept
+  saved per browser): up to 6 cards with a ready clip (6 to 12, Settings, Display, "Cards with moving clips",
+  `clipcount`, saved per browser), picked at random and kept
   while they last, play it muted on a loop under the card's shade and text
   (`pickClips`, `attachClip`, `.sd-clip`, `.has-clip`). Each card keeps its
   `<video>` across redraws, so the loop never restarts on the 10-second refresh.

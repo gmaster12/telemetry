@@ -1,7 +1,7 @@
 """Short silent looping clips for the stream cards, cut from each title's own file on its Plex server.
 
 The first time a show or movie plays, ffmpeg (installed in this container) reads about 8 seconds starting
-10% into the file, straight from the Plex server that has it, and saves a small 240p MP4 in the data
+10% into the file, straight from the Plex server that has it, and saves a small 360p MP4 in the data
 folder. Every viewer reuses that file, so each title is cut once. Only one clip is made at a time, so
 neither this host nor the Plex servers get busy. A title that fails is not retried for 6 hours. Clips
 nobody has watched for 14 days are deleted, and the folder is kept under a size cap, oldest first.
@@ -24,6 +24,7 @@ START_AT = 0.10            # 10% into the show or movie (Glenn's choice): no spo
 RETRY_AFTER = 6 * 3600     # a title that failed is left alone this long
 KEEP_DAYS = 14             # clips nobody has played for this long are deleted
 MAX_BYTES = 500 * 1024 * 1024
+CLIP_HEIGHT = 360  # Glenn asked for 360p (was 240p); about 250 KB a clip
 TIMEOUT = 90               # seconds for one ffmpeg run
 VIDEO_KINDS = ("Episode", "Movie")
 
@@ -49,7 +50,8 @@ class Clips:
         return f"{int(server_id)}_{re.sub(r'[^A-Za-z0-9_-]', '', str(rating_key))[:40]}"
 
     def path(self, server_id: int, rating_key: str) -> Path:
-        return self.dir / (self.key(server_id, rating_key) + ".mp4")
+        # The size is in the name: changing CLIP_HEIGHT makes new clips, and prune() removes the old ones.
+        return self.dir / (self.key(server_id, rating_key) + f"_{CLIP_HEIGHT}p.mp4")
 
     def url(self, server_id: int, rating_key: str) -> str:
         return f"/api/clip/{int(server_id)}/{re.sub(r'[^A-Za-z0-9_-]', '', str(rating_key))}"
@@ -112,8 +114,8 @@ class Clips:
             "-headers", f"X-Plex-Token: {token}\r\n",
             "-ss", f"{start:.2f}", "-i", file_url, "-t", str(CLIP_SECONDS),
             "-map", "0:v:0", "-an", "-sn", "-dn",
-            "-vf", "scale=-2:240:flags=bicubic,fps=24,format=yuv420p",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "30", "-profile:v", "main",
+            "-vf", f"scale=-2:{CLIP_HEIGHT}:flags=bicubic,fps=24,format=yuv420p",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "28", "-profile:v", "main",
             "-movflags", "+faststart", "-f", "mp4", "-y", str(out),
         ]
 
@@ -149,7 +151,7 @@ class Clips:
             if p.suffix == ".part" and now - st.st_mtime > 600:
                 p.unlink(missing_ok=True); removed += 1
             elif p.suffix == ".mp4":
-                if now - st.st_mtime > KEEP_DAYS * 86400:
+                if not p.name.endswith(f"_{CLIP_HEIGHT}p.mp4") or now - st.st_mtime > KEEP_DAYS * 86400:
                     p.unlink(missing_ok=True); removed += 1
                 else:
                     files.append((st.st_mtime, st.st_size, p))

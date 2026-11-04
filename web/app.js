@@ -598,11 +598,12 @@
     g.putImageData(img, 0, 0);
     return (artCache[r.title] = cv.toDataURL('image/jpeg', 0.75));
   }
-  // Moving clips (Settings, Display): up to 6 cards, picked at random, play a short silent loop cut 10% into what
+  // Moving clips (Settings, Display): up to 6 to 12 cards (the person's choice), picked at random, play a short silent loop cut 10% into what
   // is playing (made once per title on the server, app/clips.py). Each card keeps its <video> across redraws,
   // so the loop never restarts on the 10-second refresh. A clip pauses when the stream does, off screen and in a
   // hidden tab. Not for reduced motion or a browser asking to save data.
-  const MAX_CLIPS = 6;
+  // How many cards play at once: Settings, Display, "Cards with moving clips" (6 to 12, default 6, per browser).
+  const clipCount = () => Math.max(6, Math.min(12, Math.round(Number(dash.params().clipcount) || 6)));
   const clipPicks = new Set();
   const clipVideos = new Map();   // stream id -> <video>
   const clipMode = () => (dash.params().clips === 'off' ? 'off' : 'on');
@@ -618,7 +619,7 @@
     const ok = new Set(cardView && clipsOn() ? rows.filter((r) => r.clip && !r._ended).map((r) => r.id) : []);
     clipPicks.forEach((id) => { if (!ok.has(id)) clipPicks.delete(id); });
     const rest = Array.from(ok).filter((id) => !clipPicks.has(id));
-    while (clipPicks.size < MAX_CLIPS && rest.length) clipPicks.add(rest.splice(Math.floor(Math.random() * rest.length), 1)[0]);
+    while (clipPicks.size < clipCount() && rest.length) clipPicks.add(rest.splice(Math.floor(Math.random() * rest.length), 1)[0]);
     clipVideos.forEach((v, id) => {
       if (clipPicks.has(id)) return;
       v.pause(); v.removeAttribute('src'); v.load();
@@ -1363,7 +1364,7 @@
   let clipShown = null;
   const STYLE_NAMES = { classic: 'Classic', side: 'Poster beside', top: 'Poster on top', banner: 'Banner', tiles: 'Tiles' };
   function syncReset() {
-    resetBtn.disabled = Number(sizeInput.value) === 100 && Number(lightInput.value) === ART_DEFAULT && cardStyle === 'classic' && clipMode() === 'on';
+    resetBtn.disabled = Number(sizeInput.value) === 100 && Number(lightInput.value) === ART_DEFAULT && cardStyle === 'classic' && clipMode() === 'on' && clipCount() === 6;
   }
   function applyStyle(v) {
     const changed = cardStyle !== v;
@@ -1395,9 +1396,20 @@
     lightOut.textContent = v + '%';
     syncReset();
   }
+  const countInput = document.getElementById('clip-count');
+  function applyClipCount(n) {
+    countInput.value = String(n);
+    document.getElementById('clip-count-out').textContent = String(n);
+    document.getElementById('clip-hint').textContent = 'Up to ' + n + ' cards play a silent 8-second loop from 10% into the show or movie, only while that person is watching. Turn it off to save data on a phone.';
+  }
+  countInput.addEventListener('input', () => applyClipCount(Number(countInput.value)));
+  countInput.addEventListener('change', () => { dash.setParams({ clipcount: Number(countInput.value) }); syncReset(); });
+  applyClipCount(clipCount());
   function applyClipMode(v) {
     clipSwitch.checked = v === 'on';
     document.getElementById('clip-state').textContent = v === 'on' ? 'On' : 'Off';
+    countInput.disabled = v !== 'on';
+    document.getElementById('clip-count-field').classList.toggle('is-off', v !== 'on');
     syncReset();
     if (clipShown !== null && clipShown !== v) renderPreviews();
     clipShown = v;
@@ -1510,8 +1522,8 @@
   lightInput.addEventListener('input', () => applyLight(Number(lightInput.value)));
   lightInput.addEventListener('change', () => dash.setParams({ artlight: Number(lightInput.value) }));
   resetBtn.addEventListener('click', () => {
-    dash.setParams({ cardsize: 100, artlight: ART_DEFAULT, cardstyle: 'classic', clips: 'on' });
-    applySize(100); applyLight(ART_DEFAULT); applyStyle('classic'); applyClipMode('on');
+    dash.setParams({ cardsize: 100, artlight: ART_DEFAULT, cardstyle: 'classic', clips: 'on', clipcount: 6 });
+    applySize(100); applyLight(ART_DEFAULT); applyStyle('classic'); applyClipMode('on'); applyClipCount(6);
   });
 
   // Page-load build ("Build and count", Glenn's pick of five): plays once, as the splash fades.
