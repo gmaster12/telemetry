@@ -151,9 +151,15 @@
 
   // ---------- history list (drawer and the viewer's own section) ----------
   function playItem(r) {
+    // The play icon always shows; the cover replaces it only once it has loaded, so a cover that cannot load
+    // (server offline, item re-added) leaves the icon, not an empty dark box.
     var thumb = el('span', { class: 'gp-play__thumb', 'aria-hidden': 'true' });
-    if (r.poster) thumb.style.backgroundImage = 'url("' + r.poster + '")';
-    else thumb.appendChild(icon('play', 18));
+    thumb.appendChild(icon('play', 18));
+    if (r.poster) {
+      var pic = new Image();
+      pic.onload = function () { thumb.style.backgroundImage = 'url("' + r.poster + '")'; thumb.classList.add('has-art'); };
+      pic.src = r.poster;
+    }
     var meta = [r.server, r.player || r.device, timeLabel(r.started_at)];
     if (r.source === 'live') meta.push(r.live ? 'watching now' : (r.watched_min ? plural(r.watched_min, 'min', 'min') : 'under a minute'));
     if (r.method) meta.push(r.method);

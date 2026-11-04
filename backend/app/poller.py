@@ -302,7 +302,7 @@ class Poller:
                 else:
                     title, sub, art, kind = it.get("title"), str(it.get("year") or ""), it.get("thumb"), "Movie"
                 ok = self.directory.import_play({
-                    "server": s.name, "rating_key": str(it.get("ratingKey") or it.get("key", "")), "account": account,
+                    "server": s.name, "server_id": s.id, "rating_key": str(it.get("ratingKey") or it.get("key", "")), "account": account,
                     "user_id": user["plex_id"] if user else None, "username": (user or {}).get("title") or name or None,
                     "title": title, "subtitle": sub, "kind": kind, "art": art, "viewed_at": int(it.get("viewedAt") or 0),
                 })

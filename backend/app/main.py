@@ -252,13 +252,28 @@ async def api_poster(request: Request, server_id: int, rating_key: str):
     if not (p.can("streams") or p.can("mystreams") or p.can("history")):  # posters appear on stream cards and in watch history
         raise HTTPException(403, "You do not have access to this section.")
     s = next((x for x in poller.cfg.servers if x.id == server_id), None)
-    path = poller.art.get((server_id, rating_key)) or (directory.art_for(s.name, rating_key) if s else None)
-    if not path or not s:
+    if not s:
         raise HTTPException(404)
+    path = poller.art.get((server_id, rating_key)) or directory.art_for(server_id, rating_key)
+    if not path:
+        raise HTTPException(404)
+    client = poller.client(s)
     try:
-        data, ctype = await poller.client(s).image(path)
+        data, ctype = await client.image(path)
     except Exception:
-        raise HTTPException(502)
+        # The saved cover path can go stale (the item was re-added and got new art): ask Plex for the
+        # item's cover now before giving up. The page shows a placeholder when this fails too.
+        try:
+            meta = await client.metadata(rating_key)
+            fresh = (meta.get("grandparentThumb") or meta.get("thumb")) if meta.get("type") == "episode" else meta.get("thumb")
+            if not fresh or fresh == path:
+                raise HTTPException(404)
+            data, ctype = await client.image(fresh)
+            poller.art[(server_id, rating_key)] = fresh
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(404)
     return Response(content=data, media_type=ctype, headers={"Cache-Control": "private, max-age=3600"})
 
 
@@ -446,6 +461,10 @@ async def add_server(body: ServerIn):
     if owner:
         data["owner_plex_id"] = owner
     sid = store.add_server(data, token)
+    before = store.remember_machine(sid, data.get("machine_id"))
+    if before:  # the same Plex server was here before under another id (deleted and re-added): its history comes back
+        store.move_history(before, sid)
+    store.link_plays()
     poller.users_synced_at = 0  # learn the owner and who it is shared with
     poller.kick()
     poller.reload()
@@ -466,14 +485,29 @@ async def update_server(server_id: int, body: ServerPatch):
         s = next((x for x in poller.cfg.servers if x.id == server_id), None)
         await _test_plex(data.get("plex_url", row["plex_url"]), body.token or (s.token if s else None))
     store.update_server(server_id, data, body.token)
+    if data.get("name") and data["name"] != row["name"]:
+        store.set_alias(row["name"], server_id)  # plays saved under the old name still belong here
+    store.remember_machine(server_id, data.get("machine_id") or row.get("machine_id"))
     poller.reload()
     return {"ok": True}
 
 
 @app.delete("/api/settings/servers/{server_id}")
-def delete_server(server_id: int):
-    if not store.get_server(server_id):
+def delete_server(server_id: int, move_to: int | None = None):
+    """Delete a server. With move_to, its watch history (and covers) now belongs to that server, and its name
+    becomes an alias of it. Without, the history keeps the old id, and re-adding the same Plex server (same
+    machine id) links it back."""
+    row = store.get_server(server_id)
+    if not row:
         raise HTTPException(404)
+    if move_to is not None:
+        if move_to == server_id or not store.get_server(move_to):
+            raise HTTPException(400, "Pick another server to move the history to.")
+        store.move_history(server_id, move_to)
+        store.set_alias(row["name"], move_to)
+    else:
+        store.set_alias(row["name"], server_id)
+        store.remember_machine(server_id, row.get("machine_id"))
     store.delete_server(server_id)
     poller.reload()
     return {"ok": True}
@@ -720,12 +754,17 @@ async def stop_stream(stream_id: str, body: StopIn, request: Request):
 
 # ---------- playback history and users ----------
 def _history_rows(rows: list[dict]) -> list[dict]:
-    ids = {s.name: s.id for s in poller.cfg.servers}
+    """History rows for the page. Each play is tied to its server by id, so a play from before a server was
+    renamed or re-added still gets its cover and shows the server's current name."""
+    by_id = {s.id: s.name for s in poller.cfg.servers}
+    by_name = {s.name: s.id for s in poller.cfg.servers}
     out = []
     for r in rows:
-        sid = ids.get(r["server"])
+        sid = r.get("server_id") or by_name.get(r["server"])
+        if sid not in by_id:
+            sid = None  # the server was deleted and its history not moved
         out.append({
-            "id": r["id"], "server": r["server"], "title": r["title"], "subtitle": r["subtitle"], "kind": r["kind"],
+            "id": r["id"], "server": by_id.get(sid) or r["server"], "watched_on": r["server"], "title": r["title"], "subtitle": r["subtitle"], "kind": r["kind"],
             "device": r["device"], "player": r["player"], "location": r["location"], "method": r["method"],
             "resolution": r["resolution"], "started_at": r["started_at"], "stopped_at": r["stopped_at"],
             "watched_min": round((r["watched_sec"] or 0) / 60), "progress_pct": r["progress_pct"], "source": r["source"],

@@ -332,6 +332,7 @@ def normalize_session(server: ServerCfg, item: dict, source: dict | None = None)
         "bitrate_estimated": reported_mbps is not None,
         "bitrate_reported_mbps": reported_mbps,
         "server": server.name,
+        "server_id": server.id,
         "state": STATE.get(str(player.get("state", "")).lower(), "Playing"),
         "progress_pct": round(offset / duration * 100) if duration else 0,
         "elapsed_min": round(offset / 60000),

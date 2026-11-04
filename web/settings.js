@@ -432,9 +432,12 @@
     }).catch(function (e) { setMsg(key, 'error', e.message); }));
   }
 
+  var moveTo = {};  // server id -> where its history goes when it is removed
   function removeServer(id) {
-    return withBusy('remove-' + id, api('DELETE', '/api/settings/servers/' + id).then(function () {
+    var to = moveTo[id] ? '?move_to=' + encodeURIComponent(moveTo[id]) : '';
+    return withBusy('remove-' + id, api('DELETE', '/api/settings/servers/' + id + to).then(function () {
       removingId = null;
+      delete moveTo[id];
       if (discovered) discover();
       return afterChange();
     }).catch(function (e) { setMsg('plex', 'error', e.message); }));
@@ -531,6 +534,20 @@
       el('p', { class: 'st-note', text: 'Pick the address this dashboard should use. A local or private address is fastest.' }), list);
   }
 
+  // Removing a server asks where its watch history goes, so covers and names follow it to the server it is now.
+  function removeConfirm(s) {
+    var others = (state.servers || []).filter(function (x) { return x.id !== s.id; });
+    var pick = el('select', { class: 'st-select', id: 'move-' + s.id, onchange: function () { moveTo[s.id] = pick.value || null; } },
+      el('option', { value: '', text: 'Keep it for when this server is added back' }),
+      others.map(function (x) { return el('option', { value: String(x.id), text: x.name, selected: String(moveTo[s.id]) === String(x.id) }); }));
+    return el('div', { class: 'st-remove' },
+      el('label', { class: 'st-note', for: 'move-' + s.id, text: 'Remove ' + s.name + '? Move this server\'s history to:' }),
+      pick,
+      el('span', { class: 'st-row' },
+        el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Keep server', onclick: function () { removingId = null; render(); } }),
+        el('button', { type: 'button', class: 'st-btn st-btn--danger', text: busy['remove-' + s.id] ? 'Removing…' : 'Remove', onclick: function () { removeServer(s.id); } })));
+  }
+
   function editForm(s) {
     var key = 'edit-' + s.id;
     var name = input({ value: s.name }, key + '-name');
@@ -548,7 +565,7 @@
     };
     return el('div', { class: 'st-form' },
       field('Name', name), field('Stream slots', max),
-      el('div', { class: 'st-wide' }, field('Plex address', url)),
+      el('div', { class: 'st-wide' }, field('Plex address', url, 'Server changed IP? Change the address here instead of removing the server, so its history and covers stay with it.')),
       el('div', { class: 'st-wide' }, field('Plex token', token, 'Only needed if you did not sign in with Plex or the token changed.')),
       field('Uplink capacity, Mbps', cap), field('Netdata node', node),
       agent ? el('div', { class: 'st-wide' }, field('Netdata agent address', agent)) : null,
@@ -590,9 +607,7 @@
             onclick: function () { patchServer(s.id, { enabled: !s.enabled }, 'edit-' + s.id); } }),
           el('span', { class: 'st-spacer' }),
           removingId === s.id
-            ? el('span', { class: 'st-row' }, el('span', { class: 'st-note', text: 'Remove ' + s.name + '? Its history stays.' }),
-                el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Keep', onclick: function () { removingId = null; render(); } }),
-                el('button', { type: 'button', class: 'st-btn st-btn--danger', text: busy['remove-' + s.id] ? 'Removing…' : 'Remove', onclick: function () { removeServer(s.id); } }))
+            ? removeConfirm(s)
             : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Remove server…', onclick: function () { removingId = s.id; render(); } })));
       }
       list.appendChild(item);

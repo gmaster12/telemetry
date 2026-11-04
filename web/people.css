@@ -354,3 +354,5 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .st-preview__stage { overflow: hidden; }
 /* My streams: a viewer who sees only their own streams gets "Your streams" and no server count line. */
 .gs-own-streams #takeaway { display: none; }
+/* History covers: the play icon shows until the cover has loaded, then the cover replaces it. */
+.gp-play__thumb.has-art svg { display: none; }

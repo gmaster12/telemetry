@@ -93,6 +93,10 @@ CREATE TABLE IF NOT EXISTS plays (
   UNIQUE (server, session_key, rating_key, started_at)
 );
 CREATE INDEX IF NOT EXISTS plays_user ON plays (user_id, started_at DESC);
+CREATE TABLE IF NOT EXISTS server_aliases (
+  old_name TEXT PRIMARY KEY,
+  server_id INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS plays_open ON plays (stopped_at);
 CREATE TABLE IF NOT EXISTS local_admins (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,8 +133,70 @@ class Store:
         if "owner_plex_id" not in cols:  # one Plex account per server
             self.db.execute("ALTER TABLE servers ADD COLUMN owner_plex_id TEXT")
             self.db.commit()
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(plays)")}
+        if "server_id" not in cols:  # plays follow the server, not its name (servers get renamed or re-added)
+            self.db.execute("ALTER TABLE plays ADD COLUMN server_id INTEGER")
+            self.db.commit()
+        self.db.execute("CREATE INDEX IF NOT EXISTS plays_server_item ON plays (server_id, rating_key)")
+        self.db.commit()
         self.box = box
         self.lock = threading.Lock()
+        self._seed_aliases()
+        self.link_plays()
+
+    # ---------- servers by id: old names and machine ids ----------
+    # Glenn's servers changed IP and were re-added under new names in Nov 2026. Their old plays still say
+    # the old name; these point each old name at the server it is now. Seeded once, only for ids that exist.
+    FIRST_ALIASES = {"Orion": 14, "Beta": 13, "Atlas": 9, "Red": 12, "Galaxy": 11}
+
+    def _seed_aliases(self) -> None:
+        if self.db.execute("SELECT 1 FROM settings WHERE key = 'server_aliases_seeded'").fetchone():
+            return
+        ids = {r["id"] for r in self.db.execute("SELECT id FROM servers")}
+        with self.lock:
+            for old, sid in self.FIRST_ALIASES.items():
+                if sid in ids:
+                    self.db.execute("INSERT OR IGNORE INTO server_aliases (old_name, server_id) VALUES (?, ?)", (old, sid))
+            self.db.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('server_aliases_seeded', '1')")
+            self.db.commit()
+
+    def link_plays(self) -> int:
+        """Give plays saved without a server id one: first by an old name in server_aliases, then by a current
+        server name. plays.server is left alone, as the record of what the server was called then."""
+        with self.lock:
+            a = self.db.execute("UPDATE plays SET server_id = (SELECT server_id FROM server_aliases WHERE old_name = plays.server) "
+                                "WHERE server_id IS NULL AND server IN (SELECT old_name FROM server_aliases)").rowcount
+            b = self.db.execute("UPDATE plays SET server_id = (SELECT id FROM servers WHERE servers.name = plays.server) "
+                                "WHERE server_id IS NULL AND server IN (SELECT name FROM servers)").rowcount
+            self.db.commit()
+        return a + b
+
+    def aliases(self) -> list[dict]:
+        return [dict(r) for r in self.db.execute("SELECT old_name, server_id FROM server_aliases ORDER BY old_name")]
+
+    def set_alias(self, old_name: str, server_id: int) -> None:
+        with self.lock:
+            self.db.execute("INSERT INTO server_aliases (old_name, server_id) VALUES (?, ?) "
+                            "ON CONFLICT(old_name) DO UPDATE SET server_id = excluded.server_id", (old_name, int(server_id)))
+            self.db.commit()
+
+    def move_history(self, from_id: int, to_id: int) -> int:
+        """Everything that pointed at one server id now points at another (a deleted or re-added server)."""
+        with self.lock:
+            n = self.db.execute("UPDATE plays SET server_id = ? WHERE server_id = ?", (int(to_id), int(from_id))).rowcount
+            self.db.execute("UPDATE server_aliases SET server_id = ? WHERE server_id = ?", (int(to_id), int(from_id)))
+            self.db.commit()
+        return n
+
+    def remember_machine(self, server_id: int, machine_id: str | None) -> int | None:
+        """Note which Plex machine a server id is. Returns the earlier id this machine had, if it had another."""
+        if not machine_id:
+            return None
+        key = "machine:" + machine_id
+        r = self.db.execute("SELECT server_id FROM server_aliases WHERE old_name = ?", (key,)).fetchone()
+        before = int(r["server_id"]) if r and int(r["server_id"]) != int(server_id) else None
+        self.set_alias(key, server_id)
+        return before
 
     # ---------- linked Plex accounts (each owns one or more servers) ----------
     def list_accounts(self) -> list[dict]:
@@ -430,7 +496,9 @@ class Directory:
             "SELECT title, COUNT(*) AS plays FROM plays WHERE user_id = ? AND started_at >= ? GROUP BY title ORDER BY plays DESC, MAX(started_at) DESC LIMIT 3",
             (plex_id, since),
         )]
-        servers = [x["server"] for x in self.db.execute("SELECT server, COUNT(*) AS n FROM plays WHERE user_id = ? GROUP BY server ORDER BY n DESC", (plex_id,))]
+        servers = [x["server"] for x in self.db.execute(
+            "SELECT COALESCE(s.name, p.server) AS server, COUNT(*) AS n FROM plays p LEFT JOIN servers s ON s.id = p.server_id "
+            "WHERE p.user_id = ? GROUP BY COALESCE(s.name, p.server) ORDER BY n DESC", (plex_id,))]
         return {"plays_30d": r["plays"], "hours_30d": round((r["sec"] or 0) / 3600, 1), "plays_total": total,
                 "last_play": r["last_play"], "top_titles": top, "servers": servers}
 
@@ -453,10 +521,10 @@ class Directory:
     def start_play(self, row: dict, art: str | None, now: int) -> int:
         with self.lock:
             cur = self.db.execute(
-                """INSERT INTO plays (server, session_key, user_id, username, rating_key, art, title, subtitle, kind, device, player,
+                """INSERT INTO plays (server, server_id, session_key, user_id, username, rating_key, art, title, subtitle, kind, device, player,
                    platform, location, method, resolution, started_at, last_seen, progress_pct, duration_min)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                (row["server"], row["session_key"], row.get("user_id"), row.get("user"), row.get("rating_key"), art, row.get("title"),
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (row["server"], row.get("server_id"), row["session_key"], row.get("user_id"), row.get("user"), row.get("rating_key"), art, row.get("title"),
                  row.get("subtitle"), row.get("kind"), row.get("device"), row.get("player"), row.get("platform"), row.get("location"),
                  row.get("method"), row.get("resolution"), now, now, row.get("progress_pct"), row.get("duration_min")),
             )
@@ -482,19 +550,27 @@ class Directory:
             self.db.commit()
 
     def import_play(self, rec: dict) -> bool:
-        """Insert a play from Plex's own history; returns False if it was already imported."""
+        """Insert a play from Plex's own history; returns False if it was already imported (under any name the
+        server had before, so importing again after a server was renamed or re-added adds nothing twice)."""
+        key = f"hist-{rec['rating_key']}-{rec['account']}"
         with self.lock:
+            if rec.get("server_id") and self.db.execute(
+                    "SELECT 1 FROM plays WHERE server_id = ? AND session_key = ? AND rating_key = ? AND started_at = ?",
+                    (rec["server_id"], key, rec["rating_key"], rec["viewed_at"])).fetchone():
+                return False
             cur = self.db.execute(
-                """INSERT OR IGNORE INTO plays (server, session_key, user_id, username, rating_key, art, title, subtitle, kind,
-                   started_at, last_seen, stopped_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'plex')""",
-                (rec["server"], f"hist-{rec['rating_key']}-{rec['account']}", rec.get("user_id"), rec.get("username"), rec["rating_key"],
+                """INSERT OR IGNORE INTO plays (server, server_id, session_key, user_id, username, rating_key, art, title, subtitle, kind,
+                   started_at, last_seen, stopped_at, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'plex')""",
+                (rec["server"], rec.get("server_id"), key, rec.get("user_id"), rec.get("username"), rec["rating_key"],
                  rec.get("art"), rec.get("title"), rec.get("subtitle"), rec.get("kind"), rec["viewed_at"], rec["viewed_at"], rec["viewed_at"]),
             )
             self.db.commit()
             return cur.rowcount > 0
 
-    def art_for(self, server: str, rating_key: str) -> str | None:
-        r = self.db.execute("SELECT art FROM plays WHERE server = ? AND rating_key = ? AND art IS NOT NULL ORDER BY started_at DESC LIMIT 1", (server, rating_key)).fetchone()
+    def art_for(self, server_id: int, rating_key: str) -> str | None:
+        """The newest cover path saved for this item on this server, whatever the server was called then."""
+        r = self.db.execute("SELECT art FROM plays WHERE server_id = ? AND rating_key = ? AND art IS NOT NULL ORDER BY started_at DESC LIMIT 1",
+                            (int(server_id), rating_key)).fetchone()
         return r["art"] if r else None
 
     # ---------- local admins ----------

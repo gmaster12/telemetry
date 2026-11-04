@@ -152,6 +152,18 @@ files to add servers. Keep it that way.
   (`SEERR_IMAGE_BASE` overrides for tests). `tests/mock_seerr.py` is a stand-in
   Seerr for tests and local browser checks.
 
+## Servers by id (history and covers)
+
+Plays belong to a server by `plays.server_id`, not its name (Glenn's servers changed IP and were re-added
+under new names and ids in Nov 2026, which broke covers). `plays.server` keeps the name it had when watched;
+history shows the server's current name (`_history_rows`, plus `watched_on`). `server_aliases (old_name,
+server_id)` maps old names (seeded once: Orion 14, Beta 13, Atlas 9, Red 12, Galaxy 11, only for ids that
+exist) and `machine:<id>` keys to server ids; `Store.link_plays` fills a missing `server_id` at start and
+after adding a server. `art_for(server_id, rating_key)` finds covers by id; `api_poster` asks Plex for the
+item's current cover when the saved path fails, and the page keeps the play icon until a cover loads.
+Removing a server asks where its history goes (`DELETE /api/settings/servers/{id}?move_to=`); without a
+target, re-adding the same Plex machine relinks it. For an IP change, edit the address in place.
+
 ## Polling (backend/app/poller.py)
 
 `Poller.run` polls Plex every `poll_seconds` and nothing else, so live streams
