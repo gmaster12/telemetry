@@ -283,7 +283,7 @@
   function month() {
     var body = el('div', { class: 'vh-month' }, el('p', { class: 'vh-muted', text: 'Loading your viewing…' }));
     var seg = el('div', { class: 'vh-seg', role: 'group', 'aria-label': 'Period' }, [['week', 'This week'], ['month', 'This month'], ['year', 'This year']].map(function (p) {
-      return el('button', { type: 'button', class: 'vh-seg__b', 'aria-pressed': p[0] === period ? 'true' : 'false', text: p[1], onclick: function () { period = p[0]; render(); } });
+      return el('button', { type: 'button', class: 'vh-seg__b', 'aria-pressed': p[0] === period ? 'true' : 'false', text: p[1], onclick: function () { period = p[0]; render(true); } });
     }));
     var head = el('div', { class: 'vh-monthhead' }, el('div', null, el('span', { class: 'vh-eyebrow', text: 'Your viewing on Greystar' }), el('h1', { class: 'vh-hubtitle vh-monthtitle', id: 'vh-mtitle', text: '…' })), seg);
     get('/api/me/recap?period=' + period + '&tz=' + tz()).then(function (r) {
@@ -328,13 +328,55 @@
     return [head, body];
   }
 
+  // ---------- Sweep in: cards fade in one at a time while a border sweeps once around each ----------
+  var CARDS = '.vh-door, .vh-stage, .vh-tile, .vh-panel';
+  var ready = false, watch = null;
+  function finishWait() { ready = true; root.classList.remove('vh-wait'); }
+  document.addEventListener('gs:ready', finishWait, { once: true });
+  setTimeout(finishWait, 5000);  // never leave the cards hidden if the splash event is missed
+  function tidy(e) {
+    var n = e.currentTarget;
+    if (n.classList.contains('vh-in') && e.pseudoElement !== '::after') return;  // wait for the sweep, not the fade
+    n.classList.remove('vh-in', 'vh-in-plain');
+    n.style.removeProperty('--vh-d');
+    n.removeEventListener('animationend', tidy);
+  }
+  function sweepIn() {
+    if (watch) { watch.disconnect(); watch = null; }
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var start = Date.now(), n = 0;
+    function mark(node) {
+      if (node.dataset.vhSwept) return;
+      node.dataset.vhSwept = '1';
+      var card = node.matches(CARDS);
+      // cards that arrive later (the hub and My month fill in after a fetch) keep their place in the order
+      var d = card ? Math.max(0, 120 + Math.min(n++, 8) * 170 - (ready ? Date.now() - start : 0)) : 0;
+      node.style.setProperty('--vh-d', d + 'ms');
+      node.classList.add(card ? 'vh-in' : 'vh-in-plain');
+      node.addEventListener('animationend', tidy);
+    }
+    function scan(rootNode) {
+      if (rootNode.nodeType !== 1) return;
+      if (rootNode.matches('.vh-hello, ' + CARDS)) mark(rootNode);
+      rootNode.querySelectorAll('.vh-hello, ' + CARDS).forEach(mark);
+    }
+    scan(box);
+    if (!ready) { root.classList.add('vh-wait'); start = 0; document.addEventListener('gs:ready', function () { start = Date.now(); }, { once: true }); }
+    if (window.MutationObserver) {
+      var w = watch = new MutationObserver(function (list) { list.forEach(function (m) { m.addedNodes.forEach(scan); }); });
+      w.observe(box, { childList: true, subtree: true });
+      setTimeout(function () { w.disconnect(); if (watch === w) watch = null; }, 4000);
+    }
+  }
+
   // ---------- draw ----------
-  function render() {
+  function render(still) {
     apply();
     if (!active()) { box.replaceChildren(); return; }
     var lay = layout();
     box.dataset.layout = lay;
     box.replaceChildren.apply(box, [].concat(lay === 'hub' ? hub() : lay === 'month' ? month() : doors()));
+    if (!still) sweepIn();
   }
   if (back) {
     back.appendChild(icon('left', 18));

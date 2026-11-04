@@ -370,7 +370,12 @@ design system). The dashboard adds its own patterns:
   hours of the day). A layout needing a section the person lacks falls back to doors. Doors and cards open
   the page's own sections via `gsHome.show('streams'|'history'|'subscription')` with a "Home" button
   (`#vhome-back`); `.gs-vh[data-vview]` in `home.css` decides what each view shows. The Home nav button and
-  phone tab go back to it. Admins never get it.
+  phone tab go back to it. Admins never get it. Cards "Sweep in" (Glenn's pick C, `sweepIn` in `home.js`, end of
+  `home.css`): when the home opens, each card (doors, hub stages, month tiles and panels) fades in while a lime border
+  sweeps once around it, 170 ms apart, waiting for the splash (`gs:ready`); cards that load later keep their turn (a
+  MutationObserver for 4 s). Hover (pointer devices): the card grows a little (`--vh-grow`), brightens and shows the
+  full border (`::before`); a tap presses it in. The sweep is `::after`, so hover never cuts it short. Reduced motion:
+  none of it. Changing the My month period does not replay it (`render(true)`).
 - Status is always a word plus a shape, never color alone. No emoji.
 - Light theme (`web/light.css`, Glenn's reference picture): deeper shadows on
   cards, pills, the top bar and stream cards, and light Servers and Server
