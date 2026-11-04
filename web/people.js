@@ -137,7 +137,8 @@
   function closeMenu() { if (menuOpen) { menuOpen = false; renderUser(); } }
   document.addEventListener('click', function (e) {
     var box = document.getElementById('user');
-    if (menuOpen && box && !box.contains(e.target)) closeMenu();
+    // The click that opened the menu redrew the button, so its old target is detached: not an outside click.
+    if (menuOpen && box && e.target.isConnected && !box.contains(e.target)) closeMenu();
   });
   function signOut() {
     api('POST', '/api/auth/logout').catch(function () {}).then(function () { window.location.replace('/login.html'); });
@@ -361,21 +362,63 @@
     return api('GET', '/api/me/servers').then(function (r) {
       srvData = r;
       srvSkew = r.now ? r.now * 1000 - Date.now() : 0;
-      srvBoxes = srvBoxes.filter(function (b) { return b.isConnected || b === homeSrv; });
-      srvBoxes.forEach(paintServers);
-      var sec = document.getElementById('srv-card');
-      if (sec) sec.hidden = !(r.servers || []).length;
+      paintSeg();
+      if (window.sdRedrawNewest) window.sdRedrawNewest();
     }).catch(function () {});
   }
-  var homeSrv = null;
-  function startServers() {
-    var sec = document.getElementById('srv-card');
-    if (!sec || !me || me.role === 'admin' || me.kind !== 'plex') return;
-    homeSrv = serversCard(false);
-    sec.replaceChildren(homeSrv);
-    if (!srvTimer) srvTimer = setInterval(loadServers, 60000);
+  // Glenn's pick B: viewers see their servers at the end of the lime Live now bar, not in a card.
+  // All up: a quiet "Your servers ● ATLAS ● ORION-3 All up". Any down: the end turns red and says which, for how
+  // long and since when. app.js puts this element at the end of the bar on every redraw (gsServerSeg).
+  var srvSeg = null;
+  function paintSeg() {
+    var list = (srvData && srvData.servers) || [];
+    if (!srvSeg) return;
+    srvSeg.hidden = !list.length;
+    var root = document.querySelector('.gs-app');
+    if (root) root.classList.toggle('has-srvseg', !!list.length);
+    if (!list.length) return;
+    var nowSec = (Date.now() + srvSkew) / 1000;
+    var down = list.filter(function (x) { return x.online === false; });
+    var up = list.filter(function (x) { return x.online !== false; });
+    srvSeg.classList.toggle('is-down', down.length > 0);
+    var dot = function (cls) { return el('span', { class: cls, 'aria-hidden': 'true' }); };
+    var put = function () {  // replaceChildren with lists flattened and empty parts left out
+      var kids = [];
+      Array.prototype.slice.call(arguments).forEach(function (k) { (Array.isArray(k) ? k : [k]).forEach(function (x) { if (x) kids.push(x); }); });
+      srvSeg.replaceChildren.apply(srvSeg, kids);
+    };
+    if (down.length) {
+      var first = down[0];
+      var since = first.since ? new Date(first.since * 1000) : null;
+      var long = first.since ? ago2(nowSec - first.since) : '';
+      var what = down.length === 1 ? first.name + ' is down' : down.length + ' servers are down';
+      put(dot('sd-srvseg__sq'),
+        el('b', { class: 'sd-srvseg__what', text: what }),
+        down.length === 1 && long ? el('span', { class: 'sd-srvseg__long', text: 'for ' + long }) : null,
+        down.length === 1 && since ? el('span', { class: 'sd-srvseg__since', text: 'since ' + since.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) }) : null,
+        down.length > 1 ? el('span', { class: 'sd-srvseg__long', text: down.map(function (x) { return x.name + (x.since ? ' ' + ago2(nowSec - x.since) : ''); }).join(', ') }) : null,
+        up.length ? el('span', { class: 'sd-srvseg__rest', text: up.length === 1 ? up[0].name + ' up' : up.length + ' others up' }) : null,
+        el('span', { class: 'sd-srvseg__short', text: down.length === 1 ? first.name + ' down' + (long ? ' ' + long : '') : down.length + ' down' }));
+      srvSeg.setAttribute('aria-label', what + (long ? ' for ' + long : '') + '.');
+    } else {
+      put(el('span', { class: 'sd-srvseg__lbl', text: list.length === 1 ? 'Your server' : 'Your servers' }),
+        list.map(function (x) {
+          return el('span', { class: 'sd-srvseg__srv', title: x.name + ': online' + (x.since ? ', up for ' + ago2(nowSec - x.since) : '') }, dot('sd-srvseg__dot'), el('span', { class: 'sd-srvseg__name', text: x.name }));
+        }),
+        el('span', { class: 'sd-srvseg__all', text: list.length === 1 ? 'Up' : 'All up' }),
+        el('span', { class: 'sd-srvseg__short', text: list.length === 1 ? list[0].name + ' up' : list.length + ' servers up' }));
+      srvSeg.setAttribute('aria-label', (list.length === 1 ? 'Your server is' : 'Your ' + list.length + ' servers are') + ' up.');
+    }
   }
-  window.gsServersCard = function () { return me && me.role !== 'admin' && me.kind === 'plex' ? serversCard(true) : null; };
+  function startServers() {
+    if (!me || me.role === 'admin' || me.kind !== 'plex' || srvSeg) return;
+    srvSeg = el('div', { class: 'sd-srvseg', role: 'status', hidden: true });
+    loadServers();
+    if (!srvTimer) srvTimer = setInterval(function () { loadServers(); }, 60000);
+    setInterval(paintSeg, 30000);
+  }
+  window.gsServerSeg = function () { return srvSeg && !srvSeg.hidden ? srvSeg : null; };
+  window.gsServersCard = function () { return null; };
 
   // ---------- history drawer ----------
   var drawer = document.getElementById('hist');

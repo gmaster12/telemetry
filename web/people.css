@@ -382,3 +382,48 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
   .gp-srv__state { font-size: 21px; line-height: 26px; }
   .gp-srv__note { display: none; }
 }
+
+/* Your servers at the end of the lime Live now bar (viewers; Glenn's pick B). */
+.sd-srvseg { display: flex; flex: none; align-items: center; gap: 10px; height: 44px; margin-left: auto; padding: 0 16px; border-radius: var(--radius-pill);
+  background: rgba(11, 11, 13, 0.10); color: var(--on-fill, #0b0b0d); font-size: 12.5px; white-space: nowrap; }
+.sd-srvseg[hidden] { display: none; }
+.sd-srvseg__lbl { font-weight: 500; opacity: 0.75; }
+.sd-srvseg__srv { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; min-width: 0; }
+.sd-srvseg__name { overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.sd-srvseg__dot { width: 9px; height: 9px; border-radius: 50%; background: #0b0b0d; flex: none; }
+.sd-srvseg__all { font-weight: 500; }
+.sd-srvseg__short { display: none; font-weight: 600; }
+.sd-srvseg.is-down { background: #c62f2f; color: #fff; }
+.sd-srvseg__sq { width: 10px; height: 10px; background: #fff; flex: none; }
+.sd-srvseg__long { font-weight: 500; }
+.sd-srvseg__rest { font-weight: 400; opacity: 0.85; }
+.sd-srvseg__rest::before { content: "·"; margin-right: 8px; }
+.sd-pill-lime.has-seg .sd-newest:nth-of-type(n+3) { display: none; }
+.sd-pill-lime.has-seg .sd-newest { min-width: 0; }
+@media (max-width: 1200px) { .sd-pill-lime.has-seg .sd-newest:nth-of-type(n+2) { display: none; } .sd-srvseg__lbl, .sd-srvseg__rest { display: none; } }
+/* Phones: the bar gets its own full-width row under the icons, so the status has room. */
+@media (max-width: 760px) {
+  .gs-app.has-srvseg .sd-top { flex-wrap: wrap; }
+  .gs-app.has-srvseg .sd-livebar { order: 9; flex: 1 1 100%; }
+  .sd-srvseg { height: 40px; padding: 0 12px; gap: 7px; font-size: 12px; }
+  .sd-srvseg__lbl, .sd-srvseg__all, .sd-srvseg__rest, .sd-srvseg__srv { display: none; }
+  .sd-srvseg__short { display: inline; }
+  .sd-srvseg:not(.is-down)::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: #0b0b0d; }
+  .sd-srvseg.is-down .sd-srvseg__long { overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
+}
+.sd-srvseg__since { font-weight: 500; margin-left: -10px; }
+.sd-srvseg__since::before { content: ", "; }
+@media (max-width: 1500px) { .sd-srvseg.is-down .sd-srvseg__rest { display: none; } }
+@media (max-width: 760px) {
+  .gs-app.has-srvseg .sd-look { margin-left: auto; }
+  .sd-srvseg.is-down { flex: 0 1 auto; min-width: 0; max-width: 64%; }
+  .sd-srvseg.is-down .sd-srvseg__since { display: none; }
+  .sd-srvseg.is-down .sd-srvseg__what { overflow: hidden; text-overflow: ellipsis; }
+  .sd-pill-lime.has-seg .sd-newest { flex: 1 1 auto; }
+}
+@media (max-width: 760px) {
+  .sd-srvseg.is-down .sd-srvseg__what, .sd-srvseg.is-down .sd-srvseg__long { display: none; }
+  .sd-srvseg.is-down .sd-srvseg__short { display: inline; overflow: hidden; text-overflow: ellipsis; }
+  .gs-app.has-srvseg .sd-pill-title { display: none; }
+  .gs-app.has-srvseg .sd-livebar { padding-left: 5px; }
+}

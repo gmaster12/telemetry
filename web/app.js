@@ -295,8 +295,10 @@
     const box = document.getElementById('newest');
     box.replaceChildren();
     const d = dash.data('streams');
-    if (failed(d)) { box.appendChild(el('span', 'sd-pill-lime__label', 'Failed to load')); return; }
-    if (d.status !== 'ok') return;
+    const seg = window.gsServerSeg ? window.gsServerSeg() : null;
+    box.classList.toggle('has-seg', !!seg);
+    if (failed(d)) { box.appendChild(el('span', 'sd-pill-lime__label', 'Failed to load')); if (seg) box.appendChild(seg); return; }
+    if (d.status !== 'ok') { if (seg) box.appendChild(seg); return; }
     trackStreams();
     // Right after a stream starts or stops, the bar says so for a few seconds, then shows the newest streams again.
     const showMsg = liveMsg && Date.now() < liveMsg.until;
@@ -308,6 +310,7 @@
       liveMsg.parts.forEach((x) => text.append(typeof x === 'string' ? x : x.cloneNode(true)));
       m.append(shape, text);
       box.appendChild(m);
+      if (seg) box.appendChild(seg);
       if (!liveMsg.shown) { liveMsg.shown = true; box.classList.remove('is-flash'); void box.offsetWidth; box.classList.add('is-flash'); }
       return;
     }
@@ -319,7 +322,9 @@
       item.appendChild(t);
       box.appendChild(item);
     });
+    if (seg) box.appendChild(seg);
   }
+  window.sdRedrawNewest = renderNewest;
 
   /* Bandwidth chart */
   // Peak by day, last 7 days (bandwidth card). Today is lime and "so far"; the busiest day is solid ink.

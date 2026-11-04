@@ -352,9 +352,12 @@ design system). The dashboard adds its own patterns:
 - Your servers (viewers, Plex sign-ins): `GET /api/me/servers` lists only the servers shared with them
   (`users.servers`, old names through `server_aliases`), each Online or Offline and since when, nothing
   else. `Poller._mark` saves the time each server went up or down in setting `server_since` (a server
-  counts as down after 3 failed polls in a row, so a blip keeps its up time). Shown as `#srv-card` on the
-  home page and beside My requests (`gsServersCard` in `people.js`): "Up for 12 days", or red "Down for
-  2 h 14 min, since 8:45 AM".
+  counts as down after 3 failed polls in a row, so a blip keeps its up time). Shown at the END OF THE LIME
+  Live now bar (Glenn's pick B, `.sd-srvseg`, `paintSeg` in `people.js`, placed by `renderNewest` via
+  `gsServerSeg`): all up is a quiet "Your servers ● ATLAS ● ORION-3 All up"; any down turns it red with
+  "ORION-3 is down for 2 h 14 min, since 8:45 AM". On phones the bar takes its own full-width row and
+  says "ATLAS up" / "ORION-3 down 2 h 14 min". The old Your servers card is gone (`gsServersCard` returns null).
+- The account menu opens from the circle at the top right (`renderUser`): My playback history, Sign out.
 - Status is always a word plus a shape, never color alone. No emoji.
 - Light theme (`web/light.css`, Glenn's reference picture): deeper shadows on
   cards, pills, the top bar and stream cards, and light Servers and Server
