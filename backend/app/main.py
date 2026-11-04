@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import logging
 import sqlite3
@@ -793,6 +794,96 @@ def api_my_history(request: Request, before: int | None = None, limit: int = 50)
     u = directory.get_user(p.subject)
     return {"user": _user_public(u, with_email=True), "stats": directory.user_stats(p.subject),
             "rows": _history_rows(directory.history(p.subject, before, limit))}
+
+
+RECAP_DAYS = {"week": 7, "month": None, "year": None}
+
+
+def _period_bounds(period: str, tz_min: int, now: float | None = None) -> tuple[int, int, int, int, str]:
+    """(start, end, previous start, previous end, label) in UTC seconds for this week (last 7 days), this
+    calendar month or this calendar year, in the viewer's local time (tz_min = minutes east of UTC)."""
+    off = dt.timedelta(minutes=tz_min)
+    local_now = dt.datetime.fromtimestamp(now or time.time(), dt.timezone.utc) + off
+    end = int((local_now - off).timestamp())
+    if period == "week":
+        start_l = (local_now - dt.timedelta(days=6)).replace(hour=0, minute=0, second=0, microsecond=0)
+        prev_l = start_l - dt.timedelta(days=7)
+        label = "Last 7 days"
+    elif period == "year":
+        start_l = local_now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        prev_l = start_l.replace(year=start_l.year - 1)
+        label = str(local_now.year)
+    else:
+        start_l = local_now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        prev_l = (start_l - dt.timedelta(days=1)).replace(day=1)
+        label = local_now.strftime("%B")
+    to_utc = lambda d: int((d - off).replace(tzinfo=dt.timezone.utc).timestamp()) if d.tzinfo is None else int((d - off).timestamp())
+    start = to_utc(start_l)
+    prev_start = to_utc(prev_l)
+    prev_end = prev_start + (end - start)  # the same stretch of the period before, so the numbers compare fairly
+    return start, end, prev_start, prev_end, label
+
+
+def recap_for(plex_id: str, period: str, tz_min: int, now: float | None = None) -> dict:
+    start, end, pstart, pend, label = _period_bounds(period, tz_min, now)
+    off = tz_min * 60
+    rows = [dict(r) for r in store.db.execute(
+        "SELECT id, server, server_id, rating_key, title, subtitle, kind, started_at, last_seen, watched_sec, progress_pct, duration_min, art, "
+        "username, device, player, platform, location, method, resolution, stopped_at, source "
+        "FROM plays WHERE user_id = ? AND started_at >= ? AND started_at < ? ORDER BY started_at DESC", (str(plex_id), start, end))]
+    prev_sec = store.db.execute("SELECT COALESCE(SUM(watched_sec), 0) AS s FROM plays WHERE user_id = ? AND started_at >= ? AND started_at < ?",
+                                (str(plex_id), pstart, pend)).fetchone()["s"]
+    secs = sum(int(r["watched_sec"] or 0) for r in rows)
+    episodes = sum(1 for r in rows if r["kind"] == "Episode")
+    movies = sum(1 for r in rows if r["kind"] == "Movie")
+    # Longest run of days in a row with something watched (local days).
+    days = sorted({(r["started_at"] + off) // 86400 for r in rows})
+    best = run = 0
+    best_end = None
+    for i, d in enumerate(days):
+        run = run + 1 if i and d == days[i - 1] + 1 else 1
+        if run > best:
+            best, best_end = run, d
+    streak = {"days": best, "from": dt.date.fromordinal(dt.date(1970, 1, 1).toordinal() + best_end - best + 1).isoformat() if best else None,
+              "to": dt.date.fromordinal(dt.date(1970, 1, 1).toordinal() + best_end).isoformat() if best else None}
+    # When: watched time by local weekday and hour (plays without a measured time count 30 minutes).
+    by_hour = [0] * 24
+    by_slot: dict[tuple[int, int], int] = {}
+    for r in rows:
+        w = int(r["watched_sec"] or 0) or 1800
+        local = dt.datetime.fromtimestamp(r["started_at"] + off, dt.timezone.utc)
+        by_hour[local.hour] += w
+        by_slot[(local.weekday(), local.hour)] = by_slot.get((local.weekday(), local.hour), 0) + w
+    prime = max(by_slot.items(), key=lambda kv: kv[1])[0] if by_slot else None
+    # Most watched titles (shows grouped by show).
+    tops: dict[str, dict] = {}
+    for r in rows:
+        t = tops.setdefault(r["title"] or "Unknown", {"title": r["title"] or "Unknown", "kind": r["kind"], "plays": 0, "sec": 0, "row": r})
+        t["plays"] += 1
+        t["sec"] += int(r["watched_sec"] or 0)
+    top = sorted(tops.values(), key=lambda t: (t["sec"], t["plays"]), reverse=True)[:5]
+    top_rows = _history_rows([t["row"] for t in top])
+    return {
+        "period": period, "label": label, "start": start, "end": end,
+        "hours": round(secs / 3600, 1), "prev_hours": round(prev_sec / 3600, 1),
+        "plays": len(rows), "episodes": episodes, "movies": movies, "streak": streak,
+        "prime": {"weekday": prime[0], "hour": prime[1]} if prime else None,
+        "by_hour": [round(x / 3600, 2) for x in by_hour],
+        "top": [{"title": t["title"], "kind": t["kind"], "plays": t["plays"], "hours": round(t["sec"] / 3600, 1), "poster": tr.get("poster")}
+                for t, tr in zip(top, top_rows)],
+        "last": _history_rows(rows[:1])[0] if rows else None,
+    }
+
+
+@app.get("/api/me/recap")
+def api_my_recap(request: Request, period: str = "month", tz: int = 0):
+    """This person's own viewing for the week, month or year (My month home layout). tz: minutes east of UTC."""
+    p = need(request, "history")
+    if p.kind != "plex":
+        return {"period": period, "plays": 0}
+    if period not in ("week", "month", "year"):
+        raise HTTPException(400, "period is week, month or year.")
+    return recap_for(str(p.subject), period, max(-840, min(840, tz)))
 
 
 @app.get("/api/users")

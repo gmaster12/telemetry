@@ -190,8 +190,11 @@
   };
   const can = (s) => !window.dash.me || !window.dash.me() || window.dash.can(s);
   const isAdmin = () => !!(window.dash.isAdmin && window.dash.isAdmin());
+  const vh = () => !!(window.gsHome && window.gsHome.active());
+  const VH_VIEW = { vhome: 'home', 'streams-card': 'streams', 'people-card': 'history' };
   const NAV = [
-    { id: 'summary', label: 'Overview', icon: 'grid', ok: () => can('streams') },
+    { id: 'vhome', label: 'Home', icon: 'grid', ok: () => vh() },
+    { id: 'summary', label: 'Overview', icon: 'grid', ok: () => can('streams') && !vh() },
     { id: 'bandwidth-card', label: 'Bandwidth', icon: 'activity', ok: () => can('bandwidth') },
     { id: 'servers-card', label: 'Servers', icon: 'server', ok: () => can('servers') },
     { id: 'streams-card', label: 'Streams', icon: 'play', ok: () => can('streams') },
@@ -212,10 +215,12 @@
       const b = el('button', 'sd-navbtn');
       b.type = 'button'; b.title = n.label; b.setAttribute('aria-label', n.label);
       const onRequests = root.dataset.page === 'requests';
-      b.setAttribute('aria-current', (onRequests ? n.id === 'requests' : navActive === n.id) ? 'true' : 'false');
+      const cur = onRequests ? n.id === 'requests' : vh() ? VH_VIEW[n.id] === window.gsHome.view() : navActive === n.id;
+      b.setAttribute('aria-current', cur ? 'true' : 'false');
       b.appendChild(icon(n.icon, 22));
       b.addEventListener('click', () => {
         if (n.id === 'requests') { if (window.gsRequests) window.gsRequests.open(); return; }
+        if (vh() && VH_VIEW[n.id]) { window.gsHome.show(VH_VIEW[n.id]); return; }
         navActive = n.id;
         if (onRequests && window.gsRequests) window.gsRequests.close();
         renderNav(); requestAnimationFrame(() => goTo(n.id));
@@ -1173,7 +1178,7 @@
 
   /* Phone tab bar */
   const TABS = [
-    { id: 'home', label: 'Home', icon: 'grid', link: 'summary', ok: () => can('streams') || can('bandwidth') || can('viewing') },
+    { id: 'home', label: 'Home', icon: 'grid', link: 'summary', ok: () => vh() || can('streams') || can('bandwidth') || can('viewing') },
     { id: 'servers', label: 'Servers', icon: 'server', link: 'servers-card', ok: () => can('servers') },
     { id: 'streams', label: 'Streams', icon: 'play', link: 'streams-card', ok: () => can('streams') },
     { id: 'alerts', label: 'Alerts', icon: 'bell', link: 'alerts', ok: () => can('streams') && can('servers') },
@@ -1183,8 +1188,10 @@
   ];
   const okTabs = () => TABS.filter((t) => t.ok());
   window.sdGoTab = (id) => { if (isMobile()) goTab(id); };
+  window.sdSetMtab = (id) => { mtab = id; root.dataset.mtab = id; };
   function goTab(id) {
     if (id === 'requests') { if (window.gsRequests) window.gsRequests.open(); return; }
+    if (vh()) { const v = { home: 'home', streams: 'streams', people: 'history' }[id]; if (v) { mtab = id; root.dataset.mtab = id; window.gsHome.show(v); return; } }
     if (root.dataset.page === 'requests' && window.gsRequests) window.gsRequests.close();
     mtab = id;
     root.dataset.mtab = id;
@@ -1200,7 +1207,8 @@
     bar.classList.toggle('is-single', tabs.length < 2);
     tabs.forEach((t) => {
       const b = el('button', 'sd-tab'); b.type = 'button';
-      b.setAttribute('aria-current', (root.dataset.page === 'requests' ? t.id === 'requests' : mtab === t.id) ? 'true' : 'false');
+      const curT = root.dataset.page === 'requests' ? t.id === 'requests' : vh() ? ({ home: 'home', streams: 'streams', people: 'history' })[t.id] === window.gsHome.view() : mtab === t.id;
+      b.setAttribute('aria-current', curT ? 'true' : 'false');
       b.setAttribute('aria-label', t.label + (t.id === 'alerts' && alertCount ? ', ' + alertCount + ' alerts' : ''));
       b.append(icon(t.icon, 20), el('span', null, t.label));
       if (t.id === 'alerts' && alertCount) b.appendChild(el('span', 'sd-tab__count', String(alertCount)));
@@ -1466,6 +1474,7 @@
     gear.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (!open) { pvVideos.forEach((v) => v.pause()); if (was) gear.focus(); return; }
     if (window.stOnOpen) window.stOnOpen(fresh);   // settings.js picks the home (admins) or Display (viewers)
+    syncHomeLayout();
     renderPreviews();
   }
   window.sdOpenSettings = openSettings;
@@ -1478,6 +1487,26 @@
   sizeInput.addEventListener('change', () => dash.setParams({ cardsize: Number(sizeInput.value) }));
   clipSwitch.addEventListener('change', () => { const v = clipSwitch.checked ? 'on' : 'off'; dash.setParams({ clips: v }); applyClipMode(v); });
   styleBox.addEventListener('change', (e) => { if (e.target.name === 'cstyle') { dash.setParams({ cardstyle: e.target.value }); applyStyle(e.target.value); } });
+  // Home layout (viewers only): Four big doors (default), Requests hub or My month. Saved in this browser.
+  const homeBox = document.getElementById('home-layout');
+  function syncHomeLayout() {
+    const on = vh();
+    homeBox.hidden = !on;
+    if (!on) return;
+    const cur = window.gsHome.layout();
+    homeBox.querySelectorAll('input[name="vhome"]').forEach((i) => {
+      i.checked = i.value === cur;
+      const ok = i.value === 'doors' || (i.value === 'hub' ? can('requests') : can('history'));
+      i.disabled = !ok;
+      i.closest('.st-thumb').hidden = !ok;
+    });
+  }
+  homeBox.addEventListener('change', (e) => {
+    if (e.target.name !== 'vhome') return;
+    dash.setParams({ vhome: e.target.value });
+    if (window.gsHome) { window.gsHome.show('home'); }
+  });
+  window.sdSyncHomeLayout = syncHomeLayout;
   lightInput.addEventListener('input', () => applyLight(Number(lightInput.value)));
   lightInput.addEventListener('change', () => dash.setParams({ artlight: Number(lightInput.value) }));
   resetBtn.addEventListener('click', () => {

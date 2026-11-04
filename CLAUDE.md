@@ -357,7 +357,18 @@ design system). The dashboard adds its own patterns:
   `gsServerSeg`): all up is a quiet "Your servers ● ATLAS ● ORION-3 All up"; any down turns it red with
   "ORION-3 is down for 2 h 14 min, since 8:45 AM". On phones the bar takes its own full-width row and
   says "ATLAS up" / "ORION-3 down 2 h 14 min". The old Your servers card is gone (`gsServersCard` returns null).
-- The account menu opens from the circle at the top right (`renderUser`): My playback history, Sign out.
+- The account menu opens from the circle at the top right (`renderUser`): My playback history, My subscription
+  (viewers), Sign out.
+- Viewer home (`web/home.js`, `web/home.css`; Glenn's pick): Plex sign-ins that are not the admin land on a
+  home in the layout chosen in Settings, Display, "Home layout" (`vhome`, saved per browser, kept in `KEEP`):
+  `doors` Four big doors (DEFAULT: Watching now, Request something with a search box, My history, My
+  subscription), `hub` Requests hub (big search, your requests as Ready to watch / On its way / Waiting for
+  approval / Failed, trending row), `month` My month (`GET /api/me/recap?period=week|month|year&tz=`,
+  `recap_for` in `main.py`: hours vs the same stretch before, plays, longest streak, prime time, most watched,
+  hours of the day). A layout needing a section the person lacks falls back to doors. Doors and cards open
+  the page's own sections via `gsHome.show('streams'|'history'|'subscription')` with a "Home" button
+  (`#vhome-back`); `.gs-vh[data-vview]` in `home.css` decides what each view shows. The Home nav button and
+  phone tab go back to it. Admins never get it.
 - Status is always a word plus a shape, never color alone. No emoji.
 - Light theme (`web/light.css`, Glenn's reference picture): deeper shadows on
   cards, pills, the top bar and stream cards, and light Servers and Server

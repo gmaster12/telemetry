@@ -118,6 +118,9 @@
     if (me.kind === 'plex' && (me.role === 'admin' || window.dash.can('history'))) {
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); openHistory('me', me.name); } }, icon('history', 18), 'My playback history'));
     }
+    if (me.role !== 'admin' && me.kind === 'plex' && mySub && mySub.configured && window.gsHome) {
+      items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); window.gsHome.show('subscription'); } }, icon('bookmark', 18), 'My subscription'));
+    }
     if (me.role === 'admin') {
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); focusUsers(); } }, icon('users', 18), 'Users'));
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); openSettingsTab('access'); } }, icon('sliders', 18), 'Access and logins'));
@@ -303,8 +306,11 @@
   function loadMySubscription() {
     startServers();
     if (!me || me.kind !== 'plex') return;
-    api('GET', '/api/me/subscription').then(function (r) { mySub = r; renderMySub(); }).catch(function () {});
+    api('GET', '/api/me/subscription').then(function (r) { mySub = r; renderMySub(); if (window.gsHome) window.gsHome.refresh(); }).catch(function () {});
   }
+  // For the viewer home (home.js): the subscription door reuses these.
+  window.gsMySub = function () { return mySub; };
+  window.gsSubBits = { period: function (x) { return period(x); }, when: function (x) { return whenLine(x); }, badge: function (x) { return subBadge(x); } };
   function renderMySub() {
     var box = document.getElementById('sub-card');
     if (!box) return;
