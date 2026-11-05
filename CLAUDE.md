@@ -159,6 +159,18 @@ files to add servers. Keep it that way.
   Show more (50 a page) and Download CSV (`/api/settings/requests/log.csv?tz=`, in the admin's time zone).
   "Import earlier requests" (`import_earlier`) brings in requests by people linked to Seerr made since they were
   linked, marked Imported (Seerr does not record where a request came from). A Settings home card shows counts.
+- Ratings and box office (Glenn's pick C, "Scores on every poster"): `GET /api/requests/scores?ids=movie:1,tv:2`
+  (up to 60, `requests` section) returns per title Rotten Tomatoes critics/audience (`/movie/{id}/ratingscombined`,
+  falling back to `/movie/{id}/ratings`; `/tv/{id}/ratings`), IMDb (from ratingscombined), TMDB user score and, for
+  movies, budget, worldwide gross, profit (gross minus budget, before marketing), multiple and verdict (hit 1.5x and
+  up, even 0.8x to 1.5x, loss below). `Requests.scores` saves them in `title_scores` (a day; 6 h when not out yet or
+  Seerr failed) and fetches new ones 4 at a time as Seerr's admin. The page (`wantScores` batches cards, `paintChips`)
+  puts chips at the bottom of every poster card (`.rq-card__chips`): critics % with a circle (Fresh) or square
+  (Rotten), a ring with the TMDB % when there is no Rotten Tomatoes score (50+ votes), and "5.2x" (hit), a triangle
+  "1.0x" (even) or a square "Loss". The kind (Movie/Series) moved to the line under the title. Grids (Movies, Series,
+  browse, search) get Sort: Popular, Highest rated, Biggest hit (`sortBar`, reorders the cards on screen; titles
+  without the number go last). A title's About list gets Rotten Tomatoes, IMDb, TMDB users, Budget, Worldwide gross
+  and Profit rows (`facts`). Series have no money numbers.
 - A red floating "Report issue" button (`.rq-report`, Glenn's pick, option 2) on every Requests page opens
   the title picker; the list tab is "Reported issues".
 - `requests` is an access section, on for everyone by default (a one-time

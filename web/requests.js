@@ -269,12 +269,111 @@
         el('span', { class: 'rq-card__meta', text: (it.knownFor || []).join(', ') || 'Person' }));
     }
     var b = mediaBadge(it.status);
+    var chips = el('span', { class: 'rq-card__chips' });
     var art = el('span', { class: 'rq-card__art' },
       it.poster ? el('img', { src: img(it.poster, 'w300'), alt: '', loading: 'lazy' }) : el('span', { class: 'rq-card__none', text: it.title }),
-      b ? el('span', { class: 'rq-card__badge' }, b) : null,
-      el('span', { class: 'rq-card__kind', text: KIND_NAME[it.kind] || '' }));
-    return el('a', { class: 'rq-card', href: link((it.kind === 'tv' ? 'series/' : 'movie/') + it.id), title: it.title },
-      art, el('span', { class: 'rq-card__title', text: it.title }), el('span', { class: 'rq-card__meta', text: it.year || '' }));
+      b ? el('span', { class: 'rq-card__badge' }, b) : null, chips);
+    var card = el('a', { class: 'rq-card', href: link((it.kind === 'tv' ? 'series/' : 'movie/') + it.id), title: it.title },
+      art, el('span', { class: 'rq-card__title', text: it.title }), el('span', { class: 'rq-card__meta', text: [it.year, KIND_NAME[it.kind]].filter(Boolean).join(' · ') }));
+    card.dataset.key = it.kind + ':' + it.id;
+    wantScores(it.kind, it.id, function (sc) { paintChips(chips, sc); });
+    return card;
+  }
+
+  // ---------- scores: Rotten Tomatoes, IMDb, TMDB and box office (Glenn's pick C) ----------
+  // Asked for in batches as cards are drawn; the server keeps them a day, the page for this visit.
+  var scoreCache = {}, scoreWait = {}, scoreTimer = 0;
+  function wantScores(kind, id, cb) {
+    if (kind !== 'movie' && kind !== 'tv') return;
+    var key = kind + ':' + id;
+    if (key in scoreCache) { if (scoreCache[key]) cb(scoreCache[key]); return; }
+    (scoreWait[key] = scoreWait[key] || []).push(cb);
+    clearTimeout(scoreTimer);
+    scoreTimer = setTimeout(flushScores, 60);
+  }
+  function flushScores() {
+    var keys = Object.keys(scoreWait).filter(function (k) { return !(k in scoreCache); });
+    for (var i = 0; i < keys.length; i += 40) (function (part) {
+      part.forEach(function (k) { scoreCache[k] = null; });
+      api('GET', '/api/requests/scores?ids=' + encodeURIComponent(part.join(','))).then(function (d) {
+        (d.items || []).forEach(function (sc) { scoreCache[sc.kind + ':' + sc.id] = sc; });
+      }).catch(function () {}).then(function () {
+        part.forEach(function (k) {
+          var cbs = scoreWait[k] || []; delete scoreWait[k];
+          if (scoreCache[k]) cbs.forEach(function (cb) { cb(scoreCache[k]); });
+        });
+        document.dispatchEvent(new CustomEvent('rq:scores'));
+      });
+    })(keys.slice(i, i + 40));
+  }
+  function shapeSvg(kind, color) {
+    var ns = 'http://www.w3.org/2000/svg';
+    var svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('width', '9'); svg.setAttribute('height', '9'); svg.setAttribute('viewBox', '0 0 10 10'); svg.setAttribute('aria-hidden', 'true');
+    var sh = document.createElementNS(ns, kind === 'circle' ? 'circle' : kind === 'ring' ? 'circle' : kind === 'triangle' ? 'path' : 'rect');
+    if (kind === 'circle') { sh.setAttribute('cx', 5); sh.setAttribute('cy', 5); sh.setAttribute('r', 4); }
+    else if (kind === 'ring') { sh.setAttribute('cx', 5); sh.setAttribute('cy', 5); sh.setAttribute('r', 3.2); sh.setAttribute('fill', 'none'); sh.style.stroke = color; sh.setAttribute('stroke-width', 1.6); }
+    else if (kind === 'triangle') sh.setAttribute('d', 'M5 1 9.2 8.5H.8Z');
+    else { sh.setAttribute('x', 1); sh.setAttribute('y', 1); sh.setAttribute('width', 8); sh.setAttribute('height', 8); sh.setAttribute('rx', 1.5); }
+    if (kind !== 'ring') sh.style.fill = color;  // style, so var(--volt) works
+    svg.appendChild(sh);
+    return svg;
+  }
+  function money(n) {
+    var a = Math.abs(n);
+    var t = a >= 1e9 ? (Math.round(a / 1e8) / 10) + 'B' : a >= 1e6 ? Math.round(a / 1e6) + 'M' : Math.round(a / 1e3) + 'K';
+    return '$' + t;
+  }
+  function count(n) { return n >= 1e6 ? (Math.round(n / 1e5) / 10) + 'M' : n >= 1e3 ? Math.round(n / 1e3) + 'K' : String(n); }
+  function scoreChip(sc) {
+    if (sc.rt) {
+      var word = sc.rt.fresh ? (sc.rt.certified ? 'Certified Fresh' : 'Fresh') : 'Rotten';
+      return el('span', { class: 'rq-chipx', title: 'Rotten Tomatoes critics ' + sc.rt.critics + '%, ' + word }, shapeSvg(sc.rt.fresh ? 'circle' : 'square', sc.rt.fresh ? '#b8fc64' : '#ff8a8a'), sc.rt.critics + '%');
+    }
+    if (sc.tmdb && sc.tmdb.votes >= 50) return el('span', { class: 'rq-chipx', title: 'TMDB users ' + sc.tmdb.score + '% (no Rotten Tomatoes score)' }, shapeSvg('ring', '#d8d8de'), sc.tmdb.score + '%');
+    return null;
+  }
+  function moneyChip(sc) {
+    var m = sc.money;
+    if (!m) return null;
+    var tip = 'Budget ' + money(m.budget) + ', worldwide gross ' + money(m.revenue) + ': ' + m.multiple + '\u00d7 its budget';
+    if (m.verdict === 'loss') return el('span', { class: 'rq-chipx', title: tip + ', lost money' }, shapeSvg('square', '#ff8a8a'), 'Loss');
+    if (m.verdict === 'even') return el('span', { class: 'rq-chipx', title: tip + ', about broke even' }, shapeSvg('triangle', '#e9c46a'), m.multiple.toFixed(1) + '\u00d7');
+    return el('span', { class: 'rq-chipx', title: tip + ', a hit' }, m.multiple.toFixed(1) + '\u00d7');
+  }
+  function paintChips(box, sc) { box.replaceChildren.apply(box, [scoreChip(sc), moneyChip(sc)].filter(Boolean)); }
+  function rankOf(key, how) {
+    var sc = scoreCache[key];
+    if (!sc) return -1;
+    if (how === 'rated') return sc.rt ? sc.rt.critics : sc.tmdb && sc.tmdb.votes >= 50 ? sc.tmdb.score - 0.5 : -1;  // same rule as the chip
+    return sc.money ? sc.money.multiple : -1;
+  }
+  // Popular / Highest rated / Biggest hit: reorders the cards already on screen (people last).
+  function sortBar(box) {
+    var how = 'popular';
+    var seg = el('div', { class: 'rq-sort', role: 'group', 'aria-label': 'Sort' });
+    function apply() {
+      var cards = Array.prototype.slice.call(box.children);
+      cards.forEach(function (c, i) { if (c.dataset.order == null) c.dataset.order = String(i); });
+      cards.sort(function (a, b) {
+        if (how !== 'popular') {
+          var d = rankOf(b.dataset.key, how) - rankOf(a.dataset.key, how);
+          if (d) return d;
+        }
+        return a.dataset.order - b.dataset.order;
+      });
+      cards.forEach(function (c) { box.appendChild(c); });
+    }
+    [['popular', 'Popular'], ['rated', 'Highest rated'], ['hit', 'Biggest hit']].forEach(function (o) {
+      seg.appendChild(el('button', { type: 'button', 'aria-pressed': o[0] === how ? 'true' : 'false', text: o[1], onclick: function () {
+        how = o[0];
+        seg.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', b === this ? 'true' : 'false'); }, this);
+        apply();
+      } }));
+    });
+    var onScores = function () { if (!box.isConnected) { document.removeEventListener('rq:scores', onScores); return; } if (how !== 'popular') apply(); };
+    document.addEventListener('rq:scores', onScores);
+    return { el: el('div', { class: 'rq-sortbar' }, el('span', { class: 'rq-sortbar__lbl', text: 'Sort' }), seg), apply: function () { if (how !== 'popular') apply(); } };
   }
   function requestCard(q) {
     var a = el('a', { class: 'rq-rcard', href: link((q.kind === 'tv' ? 'series/' : 'movie/') + q.tmdbId) });
@@ -399,12 +498,15 @@
     opts = opts || {};
     var box = el('div', { class: 'rq-grid' });
     var more = el('button', { type: 'button', class: 'rq-btn rq-more', text: 'Load more' });
-    var wrap = el('div', { class: 'rq-gridwrap' }, box, more);
+    var sorter = opts.render ? null : sortBar(box);
+    var wrap = el('div', { class: 'rq-gridwrap' }, sorter ? sorter.el : null, box, more);
     var n = 1;
     function load() {
       more.disabled = true; more.textContent = 'Loading';
       return fetchPage(n).then(function (d) {
-        (d.items || []).forEach(function (i) { box.appendChild(opts.render ? opts.render(i) : posterCard(i)); });
+        var start = box.children.length;
+        (d.items || []).forEach(function (i, k) { var c = opts.render ? opts.render(i) : posterCard(i); c.dataset.order = String(start + k); box.appendChild(c); });
+        if (sorter) sorter.apply();
         if (!box.children.length) wrap.replaceChildren(el('div', { class: 'rq-empty' }, el('b', { text: opts.empty || 'Nothing found' }), opts.emptyHint ? el('span', { text: opts.emptyHint }) : null));
         more.hidden = !d.more; more.disabled = false; more.textContent = 'Load more';
         n += 1;
@@ -513,7 +615,32 @@
     (d.crew || []).forEach(function (c) { add2(c.job, el('a', { href: link('person/' + c.id), text: c.name })); });
     if (kind === 'movie' && (d.studios || []).length) add2('Studio', d.studios.map(function (s) { return el('a', { href: link('browse/studio/' + s.id, { title: s.name }), text: s.name }); }).reduce(function (a, b, i) { if (i) a.push(', '); a.push(b); return a; }, []));
     if (kind === 'tv' && (d.networks || []).length) add2('Network', d.networks.map(function (s) { return el('a', { href: link('browse/network/' + s.id, { title: s.name }), text: s.name }); }).reduce(function (a, b, i) { if (i) a.push(', '); a.push(b); return a; }, []));
-    return el('section', { class: 'rq-panel' }, el('h2', { class: 'rq-h2', text: 'About' }), el('dl', { class: 'rq-facts' }, rows));
+    var dl = el('dl', { class: 'rq-facts' }, rows);
+    wantScores(kind, d.id, function (sc) {
+      var more = [];
+      var add3 = function (k, v, tip) { if (v) more.push(el('dt', { text: k }), el('dd', tip ? { title: tip } : null, v)); };
+      if (sc.rt) add3('Rotten Tomatoes', el('span', { class: 'rq-score' }, shapeSvg(sc.rt.fresh ? 'circle' : 'square', sc.rt.fresh ? 'var(--volt)' : 'var(--danger)'),
+        sc.rt.critics + '% critics (' + (sc.rt.fresh ? (sc.rt.certified ? 'Certified Fresh' : 'Fresh') : 'Rotten') + ')' + (sc.rt.audience != null ? ', ' + sc.rt.audience + '% audience' : '')));
+      if (sc.imdb) add3('IMDb', sc.imdb.score.toFixed(1) + ' / 10' + (sc.imdb.votes ? ' from ' + count(sc.imdb.votes) + ' votes' : ''));
+      if (sc.tmdb) add3('TMDB users', sc.tmdb.score + '%' + (sc.tmdb.votes ? ' from ' + count(sc.tmdb.votes) + ' votes' : ''));
+      if (sc.money) {
+        var m = sc.money;
+        add3('Budget', money(m.budget));
+        add3('Worldwide gross', money(m.revenue));
+        add3('Profit', el('span', { class: 'rq-score rq-score--' + m.verdict },
+          shapeSvg(m.verdict === 'hit' ? 'circle' : m.verdict === 'even' ? 'triangle' : 'square', m.verdict === 'hit' ? 'var(--volt)' : m.verdict === 'even' ? 'var(--amber)' : 'var(--danger)'),
+          (m.profit >= 0 ? '+' + money(m.profit) : 'Lost ' + money(m.profit)) + ', ' + m.multiple.toFixed(1) + '\u00d7 its budget'),
+          'Gross minus budget, before marketing. From TMDB.');
+      }
+      if (!more.length) return;
+      if (sc.tmdb) {  // the new TMDB row replaces the old one
+        Array.prototype.forEach.call(dl.querySelectorAll('dt'), function (dt) { if (dt.textContent === 'TMDB rating') { dt.nextSibling.remove(); dt.remove(); } });
+      }
+      var after = dl.querySelector('dt:nth-of-type(' + Math.min(dl.querySelectorAll('dt').length, kind === 'movie' ? 2 : 4) + ')');
+      var anchor = after ? after.nextSibling.nextSibling : null;
+      more.forEach(function (n) { dl.insertBefore(n, anchor); });
+    });
+    return el('section', { class: 'rq-panel' }, el('h2', { class: 'rq-h2', text: 'About' }), dl);
   }
 
   // The buttons under a title: request (standard and 4K), play, trailer, watchlist, report a problem.

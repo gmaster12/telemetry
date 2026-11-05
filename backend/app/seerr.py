@@ -16,6 +16,7 @@ removed, and only the fields the pages use are kept for people (`scrub`).
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import secrets
 import time
@@ -56,6 +57,13 @@ CREATE TABLE IF NOT EXISTS request_log (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS request_log_req ON request_log (seerr_request) WHERE seerr_request IS NOT NULL;
 CREATE INDEX IF NOT EXISTS request_log_at ON request_log (at);
+CREATE TABLE IF NOT EXISTS title_scores (
+  kind TEXT NOT NULL,
+  tmdb_id INTEGER NOT NULL,
+  data TEXT NOT NULL,
+  fetched_at INTEGER NOT NULL,
+  PRIMARY KEY (kind, tmdb_id)
+);
 """
 
 # Seerr's own numbers (server/constants/media.ts, server/lib/permissions.ts)
@@ -261,6 +269,95 @@ class Requests:
             return {"title": None, "year": "", "poster": None}
         when = d.get("releaseDate") or d.get("firstAirDate") or ""
         return {"title": d.get("title") or d.get("name"), "year": when[:4], "poster": d.get("posterPath")}
+
+    # ---------- scores: ratings and box office for poster chips and the About list ----------
+    SCORE_TTL = 24 * 3600      # a released title's numbers barely move
+    SCORE_TTL_SHORT = 6 * 3600  # not out yet, or Seerr could not answer: look again sooner
+
+    def _saved_scores(self, keys: list[tuple[str, int]]) -> dict[tuple[str, int], tuple[dict, int]]:
+        if not keys:
+            return {}
+        out = {}
+        with self.store.lock:
+            for kind, tid in keys:
+                row = self.store.db.execute("SELECT data, fetched_at FROM title_scores WHERE kind = ? AND tmdb_id = ?", (kind, tid)).fetchone()
+                if row:
+                    out[(kind, tid)] = (json.loads(row[0]), int(row[1]))
+        return out
+
+    async def _fetch_scores(self, kind: str, tid: int) -> tuple[dict, bool]:
+        """One title's numbers from Seerr (as its administrator). Returns (scores, complete)."""
+        out: dict = {"kind": kind, "id": tid, "rt": None, "imdb": None, "tmdb": None, "money": None}
+        complete = True
+        c = self.client()
+        try:
+            d = await c.call("GET", f"/{'movie' if kind == 'movie' else 'tv'}/{tid}")
+        except SeerrError:
+            d, complete = {}, False
+        if d.get("voteAverage"):
+            out["tmdb"] = {"score": round(float(d["voteAverage"]) * 10), "votes": int(d.get("voteCount") or 0)}
+        if kind == "movie":
+            budget, revenue = int(d.get("budget") or 0), int(d.get("revenue") or 0)
+            if budget >= 100000 and revenue > 0:
+                m = revenue / budget
+                out["money"] = {"budget": budget, "revenue": revenue, "profit": revenue - budget, "multiple": round(m, 1),
+                                 "verdict": "hit" if m >= 1.5 else "even" if m >= 0.8 else "loss"}
+            elif d and d.get("status") != "Released":
+                complete = False
+        rt = imdb = None
+        try:
+            if kind == "movie":
+                try:
+                    r = await c.call("GET", f"/movie/{tid}/ratingscombined")
+                    rt, imdb = (r or {}).get("rt"), (r or {}).get("imdb")
+                except SeerrError as e:
+                    if e.status != 404:
+                        raise
+                    # an older Seerr has no combined route (and a title with no ratings is a 404 too): try the Rotten Tomatoes one
+                    rt = await c.call("GET", f"/movie/{tid}/ratings")
+            else:
+                rt = await c.call("GET", f"/tv/{tid}/ratings")
+        except SeerrError as e:
+            if e.status != 404:
+                complete = False
+        if isinstance(rt, dict) and rt.get("criticsScore") is not None:
+            rating = str(rt.get("criticsRating") or "")
+            out["rt"] = {"critics": int(rt["criticsScore"]), "fresh": "rotten" not in rating.lower() if rating else int(rt["criticsScore"]) >= 60,
+                         "certified": "certified" in rating.lower(), "audience": rt.get("audienceScore"),
+                         "upright": str(rt.get("audienceRating") or "").lower() != "spilled" if rt.get("audienceScore") is not None else None}
+        if isinstance(imdb, dict) and imdb.get("criticsScore") is not None:
+            out["imdb"] = {"score": float(imdb["criticsScore"]), "votes": int(imdb.get("criticsScoreCount") or 0)}
+        return out, complete
+
+    async def scores(self, keys: list[tuple[str, int]]) -> list[dict]:
+        """Ratings and box office for many titles. Saved in SQLite so a page of posters costs Seerr nothing after
+        the first look; new titles are fetched a few at a time."""
+        keys = list(dict.fromkeys((k, int(i)) for k, i in keys if k in ("movie", "tv")))[:60]
+        now = int(time.time())
+        saved = self._saved_scores(keys)
+        out: dict[tuple[str, int], dict] = {}
+        todo = []
+        for k in keys:
+            data, at = saved.get(k, (None, 0))
+            ttl = self.SCORE_TTL if data and data.get("_complete") else self.SCORE_TTL_SHORT
+            if data and now - at < ttl:
+                out[k] = data
+            else:
+                todo.append(k)
+        if todo and self.configured():
+            sem = asyncio.Semaphore(4)
+
+            async def one(k):
+                async with sem:
+                    return k, await self._fetch_scores(*k)
+            for k, (data, complete) in await asyncio.gather(*(one(k) for k in todo)):
+                data["_complete"] = complete
+                out[k] = data
+                with self.store.lock:
+                    self.store.db.execute("INSERT OR REPLACE INTO title_scores (kind, tmdb_id, data, fetched_at) VALUES (?, ?, ?, ?)",
+                                          (k[0], k[1], json.dumps(data), now))
+                    self.store.db.commit()
+        return [{x: v for x, v in out[k].items() if x != "_complete"} for k in keys if k in out]
 
     async def all_requests(self, max_pages: int = 30) -> dict[int, dict]:
         """Every request Seerr has, by id, as its administrator (cached a minute): the current state of logged requests."""

@@ -343,6 +343,17 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -
                  "by": {"id": (q.get("requestedBy") or {}).get("id"), "name": (q.get("requestedBy") or {}).get("displayName")},
                  "created": q.get("createdAt")} for q in (mi or {}).get("requests") or []]
 
+    @r.get("/scores")
+    async def scores(request: Request, ids: str = ""):
+        """Ratings and box office for up to 60 titles: ids=movie:27205,tv:1396 (poster chips, sorting, About)."""
+        need(request, "requests")
+        keys = []
+        for part in ids.split(",")[:60]:
+            kind, _, tid = part.strip().partition(":")
+            if kind in ("movie", "tv") and tid.isdigit():
+                keys.append((kind, int(tid)))
+        return {"items": await svc.scores(keys)}
+
     @r.get("/movie/{tmdb_id}")
     async def movie(request: Request, tmdb_id: int):
         _, uid = await who(request)

@@ -39,9 +39,12 @@ def reset():
 reset()
 
 MOVIES = {
-    603: {"title": "The Matrix", "releaseDate": "1999-03-31", "posterPath": "/p603.jpg", "backdropPath": "/b603.jpg", "status": 5},
-    27205: {"title": "Inception", "releaseDate": "2010-07-15", "posterPath": "/p27205.jpg", "backdropPath": "/b27205.jpg", "status": None},
-    157336: {"title": "Interstellar", "releaseDate": "2014-11-05", "posterPath": "/p157336.jpg", "backdropPath": "/b157336.jpg", "status": 2},
+    603: {"title": "The Matrix", "releaseDate": "1999-03-31", "posterPath": "/p603.jpg", "backdropPath": "/b603.jpg", "status": 5,
+          "budget": 63000000, "revenue": 463517383},
+    27205: {"title": "Inception", "releaseDate": "2010-07-15", "posterPath": "/p27205.jpg", "backdropPath": "/b27205.jpg", "status": None,
+            "budget": 160000000, "revenue": 839030630},
+    157336: {"title": "Interstellar", "releaseDate": "2014-11-05", "posterPath": "/p157336.jpg", "backdropPath": "/b157336.jpg", "status": 2,
+             "budget": 165000000, "revenue": 90000000},
     1001: {"title": "Night Harbor", "releaseDate": "2026-12-01", "posterPath": "/p1001.jpg", "backdropPath": "/b1001.jpg", "status": None},
 }
 SHOWS = {
@@ -245,12 +248,40 @@ def movie(request: Request, tmdb: int):
     if tmdb not in MOVIES:
         raise HTTPException(404, "Unable to retrieve movie.")
     r = result("movie", tmdb)
-    return {**r, "tagline": "Free your mind.", "runtime": 136, "genres": [{"id": 28, "name": "Action"}], "status": "Released",
+    return {**r, "budget": MOVIES[tmdb].get("budget", 0), "revenue": MOVIES[tmdb].get("revenue", 0), "voteCount": 30000,
+            "tagline": "Free your mind.", "runtime": 136, "genres": [{"id": 28, "name": "Action"}], "status": "Released",
             "credits": {"cast": [{"id": 6384, "name": "Keanu Reeves", "character": "Neo", "profilePath": "/k.jpg"}],
                         "crew": [{"id": 9339, "name": "Lana Wachowski", "job": "Director"}]},
             "relatedVideos": [{"site": "YouTube", "type": "Trailer", "url": "https://www.youtube.com/watch?v=abc"}],
             "collection": {"id": 2344, "name": "The Matrix Collection", "posterPath": "/c.jpg"} if tmdb == 603 else None,
             "releases": {"results": [{"iso_3166_1": "US", "release_dates": [{"certification": "R"}] + MOVIES[tmdb].get("home", [])}]}, "productionCompanies": [{"id": 174, "name": "Warner Bros. Pictures"}]}
+
+
+# Rotten Tomatoes and IMDb, the way Seerr passes them on (none for the unreleased movie)
+RATINGS = {603: ({"criticsScore": 83, "criticsRating": "Certified Fresh", "audienceScore": 85, "audienceRating": "Upright"}, {"criticsScore": 8.7, "criticsScoreCount": 2100000}),
+           27205: ({"criticsScore": 87, "criticsRating": "Certified Fresh", "audienceScore": 91, "audienceRating": "Upright"}, {"criticsScore": 8.8, "criticsScoreCount": 2600000}),
+           157336: ({"criticsScore": 58, "criticsRating": "Rotten", "audienceScore": 86, "audienceRating": "Upright"}, None)}
+TV_RATINGS = {1399: {"criticsScore": 89, "criticsRating": "Fresh", "audienceScore": 85, "audienceRating": "Upright"}}
+
+
+@app.get("/api/v1/movie/{tmdb}/ratingscombined")
+def movie_ratings(request: Request, tmdb: int):
+    me(request)
+    state["rating_calls"] = state.get("rating_calls", 0) + 1
+    if tmdb not in RATINGS:
+        raise HTTPException(404, "Rotten Tomatoes ratings not found")
+    rt, imdb = RATINGS[tmdb]
+    return {"rt": {"title": MOVIES[tmdb]["title"], "url": "https://www.rottentomatoes.com/m/x", **rt},
+            "imdb": {"title": MOVIES[tmdb]["title"], "url": "https://www.imdb.com/title/tt1", **imdb} if imdb else None}
+
+
+@app.get("/api/v1/tv/{tmdb}/ratings")
+def tv_ratings(request: Request, tmdb: int):
+    me(request)
+    state["rating_calls"] = state.get("rating_calls", 0) + 1
+    if tmdb not in TV_RATINGS:
+        raise HTTPException(404, "Rotten Tomatoes ratings not found")
+    return {"title": SHOWS[tmdb]["name"], "url": "https://www.rottentomatoes.com/tv/x", **TV_RATINGS[tmdb]}
 
 
 @app.get("/api/v1/tv/{tmdb}")

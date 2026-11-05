@@ -51,7 +51,6 @@
 .rq-card__none { display: grid; place-items: center; width: 100%; height: 100%; padding: 12px; box-sizing: border-box; text-align: center; font-size: 15px; font-weight: 300; color: var(--ink-muted); }
 .rq-card__badge { position: absolute; top: 8px; left: 8px; right: 8px; display: flex; }
 .rq-card__badge .gs-badge { height: 24px; padding: 0 9px; font-size: 11px; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25); }
-.rq-card__kind { position: absolute; bottom: 8px; left: 8px; height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: var(--radius-pill); background: rgba(11, 11, 13, 0.78); color: #f6f6f4; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
 .rq-card__title { margin-top: 6px; overflow: hidden; font-size: 14px; line-height: 18px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
 .rq-card__meta { overflow: hidden; font-size: 12px; line-height: 16px; color: var(--ink-muted); white-space: nowrap; text-overflow: ellipsis; }
 .rq-card--person .rq-card__title, .rq-card--person .rq-card__meta { text-align: center; }
@@ -320,3 +319,25 @@ body.rq-noscroll { overflow: hidden; }
 }
 .gs-app[data-look="light"] .rq-attn--wait .rq-attn__why { color: #7a5214; }
 @media (prefers-color-scheme: light) { .gs-app:not([data-look="dark"]) .rq-attn--wait .rq-attn__why { color: #7a5214; } }
+
+/* Scores on every poster (Glenn's pick C): Rotten Tomatoes critics (circle Fresh, square Rotten; a ring is the TMDB
+   user score when there is no Rotten Tomatoes one) and how many times its budget a movie earned (triangle about even,
+   square Loss). Sort: Popular, Highest rated, Biggest hit reorder the cards on screen. */
+.rq-card__chips { position: absolute; left: 8px; right: 8px; bottom: 8px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px; pointer-events: none; }
+.rq-card__chips:empty { display: none; }
+.rq-chipx { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: var(--radius-pill); background: rgba(11, 11, 13, 0.82); color: #f6f6f4; font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25); }
+.rq-sortbar { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin-bottom: 14px; }
+.rq-sortbar__lbl { font-size: 13px; color: var(--ink-muted); }
+.rq-sort { display: inline-flex; gap: 2px; padding: 4px; border-radius: var(--radius-pill); background: var(--surface-card); box-shadow: inset 0 0 0 1px var(--hairline); }
+.rq-sort button { height: 34px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: none; color: var(--ink); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer; }
+.rq-sort button[aria-pressed="true"] { background: var(--surface-ink); color: var(--on-ink); }
+.rq-sort button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.rq-score { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 760px) {
+  .rq-card__chips { left: 5px; right: 5px; bottom: 5px; }
+  .rq-chipx { height: 20px; padding: 0 6px; font-size: 11px; gap: 4px; }
+  .rq-sortbar { justify-content: stretch; }
+  .rq-sortbar__lbl { display: none; }
+  .rq-sort { flex: 1; }
+  .rq-sort button { flex: 1; padding: 0 8px; font-size: 12.5px; }
+}
