@@ -95,6 +95,9 @@
     }[status];
     return x ? badge(x[0], (is4k ? '4K ' : '') + x[1]) : null;
   }
+  // Seerr only takes a season that is not on Plex at all (or was deleted) and has no open request, failed ones
+  // included (server/entity/MediaRequest.ts); anything else it skips, so the page does not offer it.
+  function seasonOpen(st) { return st === 'unknown' || st === 'deleted'; }
   function requestBadge(status) {
     var x = { pending: ['warning', 'Pending approval'], approved: ['info', 'Approved'], declined: ['danger', 'Declined'],
       failed: ['danger', 'Failed'], completed: ['success', 'Available'] }[status];
@@ -651,7 +654,7 @@
     var open = function (st) { return st === 'unknown' || st === 'deleted' || (kind === 'tv' && st === 'partial'); };
     var tvLeft = function (four) {
       return (d.seasons || []).some(function (s) {
-        return (s.number > 0 || me.settings.specials) && !(four ? s.requested4k : s.requested) && ['available', 'processing', 'pending'].indexOf(four ? s.status4k : s.status) < 0;
+        return (s.number > 0 || me.settings.specials) && !(four ? s.requested4k : s.requested) && seasonOpen(four ? s.status4k : s.status);
       });
     };
     var mayStd = open(d.media.status) && (kind === 'movie' || tvLeft(false));
@@ -738,12 +741,14 @@
     }
     if (kind === 'tv') {
       var rows = (d.seasons || []).filter(function (s) { return s.number > 0 || me.settings.specials; });
+      var partly = false;
       var allBox = el('input', { type: 'checkbox', id: 'rq-all' });
       var tbody = el('tbody');
       rows.forEach(function (s) {
         var st = is4k ? s.status4k : s.status;
         var asked = is4k ? s.requested4k : s.requested;
-        var taken = ['available', 'processing', 'pending'].indexOf(st) >= 0 || !!asked;
+        var taken = !seasonOpen(st) || !!asked;
+        if (st === 'partial' && !asked) partly = true;
         var cb = el('input', { type: 'checkbox', id: 'rq-s' + s.number, value: String(s.number), disabled: taken, checked: false });
         if (!taken) picks.push(cb);
         tbody.appendChild(el('tr', { class: taken ? 'is-taken' : null },
@@ -757,6 +762,10 @@
       content.appendChild(el('table', { class: 'rq-seasontable' },
         el('thead', null, el('tr', null, el('th', null, allBox), el('th', null, el('label', { for: 'rq-all', text: 'All seasons' })), el('th', { class: 'rq-num', text: 'Episodes' }), el('th', { text: 'Status' }))),
         tbody));
+      var failedSeason = rows.some(function (s) { return (is4k ? s.requested4k : s.requested) === 'failed'; });
+      if (partly || failedSeason) content.appendChild(el('p', { class: 'rq-muted rq-seasonnote' },
+        [partly ? 'Seerr cannot request a season that is already partly on Plex. If episodes are missing, use Report issue.' : null,
+          failedSeason ? 'A season whose request failed can be tried again from My requests.' : null].filter(Boolean).join(' ')));
     }
     var adv = null;
     if (me.can.advanced) {

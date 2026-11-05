@@ -8,7 +8,7 @@ from __future__ import annotations
 import time
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import JSONResponse, Response
 
 KEY = "seerr-test-key"
 REQUEST, REQUEST_4K, ADVANCED, MANAGE, AUTO = 32, 1024, 8192, 16, 128
@@ -364,6 +364,13 @@ async def new_request(request: Request):
     state.setdefault("bodies", []).append(b)
     if b.get("is4k") and not can(u, REQUEST_4K):
         raise HTTPException(403, "You do not have permission to make 4K requests.")
+    if b["mediaType"] == "tv" and isinstance(b.get("seasons"), list):
+        # like Seerr: seasons that already have an open request (failed included) are dropped; none left is a 202
+        taken = {n for q in state["requests"] if q["type"] == "tv" and q["media"]["tmdbId"] == b["mediaId"]
+                 and q["is4k"] == bool(b.get("is4k")) and q["status"] not in (3, 5) for n in q["seasons"]}
+        b["seasons"] = [n for n in b["seasons"] if n not in taken]
+        if not b["seasons"]:
+            return JSONResponse({"message": "No seasons available to request"}, status_code=202)
     state["next"] += 1
     r = {"id": state["next"], "type": b["mediaType"], "status": 2 if can(u, AUTO) else 1, "is4k": bool(b.get("is4k")), "by": u["id"],
          "created": time.strftime("%Y-%m-%dT%H:%M:%SZ"), "media": {"tmdbId": b["mediaId"]},

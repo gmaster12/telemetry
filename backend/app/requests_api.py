@@ -379,7 +379,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -
         asked = {}
         for q in mi.get("requests") or []:
             st = REQUEST_STATUS.get(q.get("status"))
-            if st in ("declined", "failed", "completed"):
+            if st in ("declined", "completed"):  # Seerr still counts a failed request as taking its seasons
                 continue
             for s in q.get("seasons") or []:
                 asked.setdefault((s.get("seasonNumber"), bool(q.get("is4k"))), st)
@@ -456,7 +456,13 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -
         elif not b.get("seasons"):
             raise HTTPException(422, "Pick at least one season.")
         res = await run(svc.send("POST", "/request", user=uid, body=b))
-        status = REQUEST_STATUS.get((res or {}).get("status"), "pending")
+        if not isinstance(res, dict) or res.get("id") is None:
+            # Seerr answers 202 "No seasons available to request" (and makes nothing) when every season picked is
+            # already on Plex, partly on Plex, or has an open request, failed ones included. Say so, not "requested".
+            raise HTTPException(409, "Seerr did not make a request: " + (
+                "every season you picked is already on Plex, partly on Plex, or already requested."
+                if b["mediaType"] == "tv" else "this title is already on Plex or already requested."))
+        status = REQUEST_STATUS.get(res.get("status"), "pending")
         try:  # the admins' request log (Settings, Request log); never stops the request itself
             info = await title_info(b["mediaType"], b["mediaId"])
             seasons = sorted(s.get("seasonNumber") for s in ((res or {}).get("seasons") or []) if s.get("seasonNumber") is not None)

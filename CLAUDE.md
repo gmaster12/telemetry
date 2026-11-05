@@ -171,6 +171,13 @@ files to add servers. Keep it that way.
   browse, search) get Sort: Popular, Highest rated, Biggest hit (`sortBar`, reorders the cards on screen; titles
   without the number go last). A title's About list gets Rotten Tomatoes, IMDb, TMDB users, Budget, Worldwide gross
   and Profit rows (`facts`). Series have no money numbers.
+- Season requests follow Seerr's own rule (`server/entity/MediaRequest.ts`): a season can be requested only when it
+  is not on Plex at all (`unknown`, or `deleted`) and no request holds it; a FAILED request still holds its seasons
+  (only declined and completed ones free them). Seerr answers HTTP 202 "No seasons available to request" and makes
+  nothing when none of the picked seasons qualify, so `make_request` treats any reply without a request id as a 409
+  ("Seerr did not make a request ...") instead of "requested" (that showed success while nothing reached My
+  requests). The picker (`seasonOpen` in `requests.js`) offers only qualifying seasons, and explains partly-on-Plex
+  seasons (use Report issue) and failed ones (Try again in My requests).
 - A red floating "Report issue" button (`.rq-report`, Glenn's pick, option 2) on every Requests page opens
   the title picker; the list tab is "Reported issues".
 - `requests` is an access section, on for everyone by default (a one-time

@@ -158,3 +158,24 @@ def test_search_sends_spaces_and_apostrophes_the_way_seerr_wants(env):
         r = c.get("/api/requests/search", params={"q": q})
         assert r.status_code == 200, (q, r.text)
     assert any(i["title"] == "The 'Burbs" for i in c.get("/api/requests/search", params={"q": "the 'burbs"}).json()["items"])
+
+
+def test_a_season_seerr_will_not_take_is_not_reported_as_requested(env):
+    """Seerr answers 202 and makes nothing when every season picked already has a request (failed ones too) or is on
+    Plex. That used to show "requested" while nothing appeared in My requests and the season stayed requestable."""
+    store, d, svc = env
+    d.upsert_user({"id": "2001", "username": "sable", "email": "s@x.com"}, shared=True)
+    c = app_for(svc, d, principal("2001", "s@x.com", "sable"))
+    assert c.post("/api/requests/request", json={"mediaType": "tv", "mediaId": 1399, "seasons": [6]}).json()["ok"]
+    again = c.post("/api/requests/request", json={"mediaType": "tv", "mediaId": 1399, "seasons": [6]})
+    assert again.status_code == 409 and "did not make a request" in again.json()["detail"]
+    # a failed request still holds its season in Seerr, so the page must show it as taken (Failed), not open
+    q = next(r for r in M.state["requests"] if r["media"]["tmdbId"] == 1399 and 6 in r["seasons"])
+    q["status"] = 4
+    svc.clear_cache()
+    by = {s["number"]: s for s in c.get("/api/requests/tv/1399").json()["seasons"]}
+    assert by[6]["requested"] == "failed"
+    from app import request_log
+    import asyncio
+    rows, _ = asyncio.run(request_log.build(svc, d))
+    assert len([r for r in rows if r["tmdb"] == 1399]) == 1  # only the request Seerr really made is logged
