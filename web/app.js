@@ -150,7 +150,7 @@
   const failLine = () => el('p', 'sd-fail', 'Failed to load');
 
   function shapeSvg(tone) {
-    const defs = { success: ['circle', { cx: 5, cy: 5, r: 4 }], warning: ['path', { d: 'M5 1 9.2 8.5H.8Z' }], danger: ['rect', { x: 1, y: 1, width: 8, height: 8, rx: 1.5 }], info: ['path', { d: 'M5 .6 9.4 5 5 9.4.6 5Z' }] };
+    const defs = { success: ['circle', { cx: 5, cy: 5, r: 4 }], warning: ['path', { d: 'M5 1 9.2 8.5H.8Z' }], danger: ['rect', { x: 1, y: 1, width: 8, height: 8, rx: 1.5 }], info: ['path', { d: 'M5 .6 9.4 5 5 9.4.6 5Z' }], neutral: ['path', { d: 'M5 .8a4.2 4.2 0 1 0 0 8.4A4.2 4.2 0 0 0 5 .8Zm0 2a2.2 2.2 0 1 1 0 4.4 2.2 2.2 0 0 1 0-4.4Z', 'fill-rule': 'evenodd' }] };
     const def = defs[tone];
     if (!def) return null;
     const svg = document.createElementNS(svgNS, 'svg');

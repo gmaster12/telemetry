@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime as dt
+import logging
 import os
 from typing import Any, Callable
 
@@ -14,6 +15,8 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .seerr import MEDIA_STATUS, REQUEST_STATUS, Requests, SeerrError, has
+
+log = logging.getLogger("telemetry.requests")
 
 # Seerr's built-in studio and network rows (src/components/Discover/StudioSlider, NetworkSlider).
 STUDIOS = [("Disney", 2, "/wdrCwmRnLFJhEoH8GSfymY85KHT.png"), ("20th Century Studios", 127928, "/h0rjX5vjW5r8yEnUBStFarjcLT4.png"),
@@ -428,7 +431,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -
     # ---------- asking for things ----------
     @r.post("/request")
     async def make_request(request: Request, body: RequestIn):
-        _, uid = await who(request)
+        p, uid = await who(request)
         u = await run(me_info(uid))
         b = body.model_dump(exclude_none=True)
         # Never on someone else's behalf, never around quotas; advanced choices only if Seerr allows them.
@@ -442,7 +445,15 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -
         elif not b.get("seasons"):
             raise HTTPException(422, "Pick at least one season.")
         res = await run(svc.send("POST", "/request", user=uid, body=b))
-        return {"ok": True, "status": REQUEST_STATUS.get((res or {}).get("status"), "pending"), "id": (res or {}).get("id")}
+        status = REQUEST_STATUS.get((res or {}).get("status"), "pending")
+        try:  # the admins' request log (Settings, Request log); never stops the request itself
+            info = await title_info(b["mediaType"], b["mediaId"])
+            seasons = sorted(s.get("seasonNumber") for s in ((res or {}).get("seasons") or []) if s.get("seasonNumber") is not None)
+            svc.log_request(p, uid, (res or {}).get("id"), b["mediaType"], b["mediaId"], info,
+                            seasons or (b.get("seasons") if isinstance(b.get("seasons"), list) else None), bool(b.get("is4k")), status)
+        except Exception:  # noqa: BLE001
+            log.exception("Could not add a request to the request log")
+        return {"ok": True, "status": status, "id": (res or {}).get("id")}
 
     @r.delete("/request/{request_id}")
     async def cancel_request(request: Request, request_id: int, failed: bool = False):
@@ -451,8 +462,10 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -
         if failed:
             await own_failed(uid, request_id)
             await run(svc.send("DELETE", f"/request/{request_id}", user=None))
+            svc.log_end(request_id, "removed")
         else:
             await run(svc.send("DELETE", f"/request/{request_id}", user=uid))
+            svc.log_end(request_id, "canceled")
         return {"ok": True}
 
     @r.post("/request/{request_id}/{decision}")

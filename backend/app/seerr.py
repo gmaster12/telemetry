@@ -33,6 +33,29 @@ CREATE TABLE IF NOT EXISTS seerr_links (
   how TEXT,
   created INTEGER
 );
+CREATE TABLE IF NOT EXISTS request_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  at INTEGER NOT NULL,
+  who_kind TEXT NOT NULL,
+  who_id TEXT NOT NULL,
+  who_name TEXT,
+  who_email TEXT,
+  seerr_user INTEGER,
+  seerr_request INTEGER,
+  media_type TEXT NOT NULL,
+  tmdb_id INTEGER NOT NULL,
+  title TEXT,
+  year TEXT,
+  poster TEXT,
+  seasons TEXT,
+  is4k INTEGER NOT NULL DEFAULT 0,
+  status TEXT,
+  source TEXT NOT NULL DEFAULT 'site',
+  ended TEXT,
+  ended_at INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS request_log_req ON request_log (seerr_request) WHERE seerr_request IS NOT NULL;
+CREATE INDEX IF NOT EXISTS request_log_at ON request_log (at);
 """
 
 # Seerr's own numbers (server/constants/media.ts, server/lib/permissions.ts)
@@ -199,6 +222,61 @@ class Requests:
 
     def links(self) -> list[dict]:
         return [dict(r) for r in self.store.db.execute("SELECT plex_id, seerr_id, how, created FROM seerr_links ORDER BY created DESC")]
+
+    # ---------- request log: every request made through this site, for admins ----------
+    def log_request(self, principal, seerr_user: int | None, seerr_request: int | None, media_type: str, tmdb_id: int,
+                    info: dict, seasons: list | None, is4k: bool, status: str | None, *, at: int | None = None, source: str = "site") -> None:
+        with self.store.lock:
+            self.store.db.execute(
+                "INSERT OR IGNORE INTO request_log (at, who_kind, who_id, who_name, who_email, seerr_user, seerr_request, media_type, tmdb_id, "
+                "title, year, poster, seasons, is4k, status, source) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (int(at or time.time()), principal.kind, str(principal.subject), principal.name, principal.email, seerr_user, seerr_request,
+                 media_type, int(tmdb_id), info.get("title"), info.get("year"), info.get("poster"),
+                 ",".join(str(n) for n in seasons) if isinstance(seasons, list) else None, 1 if is4k else 0, status, source))
+            self.store.db.commit()
+
+    def log_end(self, seerr_request: int, what: str) -> None:
+        """Mark a logged request canceled (pending, by its owner) or removed (failed, cleared from the list)."""
+        with self.store.lock:
+            self.store.db.execute("UPDATE request_log SET ended = ?, ended_at = ? WHERE seerr_request = ? AND ended IS NULL",
+                                  (what, int(time.time()), int(seerr_request)))
+            self.store.db.commit()
+
+    def log_rows(self) -> list[dict]:
+        return [dict(r) for r in self.store.db.execute("SELECT * FROM request_log ORDER BY at DESC, id DESC")]
+
+    def log_counts(self, now: float | None = None) -> dict:
+        now = now or time.time()
+        db = self.store.db
+        one = lambda q, *a: db.execute(q, a).fetchone()[0]
+        return {"total": one("SELECT COUNT(*) FROM request_log"),
+                "day": one("SELECT COUNT(*) FROM request_log WHERE at >= ?", int(now - 86400)),
+                "week": one("SELECT COUNT(*) FROM request_log WHERE at >= ?", int(now - 7 * 86400)),
+                "people": one("SELECT COUNT(DISTINCT who_kind || ':' || who_id) FROM request_log")}
+
+    async def title_of(self, kind: str, tmdb: int) -> dict:
+        try:
+            d = await self.get(f"/{'movie' if kind == 'movie' else 'tv'}/{int(tmdb)}", ttl=6 * 3600)
+        except SeerrError:
+            return {"title": None, "year": "", "poster": None}
+        when = d.get("releaseDate") or d.get("firstAirDate") or ""
+        return {"title": d.get("title") or d.get("name"), "year": when[:4], "poster": d.get("posterPath")}
+
+    async def all_requests(self, max_pages: int = 30) -> dict[int, dict]:
+        """Every request Seerr has, by id, as its administrator (cached a minute): the current state of logged requests."""
+        async def fetch():
+            out: dict[int, dict] = {}
+            for page in range(max_pages):
+                res = await self.client().call("GET", "/request", params={"take": 100, "skip": page * 100, "filter": "all", "sort": "added"})
+                rows = (res or {}).get("results") or []
+                for q in rows:
+                    if q.get("id") is not None:
+                        out[int(q["id"])] = q
+                pages = ((res or {}).get("pageInfo") or {}).get("pages") or 1
+                if not rows or page + 1 >= pages:
+                    break
+            return out
+        return await self.cached("all-requests", 60, fetch)
 
     async def _find(self, email: str | None, username: str | None) -> int | None:
         c = self.client()

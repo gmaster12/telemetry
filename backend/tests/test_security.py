@@ -35,7 +35,7 @@ def signed_in(M, plex_id, email, sections=None):
 
 ADMIN_ONLY_GET = ["/api/users", "/api/users/2002", "/api/users/2002/history", "/api/settings", "/api/settings/billing",
                   "/api/settings/billing/unmatched", "/api/settings/access", "/api/settings/summary", "/api/settings/requests",
-                  "/api/status"]
+                  "/api/settings/requests/log", "/api/settings/requests/log.csv", "/api/status"]
 
 
 def test_viewers_get_403_from_every_admin_endpoint(app):
@@ -46,6 +46,7 @@ def test_viewers_get_403_from_every_admin_endpoint(app):
     assert v.post("/api/settings/admins", json={"username": "evil", "password": "x" * 20}, headers=h).status_code == 403
     assert v.put("/api/settings/users/2001", json={"sections": ["streams"], "disabled": False}, headers=h).status_code == 403
     assert v.put("/api/settings/access/defaults", json={"sections": []}, headers=h).status_code == 403
+    assert v.post("/api/settings/requests/log/import", headers=h).status_code == 403
     assert v.get("/api/me").json()["role"] == "viewer"
 
 

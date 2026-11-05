@@ -149,6 +149,16 @@ files to add servers. Keep it that way.
   person's OWN FAILED request the dashboard retries (`POST /request/{id}/retry`) or removes
   (`DELETE /request/{id}?failed=true`) with its own key after `own_failed` checks owner and status.
   Glenn chose not to connect Radarr and Sonarr, so there is no "last searched" time.
+- Request log (Settings, Request log, admins only; `app/request_log.py`, `openLog`, `loadLog`, `paintLog` in `settings.js`): every
+  request made through the site is saved in `request_log` when it is made (`make_request` calls `log_request`: who
+  (Plex id, name, email, or an admin login), title, year, poster, seasons, 4K, time); canceling or removing a failed one
+  marks it `canceled` / `removed`. The state now comes from Seerr's full request list (`all_requests`, as Seerr's
+  admin, cached 60 s): Waiting for approval, Approved (waiting for a download), Downloading, Partly available,
+  Available, Declined, Failed, No longer in Seerr, or Unknown when Seerr is not answering (the log still shows).
+  Grouped by local day, with search (person, username, email, title), Movies/Series, status chips with counts,
+  Show more (50 a page) and Download CSV (`/api/settings/requests/log.csv?tz=`, in the admin's time zone).
+  "Import earlier requests" (`import_earlier`) brings in requests by people linked to Seerr made since they were
+  linked, marked Imported (Seerr does not record where a request came from). A Settings home card shows counts.
 - A red floating "Report issue" button (`.rq-report`, Glenn's pick, option 2) on every Requests page opens
   the title picker; the list tab is "Reported issues".
 - `requests` is an access section, on for everyone by default (a one-time
@@ -223,7 +233,7 @@ Before loading datasets the shim calls `GET /api/me` (401 sends the browser to
 | Sign in | `POST /api/auth/plex/start`, `GET /api/auth/plex/check/{pin}`, `POST /api/auth/local`, `POST /api/auth/logout` | anyone |
 | Me | `GET /api/me`, `GET /api/me/history?before=` (`history` section), `GET /api/me/subscription` (always, own only) | signed in |
 | Users | `GET /api/users?q=&server=` (username, name or email; returns each person's `servers` and the monitored server names), `GET /api/users/{id}`, `GET /api/users/{id}/history` | admin |
-| Settings | everything under `/api/settings`, including `summary` (the Settings home), `billing` (key, `sync`, `unmatched`, `links`), `plex/link`, `plex/accounts/{id}` (unlink), `plex/discover?account=`, `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
+| Settings | everything under `/api/settings`, including `summary` (the Settings home), `requests/log` (+ `.csv`, `/import`), `billing` (key, `sync`, `unmatched`, `links`), `plex/link`, `plex/accounts/{id}` (unlink), `plex/discover?account=`, `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
 
 Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie
 (`gst_session`, 30 days); only their SHA-256 is stored. A Plex sign-in PIN can

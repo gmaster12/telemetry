@@ -147,6 +147,7 @@
     alerts: { title: 'Alerts', scope: 'all', lead: 'When a server counts as running hot. A hot server turns amber on the capacity rings and shows up under Alerts.' },
     access: { title: 'Access', scope: 'all', lead: 'Who can sign in and what each person can see. Anyone you share a Plex server with can sign in with Plex.' },
     billing: { title: 'Billing', scope: 'all', lead: 'Shows each person their own Stripe subscription. The key is read-only: nothing is ever charged or changed from here.' },
+    reqlog: { title: 'Request log', scope: 'all', lead: 'Every movie and series requested through this site: who asked, when, and where it stands in Seerr now.' },
     requests: { title: 'Requests', scope: 'all', lead: 'Connects your Seerr so people can find movies and series and request them here, without signing in to Seerr. Each person acts as their own Seerr account, so its permissions, limits and approvals still apply.' }
   };
   var summary = null;
@@ -185,6 +186,7 @@
     } else if (t === 'access') loadAccess();
     else if (t === 'billing') loadBilling();
     else if (t === 'requests') loadRequests();
+    else if (t === 'reqlog') openLog(changed);
     else if (t !== 'display') loadState();
     if (window.sdRenderPreviews) window.sdRenderPreviews();
   }
@@ -324,6 +326,12 @@
     cards.push(homeCard('requests', { scope: 'all', what: rq.connected ? 'People find movies and series and request them here, through your Seerr.' : 'Optional. Connect your Seerr so people can request from this site.',
       status: !rq.connected ? ['neutral', 'Not connected'] : rq.error ? ['danger', 'Seerr not answering'] : rq.pending ? ['warning', rq.pending + ' waiting'] : ['success', 'Connected'],
       facts: rq.connected ? [[rq.pending == null ? '?' : rq.pending, 'waiting for approval'], [rq.links, rq.links === 1 ? 'person linked' : 'people linked']] : [] }));
+    var lgc = rq.log || {};
+    if (rq.connected || lgc.total) {
+      cards.push(homeCard('reqlog', { scope: 'all', what: 'Every request made through this site, who made it and when, and its status now.',
+        status: lgc.total ? ['success', lgc.day ? lgc.day + ' in the last 24 h' : 'None in the last 24 h'] : ['neutral', 'Nothing requested yet'],
+        facts: [[lgc.week || 0, 'last 7 days'], [lgc.total || 0, 'all time'], [lgc.people || 0, lgc.people === 1 ? 'person' : 'people']] }));
+    }
     box.replaceChildren(el('div', { class: 'st-homegrid' }, cards));
     if (window.sdRenderPreviews) window.sdRenderPreviews();
   }
@@ -1170,6 +1178,7 @@
             }).catch(function (e) { setMsg('rq', 'error', e.message); }));
           } }),
           el('a', { class: 'st-btn', href: '#/requests', text: 'Open Requests', onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } }),
+          el('button', { type: 'button', class: 'st-btn', text: 'Request log', onclick: function () { go('reqlog'); } }),
           el('span', { class: 'st-spacer' }),
           el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Change', onclick: function () { rqEditing = true; render(); } }),
           el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Disconnect', onclick: function () {
@@ -1224,9 +1233,157 @@
       incomplete_expired: 'Expired', paused: 'Paused' }[st] || st;
   }
 
+  // ---------- Request log: every request made through this site (admins) ----------
+  var LOG_GROUPS = [['all', 'All'], ['waiting', 'Waiting for approval'], ['approved', 'Approved'], ['available', 'Available'],
+    ['problem', 'Declined or failed'], ['ended', 'Canceled or removed']];
+  var lg = { q: '', kind: '', group: 'all', page: 1, rows: [], data: null, busy: false, seq: 0, msg: null, timer: 0, ui: null };
+  function logQuery() {
+    return 'q=' + encodeURIComponent(lg.q) + '&kind=' + encodeURIComponent(lg.kind) + '&group=' + encodeURIComponent(lg.group);
+  }
+  function openLog(fresh) {
+    var pane = document.getElementById('st-pane-reqlog');
+    if (!pane) return;
+    if (fresh || !lg.ui) buildLog(pane);
+    loadLog(false);
+  }
+  function loadLog(more) {
+    if (!isAdmin()) return Promise.resolve();
+    var seq = ++lg.seq;
+    lg.busy = true;
+    paintLog();
+    return api('GET', '/api/settings/requests/log?' + logQuery() + '&page=' + (more ? lg.page + 1 : 1)).then(function (d) {
+      if (seq !== lg.seq) return;
+      lg.data = d; lg.page = d.page; lg.rows = more ? lg.rows.concat(d.rows) : d.rows;
+      if (lg.msg && lg.msg.kind === 'error') lg.msg = null;
+    }).catch(function (e) { if (seq === lg.seq) lg.msg = { kind: 'error', text: e.message }; })
+      .then(function () { if (seq === lg.seq) { lg.busy = false; paintLog(); } });
+  }
+  function buildLog(pane) {
+    var search = el('input', { type: 'search', class: 'st-input st-log__search', id: 'lg-q', placeholder: 'Search by person, email or title',
+      'aria-label': 'Search the request log', value: lg.q, oninput: function () {
+        clearTimeout(lg.timer);
+        lg.timer = setTimeout(function () { lg.q = search.value.trim(); loadLog(false); }, 250);
+      } });
+    var kinds = el('div', { class: 'st-seg', role: 'group', 'aria-label': 'Type' }, [['', 'All'], ['movie', 'Movies'], ['tv', 'Series']].map(function (k) {
+      return el('button', { type: 'button', 'data-kind': k[0], 'aria-pressed': lg.kind === k[0] ? 'true' : 'false', text: k[1], onclick: function () {
+        lg.kind = k[0];
+        kinds.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.kind === lg.kind ? 'true' : 'false'); });
+        loadLog(false);
+      } });
+    }));
+    var ui = {
+      facts: el('dl', { class: 'st-facts st-log__facts' }),
+      csv: el('a', { class: 'st-btn', download: '', text: 'Download CSV' }),
+      imp: el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Import earlier requests', onclick: importLog }),
+      chips: el('div', { class: 'st-log__chips', role: 'group', 'aria-label': 'Status' }),
+      msg: el('div', { class: 'st-log__msg' }),
+      list: el('ol', { class: 'st-log', 'aria-live': 'polite', 'aria-busy': 'false' }),
+      more: el('button', { type: 'button', class: 'st-btn st-log__more', text: 'Show more', onclick: function () { loadLog(true); } })
+    };
+    if (window.sdIcon) ui.csv.prepend(window.sdIcon('down', 16));
+    lg.ui = ui;
+    pane.replaceChildren(
+      el('section', { class: 'st-section st-log__top' },
+        el('div', { class: 'st-row' }, ui.facts, el('span', { class: 'st-spacer' }), ui.imp, ui.csv),
+        el('div', { class: 'st-log__tools' }, search, kinds),
+        ui.chips),
+      ui.msg,
+      el('section', { class: 'st-section st-log__box' }, ui.list, ui.more));
+  }
+  function importLog() {
+    var b = lg.ui && lg.ui.imp;
+    if (b) { b.disabled = true; b.textContent = 'Importing…'; }
+    api('POST', '/api/settings/requests/log/import').then(function (r) {
+      lg.msg = { kind: 'ok', text: r.added ? 'Added ' + r.added + (r.added === 1 ? ' earlier request.' : ' earlier requests.') + ' They are marked Imported. Seerr does not record where a request came from, so a few may have been made in Seerr itself.'
+        : 'Nothing new to add. Every earlier request from people linked to Seerr is already here.' };
+      return loadLog(false);
+    }).catch(function (e) { lg.msg = { kind: 'error', text: e.message }; paintLog(); })
+      .then(function () { if (b) { b.disabled = false; b.textContent = 'Import earlier requests'; } });
+  }
+  function logDay(ts) {
+    var d = new Date(ts * 1000), today = new Date();
+    var key = d.toDateString();
+    var y = new Date(today); y.setDate(today.getDate() - 1);
+    var long = d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+    return { key: key, text: key === today.toDateString() ? 'Today, ' + long : key === y.toDateString() ? 'Yesterday, ' + long : long };
+  }
+  function seasonText(list) {
+    if (!list || !list.length) return null;
+    var run = list.every(function (n, i) { return i === 0 || n === list[i - 1] + 1; });
+    if (list.length === 1) return 'Season ' + list[0];
+    return 'Seasons ' + (run && list.length > 2 ? list[0] + ' to ' + list[list.length - 1] : list.join(', '));
+  }
+  function logRow(r, base) {
+    var when = new Date(r.at * 1000);
+    var poster = el('span', { class: 'st-log__poster', 'aria-hidden': 'true' });
+    if (r.poster && base) { var im = new Image(); im.onload = function () { poster.style.backgroundImage = 'url("' + im.src + '")'; }; im.src = base + r.poster; }
+    var href = '#/requests/' + (r.kind === 'movie' ? 'movie/' : 'series/') + r.tmdb;
+    var bits = [r.year, r.kind === 'movie' ? 'Movie' : 'Series', seasonText(r.seasons)].filter(Boolean).join(' · ');
+    var sub = [r.decided && r.decided.by ? (r.state === 'declined' ? 'Declined by ' : 'Approved by ') + r.decided.by : null,
+      r.hint, r.ended_at ? ago(r.ended_at) : null].filter(Boolean).join(' · ') || null;
+    return el('li', { class: 'st-log__row' },
+      poster,
+      el('div', { class: 'st-log__what' },
+        el('a', { class: 'st-log__title', href: href, text: r.title, onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } }),
+        el('span', { class: 'st-log__meta' }, bits, r.is4k ? el('span', { class: 'st-tag', text: '4K' }) : null, r.source === 'imported' ? el('span', { class: 'st-tag', text: 'Imported', title: 'Brought in from Seerr; logged before the request log existed.' }) : null)),
+      el('div', { class: 'st-log__who' },
+        el('button', { type: 'button', class: 'st-log__name', text: r.who.name, title: 'Show only ' + r.who.name + '’s requests', onclick: function () {
+          var q = r.who.username || r.who.email || r.who.name;
+          var box = document.getElementById('lg-q'); if (box) box.value = q;
+          lg.q = q; loadLog(false);
+        } }),
+        el('span', { class: 'st-log__meta', text: r.who.admin_login ? 'Admin login' : [r.who.username ? '@' + r.who.username : null, r.who.email].filter(Boolean).join(' · ') })),
+      el('time', { class: 'st-log__when', datetime: when.toISOString(), title: when.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) },
+        el('b', { text: when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) }),
+        el('span', { class: 'st-log__meta st-log__date', text: when.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) })),
+      el('div', { class: 'st-log__state' }, badgeEl(r.tone, r.label), sub ? el('span', { class: 'st-log__meta', text: sub }) : null));
+  }
+  function paintLog() {
+    var ui = lg.ui, d = lg.data;
+    if (!ui) return;
+    ui.list.setAttribute('aria-busy', lg.busy ? 'true' : 'false');
+    ui.csv.href = '/api/settings/requests/log.csv?' + logQuery() + '&tz=' + (-new Date().getTimezoneOffset());
+    var t = (d && d.totals) || {};
+    ui.facts.replaceChildren.apply(ui.facts, [[t.day || 0, 'last 24 hours'], [t.week || 0, 'last 7 days'], [t.total || 0, 'all time'], [t.people || 0, t.people === 1 ? 'person' : 'people']].map(function (f) {
+      return el('div', null, el('dt', { text: f[1] }), el('dd', { text: String(f[0]) }));
+    }));
+    var c = (d && d.counts) || {};
+    ui.chips.replaceChildren.apply(ui.chips, LOG_GROUPS.map(function (g) {
+      return el('button', { type: 'button', class: 'st-log__chip', 'aria-pressed': lg.group === g[0] ? 'true' : 'false', onclick: function () { lg.group = g[0]; loadLog(false); } },
+        g[1], el('b', { text: String(c[g[0]] || 0) }));
+    }));
+    var notes = [];
+    if (lg.msg) notes.push(el('p', { class: 'st-msg st-msg--' + lg.msg.kind, role: lg.msg.kind === 'error' ? 'alert' : 'status' }, lg.msg.kind === 'error' ? el('b', { text: 'Error: ' }) : null, lg.msg.text));
+    if (d && d.error) notes.push(el('p', { class: 'st-msg st-msg--error', role: 'alert' }, el('b', { text: 'Seerr: ' }), d.error + ' The log still shows who asked for what; the status shows Unknown until Seerr answers.'));
+    ui.msg.replaceChildren.apply(ui.msg, notes);
+    if (!d) { ui.list.replaceChildren(el('li', { class: 'st-note st-log__empty', text: 'Loading…' })); ui.more.hidden = true; return; }
+    if (!lg.rows.length) {
+      var filtered = lg.q || lg.kind || lg.group !== 'all';
+      ui.list.replaceChildren(el('li', { class: 'st-log__empty' },
+        el('b', { text: filtered ? 'No requests match.' : 'No requests yet.' }),
+        el('span', { class: 'st-note', text: filtered ? 'Try another search or status.' : 'Requests made on this site show up here as they are made. Requests from before the log existed can be brought in with Import earlier requests.' })));
+      ui.more.hidden = true;
+      return;
+    }
+    var out = [], last = null;
+    lg.rows.forEach(function (r) {
+      var day = logDay(r.at);
+      if (day.key !== last) {
+        last = day.key;
+        var n = lg.rows.filter(function (x) { return logDay(x.at).key === day.key; }).length;
+        out.push(el('li', { class: 'st-log__day' }, el('span', { text: day.text }), el('span', { class: 'st-log__meta', text: n + (n === 1 ? ' request' : ' requests') })));
+      }
+      out.push(logRow(r, d.image_base));
+    });
+    ui.list.replaceChildren.apply(ui.list, out);
+    ui.more.hidden = !d.more;
+    ui.more.disabled = lg.busy;
+    ui.more.textContent = lg.busy ? 'Loading…' : 'Show more (' + (d.matched - lg.rows.length) + ' left)';
+  }
+
   // ---------- render ----------
   function render() {
-    if (tab === 'display' || tab === 'home') return;
+    if (tab === 'display' || tab === 'home' || tab === 'reqlog') return;
     var pane = document.getElementById('st-pane-' + tab);
     if (!pane) return;
     var active = document.activeElement && pane.contains(document.activeElement) ? document.activeElement.id : null;

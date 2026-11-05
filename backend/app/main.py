@@ -25,7 +25,8 @@ from .billing import StripeClient
 from .netdata import NetdataClient
 from .plex import PlexAccount, PlexClient
 from .poller import Poller
-from .requests_api import make_router
+from . import request_log
+from .requests_api import IMAGES, make_router
 from .secrets import SecretBox
 from .seerr import Requests, SeerrError
 from .store import Directory, Store
@@ -426,14 +427,14 @@ async def settings_summary():
 
 async def requests_summary() -> dict:
     if not seerr.configured():
-        return {"connected": False, "error": None, "pending": None, "links": 0}
+        return {"connected": False, "error": None, "pending": None, "links": 0, "log": seerr.log_counts()}
     pending = None
     try:
         pending = (await asyncio.wait_for(seerr.get("/request/count", ttl=60), 6) or {}).get("pending")
         seerr.last_error = None
     except (SeerrError, asyncio.TimeoutError) as e:
         seerr.last_error = getattr(e, "message", None) or "Seerr did not answer in time."
-    return {"connected": True, "error": seerr.last_error, "pending": pending, "links": len(seerr.links())}
+    return {"connected": True, "error": seerr.last_error, "pending": pending, "links": len(seerr.links()), "log": seerr.log_counts()}
 
 
 @app.post("/api/settings/servers/test")
@@ -1194,6 +1195,34 @@ def requests_links():
 def requests_unlink(plex_id: str):
     seerr.drop_link(plex_id)
     return {"ok": True}
+
+
+@app.get("/api/settings/requests/log")
+async def requests_log(q: str = "", kind: str = "", group: str = "all", page: int = 1, size: int = 50):
+    """Every request made through this site: who, what, when, and where it stands in Seerr now."""
+    rows, error = await request_log.build(seerr, directory)
+    base = [r for r in rows if request_log.matches(r, q.strip(), kind, "all")]
+    hit = [r for r in base if request_log.matches(r, "", "", group)]
+    return {**request_log.page_of(hit, page, max(10, min(size, 200))), "counts": request_log.counts(base), "error": error,
+            "totals": seerr.log_counts(), "connected": seerr.configured(), "image_base": IMAGES + "w92"}
+
+
+@app.get("/api/settings/requests/log.csv")
+async def requests_log_csv(q: str = "", kind: str = "", group: str = "all", tz: int = 0):
+    rows, _ = await request_log.build(seerr, directory)
+    rows = [r for r in rows if request_log.matches(r, q.strip(), kind, group)]
+    tzinfo = dt.timezone(dt.timedelta(minutes=max(-14 * 60, min(14 * 60, tz))))
+    name = "requests-" + dt.datetime.now(tzinfo).strftime("%Y-%m-%d") + ".csv"
+    return Response(request_log.to_csv(rows, tzinfo), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"})
+
+
+@app.post("/api/settings/requests/log/import")
+async def requests_log_import():
+    try:
+        return await request_log.import_earlier(seerr, directory, seerr.title_of)
+    except SeerrError as e:
+        raise HTTPException(e.status if 400 <= e.status < 600 else 502, e.message)
 
 
 app.include_router(make_router(seerr, directory, need))
