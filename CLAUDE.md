@@ -46,6 +46,9 @@ files to add servers. Keep it that way.
   `billing_links` (Stripe email -> Plex id, permanent, set in Settings,
   Billing) wins; otherwise the Stripe email equals the Plex email
   (case-insensitive). PayPal is not built yet (Glenn will configure it later).
+  Settings, Billing, "Not matched" leaves out customers whose every subscription is canceled or expired
+  (`ended_customers`; Glenn does not need them); customers with no subscription yet still show. The count
+  (`counts()["unmatched"]`, also on the home card and "needs a look") matches, and a note says how many were left out.
 - Only the Plex account in `ADMIN_PLEX_EMAIL` (cluster@mail.com) is a Plex
   administrator. Never add another way for a Plex account to become admin.
   Extra admins are local logins (Settings, Access, or `app.tools.admin`).

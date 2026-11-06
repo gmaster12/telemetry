@@ -279,9 +279,22 @@ class Billing:
                 best[pid] = r["status"]
         return best
 
+    ENDED = ("canceled", "incomplete_expired")
+
+    def ended_customers(self) -> set[str]:
+        """Customers whose every subscription is canceled or expired (Glenn: not worth matching). A customer with no
+        subscription yet (a fresh signup) is not in here."""
+        live, seen = set(), set()
+        for r in self.db.execute("SELECT customer, status FROM stripe_subscriptions"):
+            seen.add(r["customer"])
+            if r["status"] not in self.ENDED:
+                live.add(r["customer"])
+        return seen - live
+
     def unmatched(self, q: str = "", limit: int = 100) -> list[dict]:
-        """Stripe customers with an email that no Plex user has, and no manual link."""
+        """Stripe customers with an email that no Plex user has, and no manual link. Canceled and expired ones are left out."""
         owner = self.owner_by_email()
+        ended = self.ended_customers()
         like = f"%{q.strip().lower()}%"
         rows = self.db.execute(
             "SELECT c.id, c.email, c.name, c.created, "
@@ -289,13 +302,17 @@ class Billing:
             " (SELECT s.plan FROM stripe_subscriptions s WHERE s.customer = c.id ORDER BY s.created DESC LIMIT 1) AS plan "
             "FROM stripe_customers c WHERE c.email IS NOT NULL AND (? = '%%' OR c.email LIKE ? OR lower(c.name) LIKE ?) "
             "ORDER BY c.created DESC", (like, like, like)).fetchall()
-        out = [dict(r) for r in rows if r["email"] not in owner]
+        out = [dict(r) for r in rows if r["email"] not in owner and r["id"] not in ended]
         return out[:limit]
 
     def counts(self) -> dict:
         owner = self.owner_by_email()
-        emails = [r["email"] for r in self.db.execute("SELECT email FROM stripe_customers WHERE email IS NOT NULL")]
+        ended = self.ended_customers()
+        rows = self.db.execute("SELECT id, email FROM stripe_customers WHERE email IS NOT NULL").fetchall()
+        emails = [r["email"] for r in rows]
         matched = sum(1 for e in emails if e in owner)
-        return {"customers": len(emails), "matched": matched, "unmatched": len(emails) - matched,
+        loose = [r for r in rows if r["email"] not in owner]
+        hidden = sum(1 for r in loose if r["id"] in ended)
+        return {"customers": len(emails), "matched": matched, "unmatched": len(loose) - hidden, "unmatched_ended": hidden,
                 "links": self.db.execute("SELECT COUNT(*) AS n FROM billing_links").fetchone()["n"],
                 "subscriptions": self.db.execute("SELECT COUNT(*) AS n FROM stripe_subscriptions").fetchone()["n"]}

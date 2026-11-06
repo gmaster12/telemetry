@@ -1108,6 +1108,7 @@
     var manualEmail = input({ type: 'email', placeholder: 'payer@example.com' }, 'bl-manual');
     pane.appendChild(el('section', { class: 'st-section' },
       el('h3', { text: 'Not matched to a Plex user (' + (c.unmatched || 0) + ')' }),
+      c.unmatched_ended ? el('p', { class: 'st-note', text: c.unmatched_ended + (c.unmatched_ended === 1 ? ' canceled or expired customer is' : ' canceled or expired customers are') + ' not shown.' }) : null,
       el('p', { class: 'st-note', text: 'These Stripe customers pay with an email no Plex account uses. Link each one to the right Plex user.' }),
       linkBox,
       field('Search', q),

@@ -68,12 +68,13 @@ def test_matches_by_email_case_insensitive(env):
 def test_unmatched_until_linked_then_permanent(env):
     _, _, b = env
     assert b.summary("2003")["status"] == "none"
-    assert {r["email"] for r in b.unmatched()} == {"wren.pays@gmail.com", "nobody@example.net"}
+    # nobody@example.net only has an expired subscription, so it is left out (Glenn: no expired or canceled ones)
+    assert {r["email"] for r in b.unmatched()} == {"wren.pays@gmail.com"}
     b.link("Wren.Pays@Gmail.com", "2003")
     s = b.summary("2003")
     assert s["status"] == "active" and s["linked"] and s["subscriptions"][0]["plan"] == "Plus"
     assert s["last_payment"]["amount"] == 800  # charge with no customer, matched by its billing email
-    assert {r["email"] for r in b.unmatched()} == {"nobody@example.net"}
+    assert {r["email"] for r in b.unmatched()} == set()
     # a new Stripe sync does not undo the link
     b.save_snapshot({"customers": [{"id": "cus_w", "email": "wren.pays@gmail.com", "created": NOW}], "subscriptions": [], "products": {}, "charges": []})
     assert b.summary("2003")["linked"] is True and b.summary("2003")["emails"] == ["wren.pays@gmail.com", "wren@plex-only.org"]
@@ -91,7 +92,7 @@ def test_status_map_flags(env):
     m = b.status_map()
     assert m == {"2001": "active", "2002": "past_due"}
     c = b.counts()
-    assert c["customers"] == 4 and c["matched"] == 2 and c["unmatched"] == 2
+    assert c["customers"] == 4 and c["matched"] == 2 and c["unmatched"] == 1 and c["unmatched_ended"] == 1
 
 
 def test_cancel_at_period_end_and_canceled_only(env):
@@ -102,3 +103,16 @@ def test_cancel_at_period_end_and_canceled_only(env):
                      "products": {}, "charges": []})
     s = b.summary("2004")
     assert s["status"] == "canceled" and [x["id"] for x in s["subscriptions"]] == ["sub_l1"]
+
+
+def test_canceled_only_customers_are_not_listed_but_new_signups_are(env):
+    _, _, b = env
+    b.save_snapshot({"customers": [{"id": "cus_c", "email": "gone@example.com", "created": NOW},
+                                   {"id": "cus_n", "email": "new@example.com", "created": NOW},
+                                   {"id": "cus_b", "email": "back@example.com", "created": NOW}],
+                     "subscriptions": [sub("sub_c", "cus_c", "canceled"),
+                                       sub("sub_b_old", "cus_b", "canceled", created=NOW - 9000), sub("sub_b", "cus_b", "active")],
+                     "products": {}, "charges": []})
+    # canceled only: hidden; no subscription yet: shown; canceled once but active again: shown
+    assert {r["email"] for r in b.unmatched()} == {"new@example.com", "back@example.com"}
+    assert b.counts()["unmatched"] == 2 and b.counts()["unmatched_ended"] == 1
