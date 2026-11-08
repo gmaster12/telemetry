@@ -6,7 +6,12 @@
    around the dashboard. The media site sends a few messages (checked against its origin):
      ready        it loaded
      immersive    a reader opened or closed: hide or show the dashboard menu for a full-screen page
-     signed-out   its session ended: get a fresh pass and reload the frame */
+     signed-out   its session ended: get a fresh pass and reload the frame
+
+   We send the media site one message, so its own palette matches ours instead of a fixed light look:
+     { source: 'greystar-telemetry', type: 'look', look: 'light' | 'dark' }
+   sent once the frame says it is ready, and again whenever Telemetry's own look changes (its data-theme
+   attribute, or the OS scheme when nothing overrides it — see telemetryLook() below). */
 (function () {
   'use strict';
 
@@ -20,6 +25,25 @@
   var lastDashHash = '';
   var lastReload = 0;
   var me = window.gsMe || null;
+
+  function telemetryLook() {
+    var explicit = document.documentElement.getAttribute('data-theme');
+    if (explicit === 'light' || explicit === 'dark') return explicit;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+
+  function sendLook() {
+    if (!frame || !frame.contentWindow || !cfg || !cfg.origin) return;
+    try { frame.contentWindow.postMessage({ source: 'greystar-telemetry', type: 'look', look: telemetryLook() }, cfg.origin); }
+    catch (e) { /* the frame went away */ }
+  }
+  if (window.matchMedia) {
+    var schemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    var onSchemeChange = function () { sendLook(); };
+    if (schemeQuery.addEventListener) schemeQuery.addEventListener('change', onSchemeChange);
+    else if (schemeQuery.addListener) schemeQuery.addListener(onSchemeChange); // older Safari
+  }
+  new MutationObserver(sendLook).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 
   function el(tag, props) {
     var e = document.createElement(tag);
@@ -131,7 +155,7 @@
     if (!cfg || !cfg.origin || e.origin !== cfg.origin || !frame || e.source !== frame.contentWindow) return;
     var d = e.data;
     if (!d || d.source !== 'greystar-media') return;
-    if (d.type === 'ready') setLoading(false);
+    if (d.type === 'ready') { setLoading(false); sendLook(); }
     else if (d.type === 'immersive') {
       if (d.on && root.dataset.page === 'books') root.dataset.immersive = '1'; else delete root.dataset.immersive;
     } else if (d.type === 'signed-out') {

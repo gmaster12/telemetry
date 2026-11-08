@@ -9,8 +9,8 @@
   height: calc(100svh - 32px);
   border: 0;
   border-radius: var(--radius-xl, 28px);
-  background: #e4e4e4;
-  color-scheme: light;
+  background: var(--surface-page, #e4e4e4);
+  color-scheme: light dark;
 }
 .bk-loading {
   position: absolute;
@@ -56,3 +56,11 @@
 @media (max-width: 760px) {
   .bk-frame { height: calc(100svh - 120px); border-radius: var(--radius-lg, 24px); }
 }
+
+/* No visible outer scrollbar on the Books & comics page: the frame already fits the
+   viewport (height: calc(100svh - 32px) above), so a second scrollbar around it is just
+   visual noise, not something the page needs to actually scroll. */
+html:has(.gs-app[data-page="books"]) { scrollbar-width: none; -ms-overflow-style: none; }
+html:has(.gs-app[data-page="books"])::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.gs-app[data-page="books"] { scrollbar-width: none; }
+.gs-app[data-page="books"]::-webkit-scrollbar { display: none; width: 0; height: 0; }
