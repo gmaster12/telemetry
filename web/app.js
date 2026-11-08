@@ -104,6 +104,7 @@
     logout: ['M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4', 'm16 17 5-5-5-5', 'M21 12H9'],
     down: ['m6 9 6 6 6-6'],
     film: ['M3 4h18v16H3z', 'M7 4v16', 'M17 4v16', 'M3 8h4', 'M3 12h4', 'M3 16h4', 'M17 8h4', 'M17 12h4', 'M17 16h4'],
+    book: ['M4 5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2z', 'M4 20a2 2 0 0 0 2 2h13v-4', 'M9 7h6'],
     plus: ['M12 5v14', 'M5 12h14'],
     check: ['m5 12 5 5 9-10'],
     bookmark: ['M6 3h12v18l-6-4-6 4z'],
@@ -200,9 +201,19 @@
     { id: 'streams-card', label: 'Streams', icon: 'play', ok: () => can('streams') },
     { id: 'people-card', label: 'Users', icon: 'users', ok: () => isAdmin() },
     { id: 'people-card', label: 'My history', icon: 'history', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') },
-    { id: 'requests', label: 'Requests', icon: 'film', ok: () => can('requests') }
+    { id: 'requests', label: 'Requests', icon: 'film', ok: () => can('requests') },
+    { id: 'books', label: 'Books & comics', icon: 'book', ok: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) }
   ];
   let navActive = 'summary';
+  // Requests and Books & comics are their own pages; leaving one for the other closes it.
+  const PAGES = { requests: () => window.gsRequests, books: () => window.gsBooks };
+  function openPage(id) {
+    Object.keys(PAGES).forEach((k) => { if (k !== id && root.dataset.page === k && PAGES[k]()) PAGES[k]().close(); });
+    if (PAGES[id]()) PAGES[id]().open();
+  }
+  function closePages() {
+    Object.keys(PAGES).forEach((k) => { if (root.dataset.page === k && PAGES[k]()) PAGES[k]().close(); });
+  }
   function renderNav() {
     const nav = document.getElementById('nav');
     nav.replaceChildren();
@@ -214,15 +225,15 @@
     NAV.filter((n) => n.ok()).forEach((n) => {
       const b = el('button', 'sd-navbtn');
       b.type = 'button'; b.title = n.label; b.setAttribute('aria-label', n.label);
-      const onRequests = root.dataset.page === 'requests';
-      const cur = onRequests ? n.id === 'requests' : vh() ? VH_VIEW[n.id] === window.gsHome.view() : navActive === n.id;
+      const page = root.dataset.page;
+      const cur = PAGES[page] ? n.id === page : vh() ? VH_VIEW[n.id] === window.gsHome.view() : navActive === n.id;
       b.setAttribute('aria-current', cur ? 'true' : 'false');
       b.appendChild(icon(n.icon, 22));
       b.addEventListener('click', () => {
-        if (n.id === 'requests') { if (window.gsRequests) window.gsRequests.open(); return; }
+        if (PAGES[n.id]) { openPage(n.id); return; }
+        closePages();
         if (vh() && VH_VIEW[n.id]) { window.gsHome.show(VH_VIEW[n.id]); return; }
         navActive = n.id;
-        if (onRequests && window.gsRequests) window.gsRequests.close();
         renderNav(); requestAnimationFrame(() => goTo(n.id));
       });
       nav.appendChild(b);
@@ -1185,15 +1196,16 @@
     { id: 'alerts', label: 'Alerts', icon: 'bell', link: 'alerts', ok: () => can('streams') && can('servers') },
     { id: 'people', label: 'Users', icon: 'users', link: 'people-card', ok: () => isAdmin() },
     { id: 'people', label: 'History', icon: 'history', link: 'people-card', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') },
-    { id: 'requests', label: 'Requests', icon: 'film', link: 'requests', ok: () => can('requests') }
+    { id: 'requests', label: 'Requests', icon: 'film', link: 'requests', ok: () => can('requests') },
+    { id: 'books', label: 'Books', icon: 'book', link: 'books', ok: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) }
   ];
   const okTabs = () => TABS.filter((t) => t.ok());
   window.sdGoTab = (id) => { if (isMobile()) goTab(id); };
   window.sdSetMtab = (id) => { mtab = id; root.dataset.mtab = id; };
   function goTab(id) {
-    if (id === 'requests') { if (window.gsRequests) window.gsRequests.open(); return; }
+    if (PAGES[id]) { openPage(id); return; }
+    closePages();
     if (vh()) { const v = { home: 'home', streams: 'streams', people: 'history' }[id]; if (v) { mtab = id; root.dataset.mtab = id; window.gsHome.show(v); return; } }
-    if (root.dataset.page === 'requests' && window.gsRequests) window.gsRequests.close();
     mtab = id;
     root.dataset.mtab = id;
     renderAll();
@@ -1208,7 +1220,7 @@
     bar.classList.toggle('is-single', tabs.length < 2);
     tabs.forEach((t) => {
       const b = el('button', 'sd-tab'); b.type = 'button';
-      const curT = root.dataset.page === 'requests' ? t.id === 'requests' : vh() ? ({ home: 'home', streams: 'streams', people: 'history' })[t.id] === window.gsHome.view() : mtab === t.id;
+      const curT = PAGES[root.dataset.page] ? t.id === root.dataset.page : vh() ? ({ home: 'home', streams: 'streams', people: 'history' })[t.id] === window.gsHome.view() : mtab === t.id;
       b.setAttribute('aria-current', curT ? 'true' : 'false');
       b.setAttribute('aria-label', t.label + (t.id === 'alerts' && alertCount ? ', ' + alertCount + ' alerts' : ''));
       b.append(icon(t.icon, 20), el('span', null, t.label));

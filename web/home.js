@@ -80,6 +80,7 @@
   function show(v) {
     if (VIEWS.indexOf(v) < 0) v = 'home';
     if (root.dataset.page === 'requests' && window.gsRequests) window.gsRequests.close();
+    if (root.dataset.page === 'books' && window.gsBooks) window.gsBooks.close();
     root.dataset.vview = v;
     if (window.sdSetMtab) window.sdSetMtab({ home: 'home', streams: 'streams', history: 'people', subscription: 'home' }[v]);
     if (v === 'home') render();

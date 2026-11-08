@@ -34,9 +34,10 @@ SECTIONS = [
     {"key": "viewing", "label": "When people watch", "hint": "Busiest hours of the week"},
     {"key": "history", "label": "My history", "hint": "Their own playback history"},
     {"key": "requests", "label": "Requests", "hint": "Find movies and shows and request them through Seerr"},
+    {"key": "books", "label": "Books & comics", "hint": "Read comics and ebooks, listen to audiobooks and request more, from the Greystar media site"},
 ]
 SECTION_KEYS = [s["key"] for s in SECTIONS]
-DEFAULT_SECTIONS = ["mystreams", "history", "requests"]
+DEFAULT_SECTIONS = ["mystreams", "history", "requests", "books"]
 
 
 def admin_plex_email() -> str | None:
@@ -123,6 +124,10 @@ def add_requests_section(store: Store) -> None:
 
 def add_mystreams_section(store: Store) -> None:
     add_section_once(store, "mystreams", "mystreams_section_added")
+
+
+def add_books_section(store: Store) -> None:
+    add_section_once(store, "books", "books_section_added")
 
 
 def default_sections(store: Store) -> list[str]:
