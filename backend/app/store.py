@@ -232,7 +232,8 @@ class Store:
 
     # ---------- settings ----------
     def get_setting(self, key: str, default: str | None = None) -> str | None:
-        row = self.db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        with self.lock:
+            row = self.db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
         if not row or row["value"] in (None, ""):
             return default
         return self.box.open(row["value"]) if key in SECRET_SETTINGS else row["value"]
