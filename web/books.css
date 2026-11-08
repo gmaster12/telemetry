@@ -1,0 +1,58 @@
+/* Books & comics: the Greystar media site in a frame (books.js). The media site draws its own
+   "Books & comics" title, search and tabs inside the frame, so the dashboard's top bar steps aside. */
+.gs-app[data-page="books"] .sd-content > :not(.sd-settings-dock):not(#books-page):not(.sd-tabbar):not(.sd-sr) { display: none !important; }
+
+.bk { position: relative; min-width: 0; }
+.bk-frame {
+  display: block;
+  width: 100%;
+  height: calc(100svh - 32px);
+  border: 0;
+  border-radius: var(--radius-xl, 28px);
+  background: #e4e4e4;
+  color-scheme: light;
+}
+.bk-loading {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 18px;
+  border-radius: 999px;
+  background: var(--surface-raised, #fff);
+  box-shadow: var(--shadow-soft, 0 2px 10px rgba(22, 20, 31, .08));
+  color: var(--ink, #16141f);
+  font-size: 14px;
+  transform: translateX(-50%);
+}
+.bk-loading[hidden] { display: none; }
+.bk-note {
+  max-width: 520px;
+  margin: 12vh auto 0;
+  padding: var(--space-5, 24px);
+  border-radius: var(--radius-lg, 28px);
+  background: var(--surface-card, #f1f1f1);
+  color: var(--ink, #16141f);
+}
+.bk-note h2 { margin: 0 0 8px; font-size: 24px; font-weight: 400; }
+.bk-note p { margin: 0; color: var(--ink-muted, #55544e); }
+
+/* A reader is open inside the frame: full screen, the dashboard menu hidden. */
+.gs-app[data-page="books"][data-immersive="1"] .sd-nav,
+.gs-app[data-page="books"][data-immersive="1"] .sd-tabbar { display: none !important; }
+.gs-app[data-page="books"][data-immersive="1"] .bk-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  width: 100vw;
+  height: 100svh;
+  border-radius: 0;
+  background: #121119;
+}
+
+@media (max-width: 760px) {
+  .bk-frame { height: calc(100svh - 120px); border-radius: var(--radius-lg, 24px); }
+}

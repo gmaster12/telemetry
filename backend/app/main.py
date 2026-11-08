@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import sample
-from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, add_mystreams_section, add_requests_section, admin_plex_email, check_password, default_sections,
+from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, add_books_section, add_mystreams_section, add_requests_section, admin_plex_email, check_password, default_sections,
                    end_session, hash_password, new_session, password_problem, plex_principal, principal_for, record_failure,
                    set_cookie, throttled, user_sections)
 from .config import DB_PATH, WEB_DIR, ServerCfg, env
@@ -26,6 +26,7 @@ from .netdata import NetdataClient
 from .plex import PlexAccount, PlexClient
 from .poller import Poller
 from . import request_log
+from .media import Media
 from .requests_api import IMAGES, make_router
 from .secrets import SecretBox
 from .seerr import Requests, SeerrError
@@ -39,8 +40,10 @@ store = Store(DB_PATH, box)
 directory = Directory(store)
 poller = Poller(store)
 seerr = Requests(store, poller.http)
+media = Media(store)
 add_requests_section(store)
 add_mystreams_section(store)
+add_books_section(store)
 
 
 def client_id() -> str:
@@ -75,6 +78,12 @@ _IMG_EXTRA = " ".join(sorted({"https://image.tmdb.org", _origin(env("SEERR_IMAGE
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
        f"img-src 'self' data: blob: {_IMG_EXTRA}; media-src 'self' blob:; font-src 'self' data:; connect-src 'self'; "
        "object-src 'none'; frame-src 'none'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+
+
+def csp() -> str:
+    """The page may frame exactly one outside site: the Greystar media site, while Books & comics is on."""
+    origin = media.frame_origin()
+    return CSP.replace("frame-src 'none'", f"frame-src {origin}") if origin else CSP
 PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
 
 
@@ -103,7 +112,7 @@ async def session_auth(request: Request, call_next):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "same-origin")
     resp.headers.setdefault("X-Frame-Options", "DENY")
-    resp.headers.setdefault("Content-Security-Policy", CSP)
+    resp.headers.setdefault("Content-Security-Policy", csp())
     resp.headers.setdefault("Permissions-Policy", PERMISSIONS)
     resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")  # the Plex sign-in opens in a popup
     if path.startswith("/api/"):
@@ -422,6 +431,7 @@ async def settings_summary():
         "billing": {"connected": has_key, "synced_at": poller.billing_synced_at or None, "error": poller.billing_error,
                     "customers": counts.get("customers", 0), "unmatched": counts.get("unmatched", 0)},
         "requests": await requests_summary(),
+        "books": media.settings(),
     }
 
 
@@ -1223,6 +1233,53 @@ async def requests_log_import():
         return await request_log.import_earlier(seerr, directory, seerr.title_of)
     except SeerrError as e:
         raise HTTPException(e.status if 400 <= e.status < 600 else 502, e.message)
+
+
+# ---------- Books & comics (the Greystar media site in a frame) ----------
+@app.get("/api/books/config")
+def books_config(request: Request):
+    p = need(request, "books")
+    return {"enabled": media.enabled(), "origin": media.url() if media.enabled() else None,
+            "plex": p.kind == "plex"}
+
+
+@app.get("/api/books/link")
+def books_link(request: Request, next: str = "/"):
+    """A fresh sign-in address for the frame. Each one works once, for 60 seconds."""
+    p = need(request, "books")
+    if not media.enabled():
+        raise HTTPException(409, "Books & comics is not set up yet.")
+    if p.kind != "plex":
+        raise HTTPException(409, "Books & comics signs you in with your Plex account. Sign in to this site with Plex to use it.")
+    user = directory.get_user(p.subject)
+    if not user:
+        raise HTTPException(404, "Your Plex account is not known here yet. Sign out and sign in again.")
+    return {"url": media.sign_in_url(user, next), "origin": media.url()}
+
+
+class MediaIn(BaseModel):
+    url: str | None = Field(default=None, max_length=300)
+    secret: str | None = Field(default=None, max_length=300)
+    enabled: bool | None = None
+
+
+@app.get("/api/settings/books")
+def get_books_settings():
+    return media.settings()
+
+
+@app.put("/api/settings/books")
+def put_books_settings(body: MediaIn):
+    try:
+        return media.save(body.url, body.secret, body.enabled)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.delete("/api/settings/books")
+def delete_books_settings():
+    media.forget_secret()
+    return media.settings()
 
 
 app.include_router(make_router(seerr, directory, need))

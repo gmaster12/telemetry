@@ -194,6 +194,31 @@ files to add servers. Keep it that way.
   (`SEERR_IMAGE_BASE` overrides for tests). `tests/mock_seerr.py` is a stand-in
   Seerr for tests and local browser checks.
 
+## Books & comics (the Greystar media site in a frame)
+
+- Glenn's media site (https://media.greystarnetworks.com, a Node app on his Windows server, repo
+  gmaster12/media) shows inside the dashboard on `#/books` (`web/books.js`, `web/books.css`,
+  `app/media.py`). Glenn's picks: shown inside the page so people never seem to leave; new people are
+  approved on the media site straight away; everyone can request comics, ebooks and audiobooks, but
+  listening needs the media site's Audiobooks add-on (its "Add Audiobooks to my subscription" button is a
+  placeholder for a Stripe sign-up, not built; this dashboard's Stripe key stays read-only).
+- Sign-in: `GET /api/books/link?next=/path` (`books` section, Plex sign-ins only; local admin logins get
+  409) returns the media site's `/api/sso/telemetry?token=...`. The pass is `v1.<payload>.<sig>` (base64url,
+  HMAC-SHA256 with the shared secret `media_secret`, saved encrypted), payload `{v, sub: plex id, email,
+  username, title, thumb, iat, exp (60 s), nonce, next}`. The media site checks it, uses each nonce once,
+  finds the person by numeric Plex id then Plex email (or makes an approved account) and opens `next`.
+  The secret is made on the media site (Administration, Settings, Telemetry control panel) and pasted in
+  Settings, Books & comics (`/api/settings/books`, write-only). `tests/test_books.py` checks the pass.
+- CSP: `frame-src` names the media site's origin only while Books & comics is on (`csp()` in `main.py`);
+  otherwise `frame-src 'none'` as before. The media site lists this site in its `frame-ancestors`.
+- The frame is made once and only hidden afterwards, so an audiobook keeps playing around the dashboard.
+  Messages from the frame (checked against the media origin and the frame's window): `ready`, `immersive`
+  (a reader opened: `data-immersive` hides the menu and the frame fills the screen), `signed-out` (get a
+  fresh pass, at most every 15 s). The media site in a frame draws its own Books & comics title, search
+  and tabs in this dashboard's look, so the top bar steps aside on `#/books`.
+- `books` is an access section, on for everyone by default (`add_books_section`, once); the nav button and
+  phone tab show only when it is on in Settings and the person has the section.
+
 ## Servers by id (history and covers)
 
 Plays belong to a server by `plays.server_id`, not its name (Glenn's servers changed IP and were re-added

@@ -148,7 +148,8 @@
     access: { title: 'Access', scope: 'all', lead: 'Who can sign in and what each person can see. Anyone you share a Plex server with can sign in with Plex.' },
     billing: { title: 'Billing', scope: 'all', lead: 'Shows each person their own Stripe subscription. The key is read-only: nothing is ever charged or changed from here.' },
     reqlog: { title: 'Request log', scope: 'all', lead: 'Every movie and series requested through this site: who asked, when, and where it stands in Seerr now.' },
-    requests: { title: 'Requests', scope: 'all', lead: 'Connects your Seerr so people can find movies and series and request them here, without signing in to Seerr. Each person acts as their own Seerr account, so its permissions, limits and approvals still apply.' }
+    requests: { title: 'Requests', scope: 'all', lead: 'Connects your Seerr so people can find movies and series and request them here, without signing in to Seerr. Each person acts as their own Seerr account, so its permissions, limits and approvals still apply.' },
+    books: { title: 'Books & comics', scope: 'all', lead: 'Shows the Greystar media site inside this dashboard, so people read comics and ebooks, listen to audiobooks and request more without signing in again.' }
   };
   var summary = null;
   var summaryAt = 0;
@@ -186,6 +187,7 @@
     } else if (t === 'access') loadAccess();
     else if (t === 'billing') loadBilling();
     else if (t === 'requests') loadRequests();
+    else if (t === 'books') loadBooks();
     else if (t === 'reqlog') openLog(changed);
     else if (t !== 'display') loadState();
     if (window.sdRenderPreviews) window.sdRenderPreviews();
@@ -332,6 +334,10 @@
         status: lgc.total ? ['success', lgc.day ? lgc.day + ' in the last 24 h' : 'None in the last 24 h'] : ['neutral', 'Nothing requested yet'],
         facts: [[lgc.week || 0, 'last 7 days'], [lgc.total || 0, 'all time'], [lgc.people || 0, lgc.people === 1 ? 'person' : 'people']] }));
     }
+    var bk = s.books || {};
+    cards.push(homeCard('books', { scope: 'all', what: bk.enabled ? 'People read, listen and request books and comics from the Greystar media site, here.' : 'Optional. Show the Greystar media site here, signed in with Plex.',
+      status: bk.enabled ? ['success', 'On'] : bk.has_secret ? ['neutral', 'Off'] : ['neutral', 'Not connected'],
+      facts: [] }));
     box.replaceChildren(el('div', { class: 'st-homegrid' }, cards));
     if (window.sdRenderPreviews) window.sdRenderPreviews();
   }
@@ -1150,6 +1156,56 @@
       el('p', { class: 'st-note', text: 'Not connected yet. PayPal subscriptions will show on the same card once it is set up.' })));
   }
 
+  // ---------- Books & comics: the Greystar media site ----------
+  var bks = null;
+  function loadBooks() {
+    if (!isAdmin()) return Promise.resolve();
+    return Promise.all([api('GET', '/api/settings/books'), state ? null : api('GET', '/api/settings')]).then(function (r) {
+      bks = r[0];
+      if (r[1]) state = r[1];
+    }).then(render).catch(function (e) { setMsg('load', 'error', e.message); });
+  }
+  function booksSaved(b, text) {
+    bks = b; clearDrafts('bk');
+    msgs.bk = { kind: 'ok', text: text };
+    if (window.dash && window.dash.refresh) window.dash.refresh();
+    render();
+  }
+  function renderBooks(pane) {
+    if (!bks) { pane.appendChild(el('p', { class: 'st-note', text: 'Loading…' })); return; }
+    var url = input({ value: bks.url || '', placeholder: 'https://media.greystarnetworks.com', class: 'st-input is-mono' }, 'bk-url');
+    var secret = input({ type: 'password', placeholder: bks.has_secret ? 'Saved. Leave blank to keep it.' : 'Paste the secret from the media site', autocomplete: 'new-password' }, 'bk-secret');
+    var on = el('input', { type: 'checkbox', id: 'bk-on', checked: bks.enabled, disabled: !bks.has_secret || busy['bk-on'], onchange: function (e) {
+      var want = e.target.checked;
+      withBusy('bk-on', api('PUT', '/api/settings/books', { enabled: want }).then(function (b) {
+        booksSaved(b, want ? 'Books & comics is on. People with access see it in the menu after a reload.' : 'Books & comics is off.');
+      }).catch(function (err) { setMsg('bk', 'error', err.message); }));
+    } });
+    var sec = el('section', { class: 'st-section' }, el('h3', { text: 'Media site' }),
+      el('p', { class: 'st-note', text: 'Make the shared secret on the media site: Administration, Settings, Telemetry control panel, Make secret. Paste it here; it is saved encrypted and never shown again. Turn the link on there too.' }),
+      el('div', { class: 'st-form' },
+        el('div', { class: 'st-wide' }, field('Media site address', url, 'For example https://media.greystarnetworks.com')),
+        el('div', { class: 'st-wide' }, field('Shared secret', secret)),
+        el('div', { class: 'st-wide st-row' },
+          el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['bk-save'] ? 'Saving…' : 'Save', disabled: busy['bk-save'], onclick: function () {
+            var b = { url: url.value.trim() };
+            if (secret.value.trim()) b.secret = secret.value.trim();
+            withBusy('bk-save', api('PUT', '/api/settings/books', b).then(function (r) { booksSaved(r, 'Saved.'); })
+              .catch(function (err) { setMsg('bk', 'error', err.message); }));
+          } }),
+          bks.has_secret ? el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Forget secret', onclick: function () {
+            api('DELETE', '/api/settings/books').then(function (r) { booksSaved(r, 'Secret forgotten. Books & comics is off.'); })
+              .catch(function (err) { setMsg('bk', 'error', err.message); });
+          } }) : null)),
+      el('label', { class: 'st-check', for: 'bk-on' }, on, ' Show Books & comics to people with access'),
+      bks.enabled ? el('div', { class: 'st-row' }, el('a', { class: 'st-btn', href: '#/books', text: 'Open Books & comics', onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } })) : null);
+    sec.appendChild(message('bk'));
+    pane.appendChild(sec);
+    pane.appendChild(el('section', { class: 'st-section' }, el('h3', { text: 'Who sees it' }),
+      el('p', { class: 'st-note', text: 'Books & comics is an access section, on for everyone by default. Turn it off for someone in Access, like any other section. It needs a Plex sign-in: the media site finds the person by their Plex account (or makes one for them, approved straight away).' }),
+      el('p', { class: 'st-note', text: 'Everyone can request comics, ebooks and audiobooks. Listening to audiobooks needs the Audiobooks add-on, which is turned on per person on the media site.' })));
+  }
+
   // ---------- Requests: the Seerr connection ----------
   var rqs = null;
   var rqLinks = null;
@@ -1412,6 +1468,8 @@
       renderBilling(pane);
     } else if (tab === 'requests') {
       renderRequests(pane);
+    } else if (tab === 'books') {
+      renderBooks(pane);
     } else if (tab === 'access') {
       renderAccess(pane);
     }
