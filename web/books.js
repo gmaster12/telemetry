@@ -10,8 +10,9 @@
 
    We send the media site one message, so its own palette matches ours instead of a fixed light look:
      { source: 'greystar-telemetry', type: 'look', look: 'light' | 'dark' }
-   sent once the frame says it is ready, and again whenever Telemetry's own look changes (its data-theme
-   attribute, or the OS scheme when nothing overrides it — see telemetryLook() below). */
+   sent once the frame says it is ready, and again whenever Telemetry's own look changes (Settings,
+   Display, Appearance sets data-look on #streams-app to "light"/"dark"/absent; absent follows the OS
+   scheme — see telemetryLook() below). */
 (function () {
   'use strict';
 
@@ -27,7 +28,7 @@
   var me = window.gsMe || null;
 
   function telemetryLook() {
-    var explicit = document.documentElement.getAttribute('data-theme');
+    var explicit = root.dataset.look; // Settings, Display, Appearance: "light", "dark", or absent (Match device)
     if (explicit === 'light' || explicit === 'dark') return explicit;
     return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
   }
@@ -43,7 +44,7 @@
     if (schemeQuery.addEventListener) schemeQuery.addEventListener('change', onSchemeChange);
     else if (schemeQuery.addListener) schemeQuery.addListener(onSchemeChange); // older Safari
   }
-  new MutationObserver(sendLook).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  new MutationObserver(sendLook).observe(root, { attributes: true, attributeFilter: ['data-look'] });
 
   function el(tag, props) {
     var e = document.createElement(tag);
