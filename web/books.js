@@ -133,7 +133,9 @@
     lastReload = Date.now();
     setLoading(true, 'Opening Books & comics');
     api('/api/books/link?next=' + encodeURIComponent(next || '/')).then(function (r) {
-      frame.src = r.url;
+      // The look rides along (outside the signed pass, it is only cosmetic) so the media site paints in
+      // Telemetry's light/dark look from its very first frame instead of waiting for the message.
+      frame.src = r.url + (r.url.indexOf('?') >= 0 ? '&' : '?') + 'look=' + telemetryLook();
     }).catch(function (e) {
       setLoading(false);
       page.replaceChildren(note('Books & comics could not open', e.message));
