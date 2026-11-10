@@ -18,24 +18,7 @@
   var cache = {};
   var period = 'month';
 
-  function el(tag, attrs) {
-    var n = document.createElement(tag);
-    Object.keys(attrs || {}).forEach(function (k) {
-      var v = attrs[k];
-      if (v == null || v === false) return;
-      if (k === 'text') n.textContent = v;
-      else if (k === 'class') n.className = v;
-      else if (k.slice(0, 2) === 'on') n.addEventListener(k.slice(2), v);
-      else n.setAttribute(k, v === true ? '' : v);
-    });
-    for (var i = 2; i < arguments.length; i++) add(n, arguments[i]);
-    return n;
-  }
-  function add(n, c) {
-    if (c == null || c === false) return;
-    if (Array.isArray(c)) { c.forEach(function (x) { add(n, x); }); return; }
-    n.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
-  }
+  var el = window.gsUI.el, add = window.gsUI.add;   // shared helpers (ui.js)
   function icon(name, size) { return window.sdIcon ? window.sdIcon(name, size || 18) : el('span'); }
   function me() { return window.dash.me ? window.dash.me() : null; }
   function can(s) { return window.dash.can ? window.dash.can(s) : false; }
@@ -57,12 +40,7 @@
   var images = 'https://image.tmdb.org/t/p/';
   function tmdb(path, size) { return !path ? null : /^(https?:|data:|\/api\/)/.test(path) ? path : images + size + path; }
   function tz() { return -new Date().getTimezoneOffset(); }
-  function ago(sec) {
-    if (sec < 3600) return Math.max(1, Math.round(sec / 60)) + ' min ago';
-    if (sec < 86400) return Math.round(sec / 3600) + ' h ago';
-    var d = Math.round(sec / 86400);
-    return d === 1 ? 'yesterday' : d + ' days ago';
-  }
+  function ago(sec) { return window.gsUI.ago(Date.now() / 1000 - sec); }   // sec: how long ago
   function hourText(h) { return (h % 12 || 12) + (h < 12 ? ' AM' : ' PM'); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function shortDate(iso) { return iso ? new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''; }
@@ -77,15 +55,17 @@
     return v;
   }
   function view() { return VIEWS.indexOf(root.dataset.vview) >= 0 ? root.dataset.vview : 'home'; }
+  // A door or card goes to its address (#/streams, #/history, #/subscription, #/home); app.js follows the address
+  // and calls setView, so Back and reload land on the same view.
   function show(v) {
     if (VIEWS.indexOf(v) < 0) v = 'home';
-    if (root.dataset.page === 'requests' && window.gsRequests) window.gsRequests.close();
-    if (root.dataset.page === 'books' && window.gsBooks) window.gsBooks.close();
+    window.gsUI.go('#/' + v);
+  }
+  function setView(v) {
+    if (VIEWS.indexOf(v) < 0) v = 'home';
     root.dataset.vview = v;
-    if (window.sdSetMtab) window.sdSetMtab({ home: 'home', streams: 'streams', history: 'people', subscription: 'home' }[v]);
     if (v === 'home') render();
     if (window.sdNavChanged) window.sdNavChanged();
-    root.scrollIntoView({ block: 'start' });
   }
   function apply() {
     var on = active();
@@ -379,6 +359,7 @@
     var lay = layout();
     box.dataset.layout = lay;
     box.replaceChildren.apply(box, [].concat(lay === 'hub' ? hub() : lay === 'month' ? month() : doors()));
+    if (window.sdPhead) window.sdPhead();   // the phone page header shows the greeting
     if (!still) sweepIn();
   }
   if (back) {
@@ -391,6 +372,7 @@
     view: view,
     layout: layout,
     show: show,
+    setView: setView,
     refresh: function () { if (active() && view() === 'home') render(); else apply(); },
     layouts: LAYOUTS
   };

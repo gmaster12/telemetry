@@ -3,7 +3,6 @@
 (function () {
   'use strict';
 
-  var HEADERS = { 'Content-Type': 'application/json', 'X-Requested-With': 'greystar' };
   var tab = 'display';
   var state = null;
   var nodes = [];
@@ -32,45 +31,9 @@
   if (window.gsMe) me = window.gsMe;
 
   // ---------- helpers ----------
-  function el(tag, props) {
-    var e = document.createElement(tag);
-    props = props || {};
-    Object.keys(props).forEach(function (k) {
-      var v = props[k];
-      if (v == null || v === false) return;
-      if (k === 'class') e.className = v;
-      else if (k === 'text') e.textContent = v;
-      else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), v);
-      else if (k === 'value') e.value = v;
-      else if (k === 'checked') e.checked = !!v;
-      else e.setAttribute(k, v === true ? '' : v);
-    });
-    for (var i = 2; i < arguments.length; i++) {
-      var kid = arguments[i];
-      if (kid == null || kid === false) continue;
-      if (Array.isArray(kid)) kid.forEach(function (k) { if (k) e.appendChild(k); });
-      else e.appendChild(typeof kid === 'string' ? document.createTextNode(kid) : kid);
-    }
-    return e;
-  }
+  var el = window.gsUI.el;   // shared helpers (ui.js)
 
-  function api(method, path, body) {
-    return fetch(path, {
-      method: method,
-      headers: HEADERS,
-      credentials: 'same-origin',
-      body: body ? JSON.stringify(body) : undefined
-    }).then(function (r) {
-      return r.json().catch(function () { return null; }).then(function (j) {
-        if (!r.ok) {
-          var d = j && j.detail;
-          if (Array.isArray(d)) d = d.map(function (x) { return x.msg; }).join('; ');
-          throw new Error(d || ('HTTP ' + r.status));
-        }
-        return j;
-      });
-    });
-  }
+  function api(method, path, body) { return window.gsUI.api(method, path, body); }
 
   function message(key) {
     var m = msgs[key];
@@ -217,15 +180,7 @@
     }).catch(function (e) { msgs.home = { kind: 'error', text: e.message }; if (tab === 'home') renderHome(); });
   }
 
-  function since(ts) {
-    if (!ts) return null;
-    var m = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
-    if (m < 1) return 'just now';
-    if (m < 60) return m + ' min ago';
-    var h = Math.round(m / 60);
-    if (h < 48) return h + ' h ago';
-    return Math.round(h / 24) + ' days ago';
-  }
+  function since(ts) { return ts ? window.gsUI.ago(ts) : null; }   // "5 min ago"
 
   function badgeEl(tone, text) {
     if (window.sdBadge) return window.sdBadge(tone, text);
@@ -796,11 +751,8 @@
     });
   }
 
-  function ago(ts) {
-    if (!ts) return 'never';
-    var d = new Date(ts * 1000);
-    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ', ' + d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
-  }
+  var when = window.gsUI.when;   // a moment: "Nov 10, 2:52 AM" (it was called ago, but it gives a date)
+
 
   function accessEditor(u, describe) {
     var key = 'acc-u';
@@ -809,7 +761,7 @@
       el('div', null, el('b', { text: u.name || u.username }),
         el('span', { text: [u.username && u.username !== u.name ? '@' + u.username : null, u.email || 'no email on file',
           u.servers && u.servers.length ? 'on ' + u.servers.join(', ') : 'not on a monitored server'].filter(Boolean).join(' · ') }),
-        el('span', { text: describe(u) + ' · ' + (u.last_login ? 'last signed in ' + ago(u.last_login) : 'never signed in') })));
+        el('span', { text: describe(u) + ' · ' + (u.last_login ? 'last signed in ' + when(u.last_login) : 'never signed in') })));
     var close = el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: u.admin ? 'Close' : 'Cancel', onclick: function () { accEditing = null; render(); } });
     if (u.admin) {
       return el('div', { class: 'st-editor' }, head, el('p', { class: 'st-note', text: 'The administrator Plex account always sees everything and cannot be turned off.' }),
@@ -896,7 +848,7 @@
       accPicker.el,
       editing ? accessEditor(editing, describe) : null,
       message('acc-users'),
-      el('p', { class: 'st-note', text: sync.synced_at ? 'Shared users last loaded from Plex ' + ago(sync.synced_at) + '.' : 'Load the people you share servers with from your Plex account.' }),
+      el('p', { class: 'st-note', text: sync.synced_at ? 'Shared users last loaded from Plex ' + when(sync.synced_at) + '.' : 'Load the people you share servers with from your Plex account.' }),
       sync.error ? el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), sync.error) : null,
       el('div', { class: 'st-row' },
         el('button', { type: 'button', class: 'st-btn', text: busy['acc-sync'] ? 'Loading users…' : 'Sync Plex users', disabled: busy['acc-sync'],
@@ -951,7 +903,7 @@
                   }).catch(function (e) { setMsg('acc-admins', 'error', e.message); }));
                 } }))
             : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Delete…', onclick: function () { accRemoving = a.id; render(); } })),
-        el('div', { class: 'st-item__meta', text: 'Created ' + ago(a.created) + ' · ' + (a.last_login ? 'last signed in ' + ago(a.last_login) : 'never signed in') })));
+        el('div', { class: 'st-item__meta', text: 'Created ' + when(a.created) + ' · ' + (a.last_login ? 'last signed in ' + when(a.last_login) : 'never signed in') })));
     });
     var adminSec = el('details', { class: 'st-section st-details', id: 'acc-admins-box', open: !!msgs['acc-admins'] || !!drafts['acc-new-user'] },
       el('summary', { text: 'Admin logins, not Plex accounts (' + access.admins.length + ')' }),
@@ -1052,7 +1004,7 @@
     var stripeSec = el('section', { class: 'st-section' }, el('h3', { text: 'Stripe' }));
     if (billing.has_key && !editingKey) {
       stripeSec.append(
-        el('p', { class: 'st-note', text: billing.synced_at ? 'Connected. Last loaded from Stripe ' + ago(billing.synced_at) + '; it refreshes every 15 minutes.' : 'Connected. Loading from Stripe…' }),
+        el('p', { class: 'st-note', text: billing.synced_at ? 'Connected. Last loaded from Stripe ' + when(billing.synced_at) + '; it refreshes every 15 minutes.' : 'Connected. Loading from Stripe…' }),
         el('p', { class: 'st-note', text: (c.customers || 0) + ' Stripe customers · ' + (c.matched || 0) + ' matched to a Plex user · ' + (c.unmatched || 0) + ' not matched · ' + (c.links || 0) + ' linked by hand' }),
         billing.error ? el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), 'Last sync failed: ' + billing.error) : document.createDocumentFragment(),
         el('div', { class: 'st-row' },
@@ -1110,7 +1062,7 @@
           u.status ? el('span', { class: 'st-tag', text: statusLabel(u.status) }) : null,
           el('span', { class: 'st-spacer' }),
           el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Link to a Plex user', onclick: function () { linking = { email: u.email }; render(); } })),
-        el('div', { class: 'st-item__meta', text: [u.name, u.plan, 'customer since ' + ago(u.created)].filter(Boolean).join(' · ') })));
+        el('div', { class: 'st-item__meta', text: [u.name, u.plan, 'customer since ' + when(u.created)].filter(Boolean).join(' · ') })));
     });
     var manualEmail = input({ type: 'email', placeholder: 'payer@example.com' }, 'bl-manual');
     pane.appendChild(el('section', { class: 'st-section' },
@@ -1147,7 +1099,7 @@
                   }).catch(function (e) { setMsg('bl-links', 'error', e.message); });
                 } }))
             : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Remove…', onclick: function () { unlinkingEmail = l.email; render(); } })),
-        el('div', { class: 'st-item__meta', text: (l.plex_email ? 'Plex email ' + l.plex_email + ' · ' : '') + 'linked ' + ago(l.created) })));
+        el('div', { class: 'st-item__meta', text: (l.plex_email ? 'Plex email ' + l.plex_email + ' · ' : '') + 'linked ' + when(l.created) })));
     });
     pane.appendChild(el('details', { class: 'st-section st-details', open: !!unlinkingEmail },
       el('summary', { text: 'Linked by hand (' + (billing.links || []).length + ')' }),
@@ -1279,7 +1231,7 @@
           el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Relink', title: 'Forget this link; it is looked up again next time they open Requests.', onclick: function () {
             api('DELETE', '/api/settings/requests/links/' + encodeURIComponent(l.plex_id)).then(loadRequests).catch(function (e) { setMsg('rq', 'error', e.message); });
           } })),
-        el('div', { class: 'st-item__meta', text: (l.username ? '@' + l.username + ' · ' : '') + 'Seerr user ' + l.seerr_id + ' · since ' + ago(l.created) })));
+        el('div', { class: 'st-item__meta', text: (l.username ? '@' + l.username + ' · ' : '') + 'Seerr user ' + l.seerr_id + ' · since ' + when(l.created) })));
     });
     pane.appendChild(el('details', { class: 'st-section st-details' },
       el('summary', { text: 'People linked to Seerr (' + (rqLinks || []).length + ')' }),
@@ -1327,7 +1279,7 @@
         return el('li', null,
           el('div', { class: 'st-needs__what' },
             el('a', { class: 'st-log__title', href: '#/requests/' + (r.kind === 'tv' ? 'series/' : 'movie/') + r.tmdb, text: r.title, onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } }),
-            el('span', { class: 'st-log__meta', text: [r.kind === 'tv' ? 'Series' : 'Movie', r.who, 'asked ' + ago(r.notified_at)].join(' · ') })),
+            el('span', { class: 'st-log__meta', text: [r.kind === 'tv' ? 'Series' : 'Movie', r.who, 'asked ' + when(r.notified_at)].join(' · ') })),
           done);
       })));
   }
@@ -1349,7 +1301,7 @@
       rows === null ? el('p', { class: 'st-note', text: 'Could not load.' })
         : !rows.length ? el('p', { class: 'st-note', text: 'None in the last ' + missDays + ' days.' })
         : el('ol', { class: 'st-misses' }, rows.map(function (r) {
-          return el('li', null, el('span', { class: 'st-misses__term', text: r.term }), el('b', { text: r.count + (r.count === 1 ? ' time' : ' times') }), el('span', { class: 'st-log__meta', text: 'last ' + ago(r.last_at) }));
+          return el('li', null, el('span', { class: 'st-misses__term', text: r.term }), el('b', { text: r.count + (r.count === 1 ? ' time' : ' times') }), el('span', { class: 'st-log__meta', text: 'last ' + when(r.last_at) }));
         })));
   }
   function loadLog(more) {
@@ -1424,13 +1376,13 @@
     return 'Seasons ' + (run && list.length > 2 ? list[0] + ' to ' + list[list.length - 1] : list.join(', '));
   }
   function logRow(r, base) {
-    var when = new Date(r.at * 1000);
+    var at = new Date(r.at * 1000);
     var poster = el('span', { class: 'st-log__poster', 'aria-hidden': 'true' });
     if (r.poster && base) { var im = new Image(); im.onload = function () { poster.style.backgroundImage = 'url("' + im.src + '")'; }; im.src = base + r.poster; }
     var href = '#/requests/' + (r.kind === 'movie' ? 'movie/' : 'series/') + r.tmdb;
     var bits = [r.year, r.kind === 'movie' ? 'Movie' : 'Series', seasonText(r.seasons)].filter(Boolean).join(' · ');
     var sub = [r.decided && r.decided.by ? (r.state === 'declined' ? 'Declined by ' : 'Approved by ') + r.decided.by : null,
-      r.hint, r.ended_at ? ago(r.ended_at) : null].filter(Boolean).join(' · ') || null;
+      r.hint, r.ended_at ? when(r.ended_at) : null].filter(Boolean).join(' · ') || null;
     return el('li', { class: 'st-log__row' },
       poster,
       el('div', { class: 'st-log__what' },
@@ -1445,9 +1397,9 @@
           lg.q = q; loadLog(false);
         } }),
         el('span', { class: 'st-log__meta', text: r.who.admin_login ? 'Admin login' : [r.who.username ? '@' + r.who.username : null, r.who.email].filter(Boolean).join(' · ') })),
-      el('time', { class: 'st-log__when', datetime: when.toISOString(), title: when.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) },
-        el('b', { text: when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) }),
-        el('span', { class: 'st-log__meta st-log__date', text: when.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) })),
+      el('time', { class: 'st-log__when', datetime: at.toISOString(), title: at.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) },
+        el('b', { text: at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) }),
+        el('span', { class: 'st-log__meta st-log__date', text: at.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) })),
       el('div', { class: 'st-log__state' }, badgeEl(r.tone, r.label), sub ? el('span', { class: 'st-log__meta', text: sub }) : null));
   }
   function paintLog() {

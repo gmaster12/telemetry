@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Greystar Telemetry</title>
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#070912">
@@ -19,15 +19,17 @@
 <link rel="stylesheet" href="light.css">
 <link rel="stylesheet" href="people.css">
 <link rel="stylesheet" href="home.css">
+<link rel="stylesheet" href="ui.css">
 <script src="vendor/d3-7.9.0.min.js"></script>
 <script src="dash-shim.js"></script>
+<script src="ui.js"></script>
 </head>
 <body>
 
 <style>
   html, body { margin: 0; background: #e4e4e4; }
   @media (prefers-color-scheme: dark) { html, body { background: #15141d; } }
-  .gs-app.gs-app { max-width: none; min-height: 100vh; border-radius: 0; box-sizing: border-box; }
+  .gs-app.gs-app { max-width: none; min-height: 100vh; min-height: 100svh; border-radius: 0; box-sizing: border-box; }
   .gs-app { --n: 72px; --rn: 30px; --f: 18px; --notch-w: 112px; --notch-h: 112px; --notch-path: polygon(0 0, 100% 0, 100% 100%); box-sizing: border-box; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-5); padding: var(--space-6); border-radius: var(--radius-xl); background: var(--surface-page); color: var(--ink); font-family: var(--font-sans); max-width: 1360px; margin-inline: auto; }
   .gs-app *, .gs-app *::before, .gs-app *::after { box-sizing: border-box; }
   .gs-app h1, .gs-app h2, .gs-app h3, .gs-app p { margin: 0; }
@@ -224,7 +226,7 @@
   .sd-gear[aria-expanded="true"] { background: var(--surface-ink); color: var(--on-ink); }
   .sd-gear:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
   .sd-settings-dock { position: sticky; top: 12px; z-index: 9; height: 0; margin-bottom: calc(-1 * var(--space-5)); }
-  .sd-settings { position: absolute; top: 0; right: 0; width: min(560px, 100%); max-height: calc(100vh - 24px); overflow-y: auto; box-sizing: border-box; padding: 20px 22px 22px; border-radius: 28px; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-float); }
+  .sd-settings { position: absolute; top: 0; right: 0; width: min(560px, 100%); max-height: calc(100vh - 24px); max-height: calc(100svh - 24px); overflow-y: auto; box-sizing: border-box; padding: 20px 22px 22px; border-radius: 28px; background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-float); }
   .sd-settings__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
   .sd-settings__title { font-size: 24px; line-height: 30px; font-weight: 300; letter-spacing: -0.02em; }
   .sd-settings__close { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: var(--surface-card); color: var(--ink); cursor: pointer; }
@@ -496,10 +498,10 @@
   .sd-sec-head { display: flex; align-items: baseline; gap: var(--space-2); }
   .sd-sec-count { font-size: 15px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 
-  @media (min-width: 761px) {
+  @media (min-width: 761px) and (min-height: 501px), (min-width: 761px) and (pointer: fine), (min-width: 761px) and (pointer: none) {
     #alerts, .sd-tabbar, .sd-viewbtn--mob { display: none !important; }
   }
-  @media (max-width: 760px) {
+  @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
     .gs-app { grid-template-columns: minmax(0, 1fr); gap: var(--space-4); padding: var(--space-4); border-radius: var(--radius-lg); }
     .sd-nav, .sd-viewbtn--desk { display: none !important; }
     .sd-content { gap: var(--space-4); min-height: calc(100svh - 32px); }
@@ -601,6 +603,11 @@
                 <label class="st-thumb"><input type="radio" name="vhome" value="month"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="8" y="8" width="18" height="18" rx="4" fill="#0b0b0d" stroke="#555" stroke-width="1"/><rect x="29" y="8" width="18" height="18" rx="4" fill="#3a3a46"/><rect x="50" y="8" width="18" height="18" rx="4" fill="#b8fc64"/><rect x="71" y="8" width="17" height="18" rx="4" fill="#3a3a46"/><rect x="8" y="32" width="46" height="32" rx="5" fill="#3a3a46"/><rect x="14" y="40" width="30" height="3" rx="1" fill="#e4e4e4"/><rect x="14" y="48" width="22" height="3" rx="1" fill="#e4e4e4"/><rect x="14" y="56" width="14" height="3" rx="1" fill="#e4e4e4"/><rect x="58" y="32" width="30" height="32" rx="5" fill="#3a3a46"/><rect x="62" y="46" width="22" height="6" rx="2" fill="#b8fc64"/></svg><span>My month</span></label>
               </div>
             </fieldset>
+            <fieldset class="sd-field" id="look-field">
+              <legend>Appearance</legend>
+              <p class="sd-field__hint">Light, dark, or the same as this device. Saved in this browser.</p>
+              <div class="st-seg st-seg--wide" id="look-seg" role="group" aria-label="Appearance"></div>
+            </fieldset>
             <fieldset class="sd-field st-styles" id="card-style">
               <legend>Stream card style</legend>
               <p class="sd-field__hint">Pick by picture. The preview changes as you choose. Select any card on the dashboard to flip it.</p>
@@ -669,6 +676,11 @@
       <button type="button" class="sd-gear" id="gear" aria-label="Settings" title="Settings" aria-expanded="false" aria-controls="settings"></button>
       <div class="sd-user" id="user"></div>
     </div>
+
+    <header class="sd-phead" id="phead" hidden>
+      <span class="sd-phead__eyebrow">Telemetry</span>
+      <h1 class="sd-phead__title"><span id="phead-title"></span><span class="sd-phead__count" id="phead-count"></span></h1>
+    </header>
 
     <div class="sd-lockup">
       <span class="sd-lockup__label">Telemetry</span>
@@ -805,6 +817,7 @@
       <div class="sd-rows" id="rows" data-source="streams" hidden></div>
       <div class="sd-carousel" id="carousel" data-source="streams" hidden></div>
       <div class="sd-dots" id="dots" aria-hidden="true" hidden></div>
+      <div class="sd-sheet-scrim" id="sheet-scrim" hidden></div>
       <div class="sd-sheet" id="sheet" role="region" aria-label="Playback details" data-source="streams" hidden></div>
       <div class="sd-tablecard" id="table-wrap" hidden>
         <div class="sd-scroll">
@@ -827,6 +840,7 @@
     <section class="rq" id="requests-page" aria-label="Requests" hidden></section>
     <section class="bk" id="books-page" aria-label="Books and comics" hidden></section>
     <nav class="sd-tabbar" id="tabbar" aria-label="Sections"></nav>
+    <div class="sd-more" id="more-sheet" hidden><div class="sd-more__panel" role="dialog" aria-modal="true" aria-label="More"></div></div>
   </div>
   <div class="gp-drawer" id="hist" hidden role="dialog" aria-modal="true" aria-labelledby="hist-title">
     <div class="gp-drawer__panel"></div>

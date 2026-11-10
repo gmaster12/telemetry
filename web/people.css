@@ -143,7 +143,7 @@
 .gp-eyebrow { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-muted); }
 .gp-drawer__sub { margin: 0; font-size: 13px; color: var(--ink-muted); overflow-wrap: anywhere; }
 .gp-drawer__body { display: flex; flex-direction: column; gap: 14px; }
-html.gp-lock, html.gp-lock body { overflow: hidden; }
+/* the page is held still by ui.js (html.gs-locked, ui.css) */
 
 /* ---------- Access settings ---------- */
 .st-checks { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -163,7 +163,7 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .gs-only-history .sd-livebar { visibility: hidden; }
 #people-card[hidden] { display: none !important; }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .sd-brand--top { display: grid; }
   .sd-lockup { display: none; }
   .sd-user__btn { padding: 0 2px; }
@@ -231,7 +231,7 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .gu-empty span { font-size: 13px; color: var(--ink-muted); }
 .st-toolbar { display: flex; flex-wrap: wrap; gap: 8px; }
 .st-toolbar .st-field { flex: 1 1 200px; }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .gp-finder { padding: 14px; border-radius: 24px; }
   .gu-field { flex-basis: 100%; height: 48px; }
   .gu-server { flex: 1 1 100%; height: 44px; background-position: calc(100% - 22px) 20px, calc(100% - 17px) 20px; }
@@ -279,7 +279,7 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .gp-subbadge--off { background: rgba(255, 255, 255, 0.14); color: inherit; }
 .gp-sub--light .gp-subbadge--off { background: var(--surface-page); }
 .gp-subbadge--off i { border-radius: 2px; background: currentColor; }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .gp-sub { padding: 18px; border-radius: 24px; }
   .gp-sub__plan { font-size: 26px; line-height: 32px; }
   .gs-app:not([data-mtab="home"]):not([data-mtab="people"]) #sub-card { display: none; }
@@ -375,7 +375,7 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .gp-srvcard__foot { margin: 0; font-size: 12px; color: var(--ink-muted); }
 .gs-app[data-look="light"] .gp-srv__dot { background: #5f9e1f; }
 @media (prefers-color-scheme: light) { .gs-app:not([data-look="dark"]) .gp-srv__dot { background: #5f9e1f; } }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .gs-app:not([data-mtab="home"]):not([data-mtab="people"]) #srv-card { display: none; }
   .gp-srvlist { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .gp-srvcard--compact .gp-srvlist { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -402,7 +402,7 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .sd-pill-lime.has-seg .sd-newest { min-width: 0; }
 @media (max-width: 1200px) { .sd-pill-lime.has-seg .sd-newest:nth-of-type(n+2) { display: none; } .sd-srvseg__lbl, .sd-srvseg__rest { display: none; } }
 /* Phones: the bar gets its own full-width row under the icons, so the status has room. */
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .gs-app.has-srvseg .sd-top { flex-wrap: wrap; }
   .gs-app.has-srvseg .sd-livebar { order: 9; flex: 1 1 100%; }
   .sd-srvseg { height: 40px; padding: 0 12px; gap: 7px; font-size: 12px; }
@@ -414,14 +414,14 @@ html.gp-lock, html.gp-lock body { overflow: hidden; }
 .sd-srvseg__since { font-weight: 500; margin-left: -10px; }
 .sd-srvseg__since::before { content: ", "; }
 @media (max-width: 1500px) { .sd-srvseg.is-down .sd-srvseg__rest { display: none; } }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .gs-app.has-srvseg .sd-look { margin-left: auto; }
   .sd-srvseg.is-down { flex: 0 1 auto; min-width: 0; max-width: 64%; }
   .sd-srvseg.is-down .sd-srvseg__since { display: none; }
   .sd-srvseg.is-down .sd-srvseg__what { overflow: hidden; text-overflow: ellipsis; }
   .sd-pill-lime.has-seg .sd-newest { flex: 1 1 auto; }
 }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .sd-srvseg.is-down .sd-srvseg__what, .sd-srvseg.is-down .sd-srvseg__long { display: none; }
   .sd-srvseg.is-down .sd-srvseg__short { display: inline; overflow: hidden; text-overflow: ellipsis; }
   .gs-app.has-srvseg .sd-pill-title { display: none; }

@@ -7,7 +7,6 @@
   var root = document.getElementById('streams-app');
   var page = document.getElementById('requests-page');
   if (!root || !page) return;
-  var HEADERS = { 'Content-Type': 'application/json', 'X-Requested-With': 'greystar' };
   var me = null;          // GET /api/requests/me
   var meAt = 0;
   var home = null;        // Discover rows
@@ -16,54 +15,16 @@
   var body = null;
   var searchInput = null;
   var searchBox = null;   // the shared search box (usearch.js); its input is searchInput
-  var lastDashHash = '';
   var routeToken = 0;
 
   // ---------- helpers ----------
-  function el(tag, props) {
-    var e = document.createElement(tag);
-    props = props || {};
-    Object.keys(props).forEach(function (k) {
-      var v = props[k];
-      if (v == null || v === false) return;
-      if (k === 'class') e.className = v;
-      else if (k === 'text') e.textContent = v;
-      else if (k === 'html') throw new Error('no html');
-      else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), v);
-      else if (k === 'value') e.value = v;
-      else if (k === 'checked') e.checked = !!v;
-      else if (k === 'style') e.setAttribute('style', v);
-      else e.setAttribute(k, v === true ? '' : v);
-    });
-    for (var i = 2; i < arguments.length; i++) add(e, arguments[i]);
-    return e;
-  }
-  function add(e, kid) {
-    if (kid == null || kid === false) return;
-    if (Array.isArray(kid)) { kid.forEach(function (k) { add(e, k); }); return; }
-    e.appendChild(typeof kid === 'string' || typeof kid === 'number' ? document.createTextNode(String(kid)) : kid);
-  }
+  var el = window.gsUI.el;   // shared helpers (ui.js)
   var icon = function (n, s) { return window.sdIcon ? window.sdIcon(n, s) : document.createTextNode(''); };
   function badge(tone, text) {
     if (window.sdBadge) return window.sdBadge(tone, text);
     return el('span', { class: 'gs-badge gs-badge--' + tone, text: text });
   }
-  function api(method, path, data) {
-    return fetch(path, { method: method, headers: HEADERS, credentials: 'same-origin', body: data ? JSON.stringify(data) : undefined })
-      .then(function (r) {
-        if (r.status === 401) { window.location.replace('/login.html'); throw new Error('Signed out.'); }
-        return r.json().catch(function () { return null; }).then(function (j) {
-          if (!r.ok) {
-            var d = j && j.detail;
-            if (Array.isArray(d)) d = d.map(function (x) { return x.msg; }).join('; ');
-            var err = new Error(d || ('HTTP ' + r.status));
-            err.status = r.status;
-            throw err;
-          }
-          return j;
-        });
-      });
-  }
+  function api(method, path, data) { return window.gsUI.api(method, path, data); }
   function get(path, ttl) {
     var c = cache[path];
     if (c && Date.now() - c.at < (ttl || 60000)) return Promise.resolve(c.data);
@@ -79,12 +40,7 @@
     return Object.keys(o).filter(function (k) { return o[k] != null && o[k] !== ''; })
       .map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(o[k]); }).join('&');
   }
-  function fmtDate(iso, opts) {
-    if (!iso) return '';
-    var d = new Date(iso.length === 10 ? iso + 'T12:00:00' : iso);
-    if (isNaN(d)) return '';
-    return d.toLocaleDateString(undefined, opts || { month: 'short', day: 'numeric', year: 'numeric' });
-  }
+  function fmtDate(iso, opts) { return window.gsUI.date(iso, opts); }
   function plural(n, a, b) { return n + ' ' + (n === 1 ? a : b); }
   var KIND_NAME = { movie: 'Movie', tv: 'Series' };
 
@@ -105,12 +61,7 @@
     return x ? badge(x[0], x[1]) : badge('neutral', status);
   }
 
-  function toast(text, tone) {
-    var t = el('div', { class: 'rq-toast' + (tone === 'error' ? ' is-error' : ''), role: tone === 'error' ? 'alert' : 'status' }, text);
-    root.appendChild(t);
-    requestAnimationFrame(function () { t.classList.add('is-in'); });
-    setTimeout(function () { t.classList.remove('is-in'); setTimeout(function () { t.remove(); }, 300); }, 4200);
-  }
+  function toast(text, tone) { return window.gsUI.toast(text, tone); }
 
   // ---------- routing ----------
   function parse() {
@@ -127,7 +78,7 @@
   }
   function go(path, q, replace) {
     var h = '#/requests' + (path ? '/' + path : '') + (q && qs(q) ? '?' + qs(q) : '');
-    if (replace) { history.replaceState(null, '', h); route(); } else location.hash = h;
+    if (replace) { window.gsUI.replace(h); route(true); } else location.hash = h;
   }
   function link(path, q) { return '#/requests' + (path ? '/' + path : '') + (q && qs(q) ? '?' + qs(q) : ''); }
 
@@ -138,25 +89,21 @@
     if (was !== on && window.sdNavChanged) window.sdNavChanged();
   }
 
+  // The address decides what shows (app.js handles the dashboard's own addresses).
   window.gsRequests = {
-    open: function () {
-      if (!parse()) lastDashHash = location.hash;
-      go('', null);
-    },
-    close: function () {
-      history.replaceState(null, '', location.pathname + location.search + (lastDashHash && lastDashHash.indexOf('#/requests') !== 0 ? lastDashHash : ''));
-      show(false);
-    }
+    open: function () { window.gsUI.go('#/requests'); },
+    close: function () { show(false); }
   };
 
-  window.addEventListener('hashchange', route);
+  window.addEventListener('hashchange', function () { route(); });
 
   function loadMe(force) {
     if (me && !force && Date.now() - meAt < 60000) return Promise.resolve(me);
     return api('GET', '/api/requests/me').then(function (m) { me = m; meAt = Date.now(); return m; });
   }
 
-  function route() {
+  // same: the same entry with a new address (typing in the search box), so its scroll place stays as it is.
+  function route(same) {
     var r = parse();
     if (!r) { if (root.dataset.page === 'requests') show(false); return; }
     if (window.dash && window.dash.can && window.dash.me && window.dash.me() && !window.dash.can('requests')) { show(false); return; }
@@ -164,12 +111,16 @@
     show(true);
     var token = ++routeToken;
     var sect = r.path[0] || 'discover';
+    page.dataset.sect = sect;
+    // Phones: the full search box on Discover and search results; one line everywhere else.
+    if (searchBox) searchBox.setCompact(sect !== 'discover' && sect !== 'search');
+    var backTo = same ? null : window.gsUI.scroll.enter();
     setTabs(sect);
     if (searchInput && sect !== 'search' && document.activeElement !== searchInput) searchInput.value = '';
     // The Requests page always starts on Movies & shows (the box elsewhere remembers the last choice).
     if (searchBox && !searchBox.el.contains(document.activeElement)) searchBox.setKind('video');
     body.replaceChildren(el('div', { class: 'rq-loading', role: 'status' }, el('span', { class: 'rq-spin', 'aria-hidden': 'true' }), 'Loading'));
-    window.scrollTo({ top: 0 });
+    if (!same && backTo == null) window.scrollTo({ top: 0 });
     loadMe().then(function () {
       if (token !== routeToken) return;
       if (!me.connected) return notConnected();
@@ -184,7 +135,10 @@
         mine: function () { return mine(r.q); }, watchlist: watchlist, issues: function () { return issues(r.q); },
         manage: function () { return manage(r.q); }
       }[sect] || discover;
-      return view();
+      return Promise.resolve(view()).then(function () {
+        // Back or reload: put the page where it was once it has drawn.
+        if (backTo != null && token === routeToken) window.gsUI.scroll.restore(backTo);
+      });
     }).catch(function (e) {
       if (token !== routeToken) return;
       body.replaceChildren(errorBox(e, route));
@@ -261,6 +215,7 @@
       if (t.id === 'manage' && me && me.pending) a.appendChild(el('span', { class: 'rq-tab__count', text: String(me.pending) }));
       tabsBox.appendChild(a);
     });
+    window.gsUI.strip(tabsBox, '[aria-current="page"]');   // the tab you are on in view, a fade where more is hidden
   }
 
   // ---------- cards and rows ----------
@@ -613,7 +568,7 @@
       titleEl.focus({ preventScroll: true });
       // A search card's "Request more seasons" lands here with ?more=1: open the season picker once.
       if (opts && opts.more) {
-        history.replaceState(null, '', link((kind === 'tv' ? 'series/' : 'movie/') + id));
+        window.gsUI.replace(link((kind === 'tv' ? 'series/' : 'movie/') + id));
         var more = hero.querySelector('[data-more]');
         if (more) more.click();
       }
@@ -762,9 +717,10 @@
     var wrap = el('div', { class: 'rq-modal gs-app-modal' }, box);
     wrap.addEventListener('click', function (e) { if (e.target === wrap) close(); });
     wrap.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
-    function close() { wrap.remove(); document.body.classList.remove('rq-noscroll'); if (prev && prev.focus) prev.focus(); }
+    var detach = null;
+    function close() { if (!wrap.isConnected) return; wrap.remove(); if (detach) { detach(); detach = null; } if (prev && prev.focus) prev.focus(); }
     root.appendChild(wrap);
-    document.body.classList.add('rq-noscroll');
+    detach = window.gsUI.sheet(box, { onClose: close });   // holds the page still; on a phone, swipe down to close
     var f = box.querySelector('input, select, textarea, .rq-dialog__foot button');
     if (f) f.focus();
     return { close: close, box: box };

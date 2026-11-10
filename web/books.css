@@ -1,6 +1,11 @@
-/* Books & comics: the Greystar media site in a frame (books.js). The media site draws its own
-   "Books & comics" title, search and tabs inside the frame, so the dashboard's top bar steps aside. */
-.gs-app[data-page="books"] .sd-content > :not(.sd-settings-dock):not(#books-page):not(.sd-tabbar):not(.sd-sr) { display: none !important; }
+/* Books & comics: the Greystar media site in a frame (books.js). On a desktop the media site draws its own
+   "Books & comics" title, search and tabs inside the frame, so the dashboard's top bar steps aside; on a phone the
+   top bar stays (the same on every page) and the frame's header scrolls away with its content. */
+.gs-app[data-page="books"] .sd-content > :not(.sd-settings-dock):not(#books-page):not(.sd-tabbar):not(.sd-sr):not(.sd-more):not(.sd-top) { display: none !important; }
+/* Desktop: the frame draws its own title, so the top bar steps aside. Phones keep the top bar (ui.css sizes the frame). */
+@media (min-width: 761px) and (min-height: 501px), (min-width: 761px) and (pointer: fine), (min-width: 761px) and (pointer: none) {
+  .gs-app[data-page="books"] .sd-content > .sd-top { display: none !important; }
+}
 
 .bk { position: relative; min-width: 0; }
 .bk-frame {
@@ -53,8 +58,8 @@
   background: #121119;
 }
 
-@media (max-width: 760px) {
-  .bk-frame { height: calc(100svh - 120px); border-radius: var(--radius-lg, 24px); }
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+  .bk-frame { border-radius: var(--radius-lg, 24px); }   /* height: ui.css, from the top bar and the tab bar */
 }
 
 /* No visible outer scrollbar on the Books & comics page: the frame already fits the

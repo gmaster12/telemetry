@@ -364,8 +364,8 @@ design system). The dashboard adds its own patterns:
   subtle highlight border instead.
 - Stream cards show the poster (from `/api/poster/...`) dimmed under the text,
   and flip to show playback details.
-- Mobile (760px and below): bottom tab bar Home / Servers / Streams / Alerts,
-  compact stream rows with a bottom sheet, optional poster carousel.
+- Phones (see "Phone layout and addresses" below): a fixed bottom tab bar, compact stream rows
+  with a bottom sheet, optional poster carousel.
 - Settings screen (Glenn's pick "Mix": a home of cards plus Display with a live
   preview). Admins open the gear onto a home (`#st-home`, `renderHome` in
   `settings.js`, data from `GET /api/settings/summary`): a tall Display card with a
@@ -501,6 +501,38 @@ design system). The dashboard adds its own patterns:
   the viewer sees (`stopControl` in `app.js`, `POST /api/streams/{id}/stop`,
   `PlexClient.terminate` with the session id; Plex Pass). On by default; set
   `ENABLE_ACTIONS=false` in `.env` to turn it off. `/api/me` reports `actions`.
+
+## Phone layout and addresses (Glenn's phone audit, Nov 2026)
+
+- Every page has an address: `#/home`, `#/servers`, `#/streams`, `#/alerts`, `#/users` (admin) or `#/history`
+  (viewer), `#/subscription`, `#/bandwidth`, beside `#/requests/...` and `#/books/...`. The router is in `app.js`
+  (`ROUTE_OF`, `CARD_OF`, `hashFor`, `applyRoute` on `hashchange`); old anchors (`#streams-card` and the like, in
+  `LEGACY`) are replaced with the new address. Back and Forward move between pages; reload stays put.
+- `web/ui.js` (`gsUI`, loaded before `app.js`) holds what every page shares: `el`/`elc`/`add`, `api`, `ago`, `when`,
+  `date`, `duration`, `toast` (one toast style, above the tab bar on phones), `lock` (counted scroll lock,
+  `html.gs-locked`), `go`/`replace` (navigation), `scroll` (each history entry, keyed by `history.state.gsk`, keeps
+  its scroll position in memory and sessionStorage `gs-scroll`; Back restores it, a new page starts at the top,
+  tapping the tab you are on goes to the top), `sheet` and `strip`. Use these rather than writing new copies.
+- The phone rule is one media query everywhere: `(max-width: 760px), (max-height: 500px) and (pointer: coarse)`
+  (a phone on its side counts as a phone). The desktop side is its complement in `index.html`. `web/ui.css` holds
+  the shared phone layout; its selectors start with `html ` because `index.html`'s own `<style>` comes later.
+- Tab bar: fixed to the bottom of the screen on every page (safe areas respected, `--tabbar-space` padding), at most
+  five tabs (`PLACES` in `app.js`): viewers Home, Streams, Requests, Books, History; admins Home, Streams, Requests,
+  Books, More (a sheet with Servers, Alerts, Users; the alert count shows on More). On a phone on its side the bar is
+  slimmer with labels beside the icons. The Requests tab shows a small lime dot instead of the pulse ring.
+- One bottom sheet for every overlay on phones (`gsUI.sheet`: grab bar, swipe down or tap the dimmed page to close,
+  scroll lock): stream details, Settings, the history drawer, the account menu, the search kind menu, request
+  dialogs, More. On desktop the same panels keep their own look.
+- One page header on phones (`#phead`, `renderPhead`, `window.sdPhead`): a small "Telemetry" (or section) eyebrow and
+  a 32 px title under the top bar; `has-phead` hides the old titles inside cards. Requests title pages skip it
+  (the poster block names the title). Light and Dark live in Settings, Display, Appearance on phones (not the top bar).
+- Requests on phones: the search box is one line (kind chip plus field, Enter searches) away from Discover and
+  search results (`searchBox.setCompact`); the floating Report issue button is hidden (title pages and Reported
+  issues have their own). Sideways strips fade where more is hidden (`gsUI.strip`), and the current tab scrolls
+  into view.
+- Books & comics on phones keeps the top bar; the frame fills the space above the tab bar. The media site in a
+  frame hides its own Books & comics title on phones (its tabs scroll and fade the same way).
+- Verify phone changes at 390 x 844, 360 x 740 and 844 x 390 (touch), light and dark, viewer and admin.
 
 ## Running tests
 

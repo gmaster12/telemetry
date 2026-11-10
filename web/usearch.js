@@ -54,24 +54,7 @@
     PATHS[name].forEach(function (d) { var p = document.createElementNS(svgNS, 'path'); p.setAttribute('d', d); s.appendChild(p); });
     return s;
   }
-  function el(tag, props) {
-    var e = document.createElement(tag);
-    props = props || {};
-    Object.keys(props).forEach(function (k) {
-      var v = props[k];
-      if (v == null || v === false) return;
-      if (k === 'class') e.className = v;
-      else if (k === 'text') e.textContent = v;
-      else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), v);
-      else e.setAttribute(k, v === true ? '' : v);
-    });
-    for (var i = 2; i < arguments.length; i++) {
-      var kid = arguments[i];
-      if (kid == null || kid === false) continue;
-      e.appendChild(typeof kid === 'string' ? document.createTextNode(kid) : kid);
-    }
-    return e;
-  }
+  var el = window.gsUI.el;   // shared helpers (ui.js)
 
   function isBook(k) { return k === 'comics' || k === 'ebook' || k === 'audiobook'; }
 
@@ -101,7 +84,8 @@
   }
 
   function placeholder(kind, mode) {
-    if (kind === 'video') return 'Search movies, series and people';
+    // A phone has room for a few words only.
+    if (kind === 'video') return window.gsUI.isPhone() ? 'Movies, series, people' : 'Search movies, series and people';
     if (kind === 'books') return 'Search comics, ebooks and audiobooks';
     if (mode === 'request') return kind === 'comics' ? 'Find a comic series to request' : kind === 'ebook' ? 'Find an ebook to request' : 'Find an audiobook to request';
     return 'Search ' + KINDS[kind].label.toLowerCase() + ' in the library';
@@ -156,15 +140,24 @@
       form.dataset.kind = state.kind;
     }
 
+    // On a phone the menu is the shared bottom sheet (ui.js): it moves to the end of the page while open, so no
+    // card around the box can clip it, with a dimmed page behind it.
+    var detach = null, scrim = null;
     function close(focusBtn) {
       if (!state.open) return;
       state.open = false;
       menu.hidden = true;
       selBtn.setAttribute('aria-expanded', 'false');
       document.removeEventListener('mousedown', outside, true);
+      if (detach) { detach(); detach = null; }
+      if (scrim) { scrim.remove(); scrim = null; }
+      if (menu.parentNode !== sel) sel.appendChild(menu);
       if (focusBtn) selBtn.focus();
     }
-    function outside(e) { if (!sel.contains(e.target)) close(false); }
+    function outside(e) {
+      if (scrim && e.target === scrim) return;   // the dimmed page closes it on click, so the tap does not fall through
+      if (!sel.contains(e.target) && !menu.contains(e.target)) close(false);
+    }
     function openMenu() {
       var ks = list();
       menu.replaceChildren();
@@ -175,7 +168,13 @@
         menu.appendChild(item);
       });
       state.open = true;
-      menu.hidden = false;
+      if (window.gsUI.isPhone()) {
+        scrim = el('div', { class: 'us-scrim' });
+        var host = document.getElementById('streams-app') || document.body;
+        host.append(scrim, menu);
+        menu.hidden = false;
+        detach = window.gsUI.sheet(menu, { onClose: function () { close(true); }, scrim: scrim });
+      } else menu.hidden = false;
       selBtn.setAttribute('aria-expanded', 'true');
       document.addEventListener('mousedown', outside, true);
       var on = menu.querySelector('[aria-checked="true"]') || menu.firstChild;
@@ -200,6 +199,7 @@
 
     selBtn.addEventListener('click', function () { if (state.open) close(true); else openMenu(); });
     menu.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && state.open) { e.stopPropagation(); close(true); return; }
       var items = Array.prototype.slice.call(menu.querySelectorAll('.us-item'));
       var i = items.indexOf(document.activeElement);
       if (e.key === 'ArrowDown') { e.preventDefault(); (items[i + 1] || items[0]).focus(); }
@@ -233,6 +233,8 @@
       kind: function () { return state.kind; },
       setKind: function (k) { if (list().indexOf(k) >= 0) { state.kind = k; if (!isBook(k)) state.mode = 'library'; paint(); } },
       setValue: function (q) { input.value = q || ''; },
+      // One line on a phone: the kind as a small chip inside the box, no Search button (Enter searches).
+      setCompact: function (on) { form.classList.toggle('is-compact', !!on); },
       refresh: paint
     };
     instances.push(api);

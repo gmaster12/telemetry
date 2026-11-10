@@ -3,44 +3,15 @@
 (function () {
   'use strict';
 
-  var HEADERS = { 'Content-Type': 'application/json', 'X-Requested-With': 'greystar' };
   var root = document.getElementById('streams-app');
   var me = null;
 
   // ---------- helpers ----------
-  function el(tag, props) {
-    var e = document.createElement(tag);
-    props = props || {};
-    Object.keys(props).forEach(function (k) {
-      var v = props[k];
-      if (v == null || v === false) return;
-      if (k === 'class') e.className = v;
-      else if (k === 'text') e.textContent = v;
-      else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), v);
-      else if (k === 'value') e.value = v;
-      else e.setAttribute(k, v === true ? '' : v);
-    });
-    for (var i = 2; i < arguments.length; i++) {
-      var kid = arguments[i];
-      if (kid == null || kid === false) continue;
-      if (Array.isArray(kid)) kid.forEach(function (x) { if (x) e.appendChild(typeof x === 'string' ? document.createTextNode(x) : x); });
-      else e.appendChild(typeof kid === 'string' ? document.createTextNode(kid) : kid);
-    }
-    return e;
-  }
+  var el = window.gsUI.el;   // shared helpers (ui.js)
   function icon(name, size) {
     return window.sdIcon ? window.sdIcon(name, size) : document.createTextNode('');
   }
-  function api(method, path, body) {
-    return fetch(path, { method: method, headers: HEADERS, credentials: 'same-origin', cache: 'no-store', body: body ? JSON.stringify(body) : undefined })
-      .then(function (r) {
-        if (r.status === 401) { window.location.replace('/login.html'); throw new Error('Signed out'); }
-        return r.json().catch(function () { return null; }).then(function (j) {
-          if (!r.ok) throw new Error((j && j.detail) || ('HTTP ' + r.status));
-          return j;
-        });
-      });
-  }
+  function api(method, path, body) { return window.gsUI.api(method, path, body, { cache: 'no-store' }); }
   function avatar(name, size) {
     var s = String(name || '?');
     var hash = Array.from(s).reduce(function (h, c) { return h + c.charCodeAt(0); }, 0) % 4;
@@ -61,15 +32,7 @@
   function timeLabel(ts) {
     return new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
   }
-  function ago(ts) {
-    if (!ts) return 'Never';
-    var s = Math.max(0, Date.now() / 1000 - ts);
-    if (s < 90) return 'Just now';
-    if (s < 3600) return Math.round(s / 60) + ' min ago';
-    if (s < 86400) return Math.round(s / 3600) + ' h ago';
-    if (s < 86400 * 30) return Math.round(s / 86400) + ' d ago';
-    return new Date(ts * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
-  }
+  function ago(ts) { var w = window.gsUI.ago(ts); return w.charAt(0).toUpperCase() + w.slice(1); }   // at the start of a line
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   var SECTION_LABEL = { streams: 'Live streams', mystreams: 'My streams', requests: 'Requests', servers: 'Servers', bandwidth: 'Bandwidth', viewing: 'When people watch', history: 'My history' };
 
@@ -101,9 +64,11 @@
 
   // ---------- user pill and menu ----------
   var menuOpen = false;
+  var menuDetach = null;
   function renderUser() {
     var box = document.getElementById('user');
     if (!box || !me) return;
+    if (menuDetach) { menuDetach(); menuDetach = null; }
     box.replaceChildren();
     var a = avatar(me.name, null);
     a.appendChild(el('span', { class: 'sd-avatar__on' }));
@@ -135,7 +100,10 @@
       else if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length].focus(); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length].focus(); }
     });
-    box.appendChild(menu);
+    // Phones: the shared bottom sheet over a dimmed page (the scrim only shows there, ui.css).
+    var scrim = el('div', { class: 'gp-menu-scrim' });
+    box.append(scrim, menu);
+    menuDetach = window.gsUI.sheet(menu, { onClose: closeMenu, scrim: scrim, desktop: 'menu' });
   }
   function closeMenu() { if (menuOpen) { menuOpen = false; renderUser(); } }
   document.addEventListener('click', function (e) {
@@ -323,14 +291,7 @@
 
   // ---------- your servers (viewers): Online or Offline, and for how long ----------
   var srvData = null, srvSkew = 0, srvBoxes = [], srvTimer = null;
-  function ago2(sec) {
-    sec = Math.max(0, sec);
-    if (sec < 60) return 'under a minute';
-    var m = Math.floor(sec / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
-    if (d >= 2) return d + ' days';
-    if (h >= 1) return h + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
-    return m + ' min';
-  }
+  function ago2(sec) { return window.gsUI.duration(sec); }
   function serverTile(s) {
     var nowSec = (Date.now() + srvSkew) / 1000;
     var down = s.online === false, known = s.online != null;
@@ -429,10 +390,11 @@
   // ---------- history drawer ----------
   var drawer = document.getElementById('hist');
   var lastFocus = null;
+  var drawerDetach = null;
   function closeHistory() {
     if (!drawer || drawer.hidden) return;
     drawer.hidden = true;
-    document.documentElement.classList.remove('gp-lock');
+    if (drawerDetach) { drawerDetach(); drawerDetach = null; }
     if (lastFocus && lastFocus.focus) lastFocus.focus();
   }
   function openHistory(id, name) {
@@ -447,7 +409,7 @@
     var body = el('div', { class: 'gp-drawer__body' });
     panel.append(close, head, body);
     drawer.hidden = false;
-    document.documentElement.classList.add('gp-lock');
+    if (!drawerDetach) drawerDetach = window.gsUI.sheet(panel, { onClose: closeHistory });   // page held still; phones: swipe down
     close.focus();
     var isSelf = id === 'me';
     var info = isSelf ? api('GET', '/api/me/history?limit=50') : api('GET', '/api/users/' + encodeURIComponent(id));
