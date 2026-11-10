@@ -104,7 +104,7 @@
   // Viewers only have Display, so they go straight there.
   var VIEWS = {
     home: { title: 'Settings', lead: 'Everything at a glance. Open a card to change it.' },
-    display: { title: 'Display', scope: 'you', lead: 'How stream cards look on this screen. Nobody else sees these changes, and your other devices keep their own.' },
+    display: { title: 'Display', scope: 'you', lead: 'Light or dark, and how the dashboard looks on this screen. Nobody else sees these changes, and your other devices keep their own.' },
     plex: { title: 'Plex servers', scope: 'all', lead: 'Where live streams come from. The dashboard asks each server what is playing every few seconds. Each server can belong to its own Plex account.' },
     netdata: { title: 'Netdata', scope: 'all', lead: 'CPU and upload speed for each server, read from Netdata. They drive the capacity rings, server status and the bandwidth chart.' },
     alerts: { title: 'Alerts', scope: 'all', lead: 'When a server counts as running hot. A hot server turns amber on the capacity rings and shows up under Alerts.' },

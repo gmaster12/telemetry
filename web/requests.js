@@ -1189,14 +1189,14 @@
     var l = requestList('/api/requests/mine?' + qs({ filter: q.filter || 'all', everyone: everyone ? 'true' : null }),
       everyone ? 'No requests match' : 'You have not requested anything yet', everyone ? null : 'Find a movie or series and choose Request.');
     var top = el('div', { class: 'rq-listtop' }, filterChips('mine', q.filter, { everyone: everyone ? '1' : null }),
-      me.can.viewRequests ? el('a', { class: 'rq-chip', href: link('mine', { filter: q.filter, everyone: everyone ? null : '1' }), 'aria-pressed': everyone ? 'true' : 'false', text: everyone ? 'Everyone' : 'Only mine' }) : null);
+      me.can.viewRequests ? el('a', { class: 'rq-chip', href: link('mine', { filter: q.filter, everyone: everyone ? null : '1' }), 'aria-current': everyone ? 'true' : null, text: everyone ? 'Everyone' : 'Only mine' }) : null);
     if (everyone || (q.filter && q.filter !== 'all')) {
       body.replaceChildren.apply(body, [quotaNote(), top, l.el].filter(Boolean));
       return l.load();
     }
     // Own requests: one list of everything (movies, shows, comics, ebooks, audiobooks), newest first.
     if (!q.classic) {
-      var evTop = me.can.viewRequests ? el('div', { class: 'rq-listtop' }, el('a', { class: 'rq-chip', href: link('mine', { everyone: '1' }), 'aria-pressed': 'false', text: 'Everyone (movies and shows)' })) : '';
+      var evTop = me.can.viewRequests ? el('div', { class: 'rq-listtop' }, el('a', { class: 'rq-chip', href: link('mine', { everyone: '1' }), text: 'Everyone (movies and shows)' })) : '';
       return everything(evTop);
     }
     // Own requests, all of them: what failed and what is waiting come first, in their own boxes; the servers

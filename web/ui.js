@@ -262,6 +262,28 @@
     requestAnimationFrame(edges);
   }
 
+  // ---------- skip link ----------
+  /* "Skip to content" (the first Tab stop) moves focus to the page's title, or into the Books & comics frame,
+     without changing the address (the router owns the hash). */
+  document.addEventListener('click', function (e) {
+    var a = e.target.closest && e.target.closest('.gs-skip');
+    if (!a) return;
+    e.preventDefault();
+    var shown = function (n) { return n.getClientRects().length > 0 && !n.closest('#settings-dock'); };
+    var app = document.getElementById('streams-app');
+    var t = null;
+    if (app && app.dataset.page === 'books') t = document.querySelector('#books-page iframe');
+    // Desktop dashboard: the part the address names (#/streams is the Live streams card further down the page).
+    var part = { streams: 'streams-card', servers: 'servers-card', alerts: 'servers-card', users: 'people-card', bandwidth: 'bandwidth-card' }[location.hash.replace(/^#\/?/, '').split(/[/?]/)[0]];
+    var card = part && !isPhone() && !(app && app.dataset.page) ? document.getElementById(part) : null;
+    if (!t && card) t = Array.prototype.filter.call(card.querySelectorAll('h1, h2'), shown)[0] || null;
+    if (!t) t = Array.prototype.filter.call(document.querySelectorAll('.sd-content h1, .sd-content h2'), shown)[0];
+    if (!t) t = document.getElementById('content');
+    if (!t) return;
+    if (t.tagName !== 'IFRAME' && !t.hasAttribute('tabindex')) t.setAttribute('tabindex', '-1');
+    t.focus();
+  });
+
   window.gsUI = {
     PHONE: PHONE, phoneQuery: phoneQuery, isPhone: isPhone, reduced: reduced,
     el: el, elc: elc, add: add, api: api,

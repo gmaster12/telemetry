@@ -59,7 +59,8 @@
     var t = document.getElementById('title');
     if (t) t.textContent = own ? 'Your streams' : 'Active streams';
     var gear = document.getElementById('gear');
-    if (gear) gear.hidden = !(me.role === 'admin' || window.dash.can('streams'));
+    // Everyone gets Settings, Display (Appearance and the home layout); the stream card choices need streams (ui.css).
+    if (gear) gear.hidden = false;
   }
 
   // ---------- user pill and menu ----------
@@ -81,7 +82,7 @@
     if (!menuOpen) return;
     var items = [];
     if (me.kind === 'plex' && (me.role === 'admin' || window.dash.can('history'))) {
-      items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); openHistory('me', me.name); } }, icon('history', 18), 'My playback history'));
+      items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(true); openHistory('me', me.name); } }, icon('history', 18), 'My playback history'));
     }
     if (me.role !== 'admin' && me.kind === 'plex' && mySub && mySub.configured && window.gsHome) {
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); window.gsHome.show('subscription'); } }, icon('bookmark', 18), 'My subscription'));
@@ -96,7 +97,7 @@
     menu.addEventListener('keydown', function (e) {
       var list = Array.prototype.slice.call(menu.querySelectorAll('[role="menuitem"]'));
       var i = list.indexOf(document.activeElement);
-      if (e.key === 'Escape') { closeMenu(); btn.focus(); }
+      if (e.key === 'Escape') { closeMenu(true); }
       else if (e.key === 'ArrowDown') { e.preventDefault(); list[(i + 1) % list.length].focus(); }
       else if (e.key === 'ArrowUp') { e.preventDefault(); list[(i - 1 + list.length) % list.length].focus(); }
     });
@@ -105,7 +106,13 @@
     box.append(scrim, menu);
     menuDetach = window.gsUI.sheet(menu, { onClose: closeMenu, scrim: scrim, desktop: 'menu' });
   }
-  function closeMenu() { if (menuOpen) { menuOpen = false; renderUser(); } }
+  // focus: put focus back on the account button (closing redraws it, so the old one is gone).
+  function closeMenu(focus) {
+    if (!menuOpen) return;
+    menuOpen = false; renderUser();
+    if (focus) accountButton().focus();
+  }
+  function accountButton() { return document.querySelector('#user .sd-user__btn') || document.body; }
   document.addEventListener('click', function (e) {
     var box = document.getElementById('user');
     // The click that opened the menu redrew the button, so its old target is detached: not an outside click.
@@ -395,11 +402,16 @@
     if (!drawer || drawer.hidden) return;
     drawer.hidden = true;
     if (drawerDetach) { drawerDetach(); drawerDetach = null; }
-    if (lastFocus && lastFocus.focus) lastFocus.focus();
+    // Opened from the account menu, whose items are gone now: back to the account button.
+    var to = fromMenu ? accountButton() : lastFocus && lastFocus.isConnected ? lastFocus : null;
+    fromMenu = false;
+    if (to && to.focus) to.focus();
   }
+  var fromMenu = false;
   function openHistory(id, name) {
     if (!drawer) return;
     lastFocus = document.activeElement;
+    fromMenu = !!(lastFocus && lastFocus.closest && lastFocus.closest('#user-menu'));
     closeMenu();
     var panel = drawer.querySelector('.gp-drawer__panel');
     panel.replaceChildren();
