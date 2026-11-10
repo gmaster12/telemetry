@@ -212,20 +212,20 @@
   const isAdmin = () => !!(window.dash.isAdmin && window.dash.isAdmin());
   const vh = () => !!(window.gsHome && window.gsHome.active());
   const VH_OF_ROUTE = { home: 'home', streams: 'streams', people: 'history', subscription: 'subscription' };
-  /* Every place, once: the desktop menu (nav) and the phone tab bar (tab) both come from this list.
-     route is the address (#/route); more: on a phone it goes under More when there are more than five tabs. */
+  /* Every place, once: the desktop menu (nav) and the phone tab bar (tab) both come from this list, with the same
+     names. route is the address (#/route); more: on a phone it goes under More when there are more than five tabs. */
   const v = (x) => (typeof x === 'function' ? x() : x);
   const PLACES = [
-    { route: 'home', nav: () => (vh() ? 'Home' : 'Overview'), tab: 'Home', icon: 'grid',
+    { route: 'home', nav: 'Home', tab: 'Home', icon: 'grid',
       navOk: () => vh() || can('streams'), tabOk: () => vh() || can('streams') || can('bandwidth') || can('viewing') },
     { route: 'bandwidth', nav: 'Bandwidth', icon: 'activity', navOk: () => can('bandwidth'), tabOk: () => false },
     { route: 'servers', nav: 'Servers', tab: 'Servers', icon: 'server', more: true, navOk: () => can('servers'), tabOk: () => can('servers') },
     { route: 'streams', nav: 'Streams', tab: 'Streams', icon: 'play', navOk: () => can('streams'), tabOk: () => can('streams') },
     { route: 'alerts', tab: 'Alerts', icon: 'bell', more: true, navOk: () => false, tabOk: () => can('streams') && can('servers') },
-    { route: 'people', nav: () => (isAdmin() ? 'Users' : 'My history'), tab: () => (isAdmin() ? 'Users' : 'History'), icon: () => (isAdmin() ? 'users' : 'history'),
+    { route: 'people', nav: () => (isAdmin() ? 'Users' : 'History'), tab: () => (isAdmin() ? 'Users' : 'History'), icon: () => (isAdmin() ? 'users' : 'history'),
       more: () => isAdmin(), navOk: () => isAdmin() || (!!window.dash.me && !!window.dash.me() && can('history')), tabOk: () => isAdmin() || (!!window.dash.me && !!window.dash.me() && can('history')) },
     { route: 'requests', nav: 'Requests', tab: 'Requests', icon: 'film', navOk: () => can('requests'), tabOk: () => can('requests') },
-    { route: 'books', nav: 'Books & comics', tab: 'Books', icon: 'book', navOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()), tabOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) }
+    { route: 'books', nav: 'Books', tab: 'Books', icon: 'book', navOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()), tabOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) }
   ];
   let navActive = 'home';
   // Requests and Books & comics are their own pages, shown by their own scripts when the address is theirs.
@@ -306,11 +306,13 @@
     const params = dash.params();
     root.querySelectorAll('.sd-pill[data-go]').forEach((b) => b.setAttribute('aria-pressed', PILL_FILTER[b.dataset.go](params) ? 'true' : 'false'));
     root.querySelector('.sd-pill[data-go="buffering"]').classList.toggle('is-warn', !!row && row.buffering > 0);
+    // The newest bandwidth minute; people who are not given bandwidth see when their streams last loaded.
     const bw = dash.data('bandwidth');
-    if (bw.status === 'ok' && bw.data.length) {
-      const last = bw.data.reduce((a, r) => (new Date(r.minute) > new Date(a.minute) ? r : a));
-      document.getElementById('asof').textContent = 'Updated ' + clock(new Date(last.minute));
-    }
+    const st = dash.data('streams');
+    let at = null;
+    if (bw.status === 'ok' && bw.data.length) at = new Date(bw.data.reduce((a, r) => (new Date(r.minute) > new Date(a.minute) ? r : a)).minute);
+    else if (st.status === 'ok' && st.at) at = new Date(st.at);
+    if (at) document.getElementById('asof').textContent = 'Updated ' + clock(at);
   }
 
   const sortedStreams = () => {
@@ -782,7 +784,7 @@
   const flipped = new Set();
   function streamBack(r) {
     const fit = cardStyle === 'classic' ? '' : ' sd-back--fit sd-back--' + (cardStyle === 'tiles' ? 'tile' : cardStyle);
-    const card = notchCard('sd-scard sd-back sd-face' + fit, 'Flip back', (e) => { e.stopPropagation(); toggleFlip(r.id, e.currentTarget.closest('.sd-flip__inner')); });
+    const card = notchCard('sd-scard sd-back sd-face' + fit, 'Flip back', (e) => { e.stopPropagation(); toggleFlip(r.id, e.currentTarget.closest('.sd-flip__inner'), e.detail === 0); });
     card.style.setProperty('--art', 'url(' + artFor(r) + ')');
     const head = el('div', 'sd-card__head');
     const sub = el('p', 'sd-back__sub');
@@ -862,9 +864,25 @@
     fill();
     return box;
   }
-  function toggleFlip(id, inner) {
+  // focus: a keyboard flip moves focus to the button on the side that is now showing.
+  function toggleFlip(id, inner, focus) {
     if (flipped.has(id)) flipped.delete(id); else flipped.add(id);
-    if (inner) { inner.classList.toggle('is-flipped', flipped.has(id)); inner.setAttribute('aria-pressed', flipped.has(id) ? 'true' : 'false'); }
+    if (!inner) return;
+    const on = flipped.has(id);
+    inner.classList.toggle('is-flipped', on);
+    faceState(inner, on);
+    if (focus) {
+      const b = on ? inner.children[1] && inner.children[1].querySelector('.sd-go') : inner.querySelector('.sd-flipbtn');
+      if (b) b.focus();
+    }
+  }
+  // Only the side that shows can be reached with Tab or a screen reader.
+  function faceState(inner, on) {
+    const [front, back] = inner.children;
+    if (front) front.inert = on;
+    if (back) back.inert = !on;
+    const b = inner.querySelector('.sd-flipbtn');
+    if (b) b.setAttribute('aria-expanded', on ? 'true' : 'false');
   }
   /* Streams starting and stopping, "Clock sweep" with the Live now bar (Glenn's pick): a lime border sweeps once
      around a new card like a clock hand, then fades; an ended card stays in its old place while a grey border
@@ -972,14 +990,18 @@
   function streamCard(r) {
     const wrap = el('div', 'sd-flip');
     const inner = el('div', 'sd-flip__inner' + (flipped.has(r.id) ? ' is-flipped' : ''));
-    inner.tabIndex = 0;
-    inner.setAttribute('role', 'button');
-    inner.setAttribute('aria-pressed', flipped.has(r.id) ? 'true' : 'false');
-    inner.setAttribute('aria-label', r.user + ', ' + r.title + '. Show playback details');
-    inner.addEventListener('click', () => toggleFlip(r.id, inner));
-    inner.addEventListener('keydown', (e) => { if (e.target === inner && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); toggleFlip(r.id, inner); } });
+    // A group with its own Flip button (a button holding other buttons reads as one long button).
+    // A mouse can still click anywhere on the card to flip it.
+    inner.setAttribute('role', 'group');
+    inner.setAttribute('aria-label', r.user + ', ' + r.title);
+    inner.addEventListener('click', (e) => { if (!e.target.closest('button, a, input, select, textarea, label')) toggleFlip(r.id, inner); });
     const front = streamFront(r);
+    const flip = el('button', 'sd-flipbtn', 'Show playback details');
+    flip.type = 'button';
+    flip.addEventListener('click', (e) => { e.stopPropagation(); toggleFlip(r.id, inner, true); });
+    front.appendChild(flip);
     inner.append(front, streamBack(r));
+    faceState(inner, flipped.has(r.id));
     wrap.appendChild(inner);
     pulseMarks(wrap, r, front);
     return wrap;
@@ -1304,21 +1326,58 @@
       mtab = t; root.dataset.mtab = t;
     }
     renderAll();
+    setDocTitle(r);
+    spyHold = Date.now() + 1200;   // the smooth scroll below is not the person scrolling
     if (y != null) { window.gsUI.scroll.restore(y); return; }
     if (isMobile() || vh() || r === 'home') { window.gsUI.scroll.top(); return; }
     const target = document.getElementById(CARD_OF[r]);
     if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
   window.addEventListener('hashchange', applyRoute);
+
+  /* The browser tab names the page (Requests and Books & comics set their own). */
+  const TITLE_OF = { home: 'Home', bandwidth: 'Bandwidth', servers: 'Servers', streams: 'Streams', alerts: 'Alerts', subscription: 'My subscription' };
+  function setDocTitle(r) {
+    const name = r === 'people' ? (isAdmin() ? 'Users' : 'My history') : TITLE_OF[r] || 'Home';
+    document.title = (r === 'home' ? 'Greystar Telemetry' : name + ' · Greystar Telemetry');
+  }
+
+  /* Desktop: the menu follows the page. Scrolling by hand to another part of the dashboard highlights it in the
+     menu and changes the address in place (no new Back step), once the scrolling stops. */
+  let spyHold = 0, spyTimer = null;
+  const SPY = [['bandwidth', 'bandwidth-card'], ['servers', 'servers-card'], ['streams', 'streams-card'], ['people', 'people-card']];
+  function spy() {
+    if (isMobile() || vh() || PAGES[root.dataset.page] || Date.now() < spyHold || !dock.hidden) return;
+    const cur = dashRoute();
+    if (cur == null) return;
+    const line = Math.min(window.innerHeight * 0.4, 360);
+    let r = 'home';
+    if (window.scrollY > 40) {
+      const parts = SPY.map(([route, id]) => [route, document.getElementById(id)])
+        .filter(([route, e]) => e && e.offsetParent !== null && PLACES.some((p) => p.route === route && p.navOk()))
+        .map(([route, e]) => [route, e.getBoundingClientRect().top]).sort((a, b) => a[1] - b[1]);
+      parts.forEach(([route, top]) => { if (top <= line) r = route; });
+      // At the bottom of the page the last part counts, however short it is.
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4 && parts.length) r = parts[parts.length - 1][0];
+    }
+    // Alerts and My subscription live on the Servers card and the Home part: leave those addresses as they are.
+    if (r === cur || (cur === 'alerts' && r === 'servers') || (cur === 'subscription' && r === 'home')) return;
+    navActive = r;
+    window.gsUI.replace(hashFor(r));
+    setDocTitle(r);
+    renderNav();
+  }
+  window.addEventListener('scroll', () => { clearTimeout(spyTimer); spyTimer = setTimeout(spy, 160); }, { passive: true });
   let routed = false;
 
-  /* Phones: one page header (eyebrow and title) right under the top bar, the same on every screen. The cards and
-     sections keep their titles on a desktop; on a phone the ones that would repeat it are hidden (ui.css). */
+  /* One page header (eyebrow and title) right under the top bar. Phones: every screen. Desktop: a viewer's pages
+     (the dashboard for admins keeps its own title, which has the Telemetry eyebrow above it). The titles inside
+     cards that would repeat it are hidden (ui.css, has-phead). */
   const phead = document.getElementById('phead');
   function renderPhead() {
     let title = null, count = '';
     const txt = (id, fb) => { const e = document.getElementById(id); return (e && e.textContent.trim()) || fb; };
-    if (isMobile() && !PAGES[root.dataset.page]) {
+    if ((isMobile() || vh()) && !PAGES[root.dataset.page]) {
       if (vh()) {
         const v = window.gsHome.view();
         if (v === 'home') { const h = document.querySelector('#vhome .vh-hello'); title = h ? h.textContent : null; }  // hub and month have their own title

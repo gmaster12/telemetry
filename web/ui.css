@@ -30,6 +30,71 @@ html.gs-locked, html.gs-locked body { overflow: hidden; overscroll-behavior: non
 
 @media (prefers-reduced-motion: reduce) { .gs-toast { transition: none; } }
 
+/* ---------- the same on every screen (the phone pass, then the desktop pass) ---------- */
+/* Light and Dark live in Settings, Display, Appearance: the top bar keeps its room for Live now. */
+html .sd-look { display: none !important; }
+/* Nothing playing: quiet words on the dark bar (an empty lime block said nothing). */
+html .sd-pill-lime:has(> .sd-pill-lime__none:only-child) { background: transparent; padding: 0 10px 0 0; }
+html .sd-pill-lime__none { min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--on-ink); opacity: 0.72; }
+/* One page header: an eyebrow and one title; the titles inside cards that would repeat it are hidden. */
+html .sd-phead[hidden] { display: none; }
+html .sd-phead__eyebrow, html .rq-eyebrow, html .sd-lockup__label { font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted); opacity: 1; }
+html .sd-phead__count { margin-left: 8px; font-size: 17px; color: var(--ink-muted); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+html .gs-app.has-phead :is(#srv-title, #str-title, #al-title, #people-title, .sd-head .sd-title, .vh-hello, #al-count) { display: none !important; }
+html .gs-app.has-phead .sd-srvtitle { min-height: 0; }
+html .gs-app.has-phead #alerts .sd-sec-head { display: none; }
+/* A viewer's Home button repeats the Home button in the menu and the tab bar. */
+html .vh-back, html #vhome-back { display: none !important; }
+/* Requests: a small lime dot instead of the ring, which read as a second selected item. */
+html .sd-navbtn { position: relative; }
+html :is(.sd-navbtn, .sd-tab)[aria-label="Requests"]:not([aria-current="true"]) { animation: none; box-shadow: none; outline: 0; }
+html :is(.sd-navbtn, .sd-tab)[aria-label="Requests"]:not([aria-current="true"])::after { content: ""; position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--volt); box-shadow: 0 0 0 2px var(--surface-card); }
+html .sd-tab[aria-label="Requests"]:not([aria-current="true"])::after { right: 13px; box-shadow: 0 0 0 2px var(--surface-ink); }
+html .gs-app:not([data-look="dark"]) .sd-navbtn[aria-label="Requests"]:not([aria-current="true"])::after { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3px rgba(80, 150, 30, 0.55); }
+/* Settings, Display for someone who is not given streams: Appearance and the home layout only. */
+html .gs-no-streams .st-display { grid-template-columns: minmax(0, 1fr); }
+html .gs-no-streams .st-display :is(#card-style, .sd-field:has(#card-size), #art-light-field, #clip-mode, #clip-count-field, .st-preview) { display: none; }
+/* Skip link: the first Tab stop on every page, shown only while focused. */
+.gs-skip { position: fixed; top: 12px; left: 12px; z-index: 80; padding: 12px 20px; border-radius: var(--radius-pill, 999px); background: var(--surface-ink, #0b0b0d); color: var(--on-ink, #f6f6f4);
+  font: 600 15px/20px var(--font-sans, system-ui); text-decoration: none; transform: translateY(-160%); }
+.gs-skip:focus, .gs-skip:focus-visible { transform: none; outline: 2px solid var(--volt, #b8fc64); outline-offset: 2px; }
+/* A stream card's own flip button: shown when it has keyboard focus (a mouse can click anywhere on the card). */
+.sd-flipbtn { position: absolute; left: 12px; bottom: 12px; z-index: 6; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+  border: 0; border-radius: var(--radius-pill, 999px); background: var(--volt, #b8fc64); color: var(--on-fill, #16141f); font: 600 14px/20px var(--font-sans, system-ui); cursor: pointer; }
+.sd-flipbtn:focus-visible { width: auto; height: 40px; padding: 0 16px; clip: auto; clip-path: none; overflow: visible; outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+/* ---------- desktops and tablets ---------- */
+@media (min-width: 761px) and (min-height: 501px), (min-width: 761px) and (pointer: fine), (min-width: 761px) and (pointer: none) {
+  /* Holding the page still: only the window stops scrolling. A body with overflow: hidden becomes a scroller of its
+     own, and the sticky top bar and Settings would then stick to the top of the page instead of the window. */
+  html.gs-locked body { overflow: visible; }
+  /* Big screens: the content stops at 1,600 px and sits in the middle; the menu stays at the left edge. */
+  html .sd-content { width: 100%; max-width: 1600px; margin-inline: auto; }
+  /* The top bar stays at the top of the window, like the menu, on the page colour. */
+  html .sd-top { position: sticky; top: 0; z-index: 8; margin-top: -16px; padding: 16px 0 12px; background: var(--surface-page); }
+  html .sd-top::before { content: ""; position: absolute; inset: 0 -32px 0 -24px; z-index: -1; background: inherit; }   /* covers card shadows out to the edges */
+  html .gs-app [id$="-card"], html .gs-app #alerts, html .gs-app #summary, html .gs-app #phead { scroll-margin-top: 112px; }
+  /* Narrow desktops: the account shows as its picture only, and Live now names its newest two streams. */
+  @media (max-width: 1199px) {
+    html .sd-user { padding: 0 10px; }
+    html .sd-user__text { display: none; }
+  }
+  @media (max-width: 1099px) { html .sd-newest:nth-of-type(n+3) { display: none; } }
+  @media (max-width: 899px) { html .sd-newest:nth-of-type(n+2) { display: none; } html .sd-clock { display: none; } }
+  /* One page header: the same eyebrow and one 48 px title on every page. */
+  html .sd-phead { display: flex; flex-direction: column; gap: 4px; }
+  html .sd-phead__title, html .rq-title, html .sd-title, html .vh-hello, html .vh-hubtitle { margin: 0; font-size: 48px; line-height: 52px; font-weight: 300; letter-spacing: -0.03em; }
+  /* Under a viewer's page header the stream figures follow on the left, not far off at the right. */
+  html .gs-app.has-phead .sd-head { justify-content: flex-start; margin-top: -8px; }
+  /* Report issue floats only on lists; a title page and Reported issues have their own. */
+  html #requests-page:is([data-sect="movie"], [data-sect="series"], [data-sect="issues"]) .rq-report { display: none; }
+  /* One size per kind of control: search boxes 46 px, chips and tabs 36 px, links at least 32 px. */
+  html .sd-search { height: 46px; }
+  html .rq-tab { height: 36px; }
+  html .rq-row__all { min-height: 32px; display: inline-flex; align-items: center; padding: 0 4px; }
+}
+
 /* ---------- phones ---------- */
 @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   :root { --tabbar-space: calc(108px + env(safe-area-inset-bottom)); }
@@ -42,31 +107,13 @@ html.gs-locked, html.gs-locked body { overflow: hidden; overscroll-behavior: non
   html .sd-tab { font-size: 11px; }
   html .sd-tab > span:not(.sd-tab__count) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   html .sd-tab__count { font-size: 11px; }
-  /* Requests: a small lime dot instead of the ring, which read as a second selected tab. */
-  html .sd-tab[aria-label="Requests"]:not([aria-current="true"]) { animation: none; }
-  html .sd-tab[aria-label="Requests"]:not([aria-current="true"])::after { content: ""; position: absolute; top: 9px; right: 13px; width: 8px; height: 8px; border-radius: 50%;
-    background: var(--volt); box-shadow: 0 0 0 2px var(--surface-ink); }
   html .sd-back--tile .sd-back__eyebrow, html .sd-back--tile .sd-dl dt { font-size: 11px; }
-
-  /* Top bar: Live now gets the room; Light and Dark live in Settings, Display. */
-  html .sd-look { display: none !important; }
-  /* Nothing playing: the words sit on the dark bar (an empty lime blob said nothing, and its words did not fit). */
-  html .sd-pill-lime:has(> .sd-pill-lime__none:only-child) { background: transparent; padding: 0 10px 0 0; }
-  html .sd-pill-lime__none { min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--on-ink); opacity: 0.72; }
 
   /* One page header: an eyebrow and a 32 px title right under the top bar, never inside a card. */
   html .sd-phead { display: flex; flex-direction: column; gap: 2px; }
-  html .sd-phead[hidden] { display: none; }
-  html .sd-phead__eyebrow, html .rq-eyebrow { font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted); }
   html .sd-phead__title, html .rq-title, html .sd-title, html .vh-hello, html .vh-hubtitle { margin: 0; font-size: 32px !important; line-height: 36px !important; font-weight: 300; letter-spacing: -0.02em; }
-  html .sd-phead__count { margin-left: 8px; font-size: 17px; color: var(--ink-muted); font-variant-numeric: tabular-nums; letter-spacing: 0; }
-  html .gs-app.has-phead :is(#srv-title, html #str-title, html #al-title, html #people-title, html .sd-head .sd-title, html .vh-hello, html #al-count) { display: none !important; }
-  html .gs-app.has-phead .sd-srvtitle { min-height: 0; }
-  html .gs-app.has-phead #alerts .sd-sec-head { display: none; }
   /* Rows of cards with nothing showing on this tab would still take a gap each. */
   html .gs-app:is([data-mtab="streams"], [data-mtab="alerts"], [data-mtab="people"]) .sd-content > :is(.sd-main, .sd-insights) { display: none; }
-  /* A viewer's Home button duplicates the Home tab. */
-  html .vh-back, html #vhome-back { display: none !important; }
 
   /* Requests: the floating Report issue button covered content; title pages and Reported issues have their own. */
   html .rq-report { display: none !important; }

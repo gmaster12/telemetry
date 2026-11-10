@@ -13,6 +13,8 @@
   };
   var SECTION = { streams: 'streams', servers: 'servers', bandwidth: 'bandwidth', viewing_hours: 'viewing', bandwidth_daily: 'bandwidth' };
   var REFRESH_MS = 10000;
+  // The last-7-days data sets barely move inside an hour: fetched every 5 minutes, not every 10 seconds.
+  var SLOW_MS = { viewing_hours: 300000, bandwidth_daily: 300000 };
   var me = null;
   var loaded = false;
   var KEEP = ['look', 'cardsize', 'artlight', 'cardstyle', 'clips', 'clipcount', 'vhome'];
@@ -62,7 +64,7 @@
         return r.json();
       })
       .then(function (j) {
-        store[id] = { status: 'ok', data: j.rows || [], sample: !!j.sample, updated: j.updated };
+        store[id] = { status: 'ok', data: j.rows || [], sample: !!j.sample, updated: j.updated, at: Date.now() };
       })
       .catch(function (e) {
         var prev = store[id];
@@ -74,7 +76,12 @@
 
   function refresh() {
     if (!me) return Promise.resolve();
-    return Promise.all(Object.keys(ENDPOINTS).map(load)).then(function () { loaded = true; fire(); });
+    var now = Date.now();
+    var due = Object.keys(ENDPOINTS).filter(function (id) {
+      var s = store[id];
+      return !SLOW_MS[id] || !s || s.status !== 'ok' || s.stale || s.forbidden || !s.at || now - s.at >= SLOW_MS[id];
+    });
+    return Promise.all(due.map(load)).then(function () { loaded = true; fire(); });
   }
 
   function loadMe() {

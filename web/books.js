@@ -89,6 +89,7 @@
       delete root.dataset.immersive;
     }
     page.hidden = !on;
+    if (on) document.title = 'Books & comics · Greystar Telemetry';
     if (was !== on && window.sdNavChanged) window.sdNavChanged();
   }
 

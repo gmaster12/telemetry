@@ -1,17 +1,14 @@
-/* Books & comics: the Greystar media site in a frame (books.js). On a desktop the media site draws its own
-   "Books & comics" title, search and tabs inside the frame, so the dashboard's top bar steps aside; on a phone the
-   top bar stays (the same on every page) and the frame's header scrolls away with its content. */
+/* Books & comics: the Greystar media site in a frame (books.js). The dashboard's top bar stays, the same as on
+   every page, and the frame fills the window under it (on a phone, above the tab bar: ui.css). The media site
+   in a frame leaves out its own big title, so the page has one header. */
 .gs-app[data-page="books"] .sd-content > :not(.sd-settings-dock):not(#books-page):not(.sd-tabbar):not(.sd-sr):not(.sd-more):not(.sd-top) { display: none !important; }
-/* Desktop: the frame draws its own title, so the top bar steps aside. Phones keep the top bar (ui.css sizes the frame). */
-@media (min-width: 761px) and (min-height: 501px), (min-width: 761px) and (pointer: fine), (min-width: 761px) and (pointer: none) {
-  .gs-app[data-page="books"] .sd-content > .sd-top { display: none !important; }
-}
 
 .bk { position: relative; min-width: 0; }
 .bk-frame {
   display: block;
   width: 100%;
-  height: calc(100svh - 32px);
+  height: calc(100vh - 168px);   /* the window less the top bar (112 px), the gap and the page's bottom edge */
+  height: calc(100dvh - 168px);
   border: 0;
   border-radius: var(--radius-xl, 28px);
   background: var(--surface-page, #e4e4e4);
@@ -62,9 +59,8 @@
   .bk-frame { border-radius: var(--radius-lg, 24px); }   /* height: ui.css, from the top bar and the tab bar */
 }
 
-/* No visible outer scrollbar on the Books & comics page: the frame already fits the
-   viewport (height: calc(100svh - 32px) above), so a second scrollbar around it is just
-   visual noise, not something the page needs to actually scroll. */
+/* No outer scrollbar on the Books & comics page: the frame already fits the window (above), so the page
+   itself has nothing to scroll; the frame scrolls its own content. */
 html:has(.gs-app[data-page="books"]) { scrollbar-width: none; -ms-overflow-style: none; }
 html:has(.gs-app[data-page="books"])::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .gs-app[data-page="books"] { scrollbar-width: none; }

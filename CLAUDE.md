@@ -246,8 +246,8 @@ files to add servers. Keep it that way.
 - The frame is made once and only hidden afterwards, so an audiobook keeps playing around the dashboard.
   Messages from the frame (checked against the media origin and the frame's window): `ready`, `immersive`
   (a reader opened: `data-immersive` hides the menu and the frame fills the screen), `signed-out` (get a
-  fresh pass, at most every 15 s). The media site in a frame draws its own Books & comics title, search
-  and tabs in this dashboard's look, so the top bar steps aside on `#/books`.
+  fresh pass, at most every 15 s). The media site in a frame draws its own search and tabs in this
+  dashboard's look under the dashboard's top bar (which stays on `#/books`, phones and desktop).
 - `books` is an access section, on for everyone by default (`add_books_section`, once); the nav button and
   phone tab show only when it is on in Settings and the person has the section.
 - Changing the frame's page without reloading it (so an audiobook keeps playing): opening `#/books/<path>` while
@@ -395,7 +395,8 @@ design system). The dashboard adds its own patterns:
   the right), `tiles` (compact 2:3 poster tiles). `streamFront` builds Classic,
   `styledFront` the others; `.gs-app[data-cstyle]` sets the grid. In the new
   styles the flip side (`.sd-back--fit`) keeps the front's size and scrolls.
-  Rows and the table are the same in every style. Viewers only get Display, and only if they can see streams.
+  Rows and the table are the same in every style. Viewers only get Display (everyone gets the gear: Appearance and Home
+  layout; the stream card choices only show for people who can see streams, `gs-no-streams` in `ui.css`).
 - Logo (from Glenn's logo pack, in `web/assets/`): glow mark on a UI Navy
   circle at the top of the nav (and the phone top bar); a small "Telemetry"
   label above the title (Glenn removed the logo there); loading splash on UI
@@ -461,9 +462,9 @@ design system). The dashboard adds its own patterns:
   browsers asking to save data. Placement per style: Classic over the poster with
   the same shade, Poster beside and Poster on top in the poster area, Banner on
   the right with a fade, Tiles full tile with the bottom shade.
-- Requests nav button (desktop and phone tab) and the Requests search pill pulse a slow lime ring
-  (`rq-pulse`, 2.8 s, end of `requests.css`; Glenn's ask): not while on Requests or typing, not for
-  reduced motion; a deeper green edge in the light theme.
+- The Requests search pill pulses a slow lime ring (`rq-pulse-pill`, 2.8 s, end of `requests.css`; Glenn's ask):
+  not while typing, not for reduced motion. The Requests nav button and phone tab show a small lime dot instead
+  (`ui.css`; the ring read as a second selected item).
 - Your servers (viewers, Plex sign-ins): `GET /api/me/servers` lists only the servers shared with them
   (`users.servers`, old names through `server_aliases`), each Online or Offline and since when, nothing
   else. `Poller._mark` saves the time each server went up or down in setting `server_since` (a server
@@ -525,14 +526,47 @@ design system). The dashboard adds its own patterns:
   dialogs, More. On desktop the same panels keep their own look.
 - One page header on phones (`#phead`, `renderPhead`, `window.sdPhead`): a small "Telemetry" (or section) eyebrow and
   a 32 px title under the top bar; `has-phead` hides the old titles inside cards. Requests title pages skip it
-  (the poster block names the title). Light and Dark live in Settings, Display, Appearance on phones (not the top bar).
+  (the poster block names the title). Light and Dark live in Settings, Display, Appearance (not the top bar).
 - Requests on phones: the search box is one line (kind chip plus field, Enter searches) away from Discover and
   search results (`searchBox.setCompact`); the floating Report issue button is hidden (title pages and Reported
   issues have their own). Sideways strips fade where more is hidden (`gsUI.strip`), and the current tab scrolls
   into view.
 - Books & comics on phones keeps the top bar; the frame fills the space above the tab bar. The media site in a
-  frame hides its own Books & comics title on phones (its tabs scroll and fade the same way).
+  frame hides its own Books & comics title (on every screen now; its tabs scroll and fade the same way on phones).
 - Verify phone changes at 390 x 844, 360 x 740 and 844 x 390 (touch), light and dark, viewer and admin.
+
+## Desktop layout (Glenn's desktop audit, Nov 2026)
+
+- The desktop rules are the `desktops and tablets` block in `web/ui.css` (the complement of the phone rule); what is
+  the same on both sits above it. Keep phone and desktop in step: one look, one set of names.
+- Frame: the top bar (`.sd-top`) is sticky like the side menu, on the page colour; cards have `scroll-margin-top` so
+  a jump lands under it. While an overlay holds the page still (`html.gs-locked`) only the window stops scrolling on
+  desktop: an `overflow: hidden` body becomes its own scroller and the sticky bar and Settings would stick to the
+  top of the page. The content stops at 1,600 px and is centred; the menu stays at the left edge.
+- Below 1,200 px the account is its picture only; Live now names three, two (under 1,100) or one (under 900) newest
+  streams. Light, Dark and Match device are in Settings, Display, Appearance on every screen (no top bar buttons).
+- The menu follows the page (`spy` in `app.js`): scrolling by hand to another card highlights it and replaces the
+  address once scrolling stops (no new Back step); a click or Back holds it for 1.2 s while the smooth scroll runs.
+- Every address names the browser tab: `setDocTitle` in `applyRoute` ("Servers · Greystar Telemetry"), Requests
+  (`setTitle`, "Movies · Requests · ...") and Books & comics (`show` in `books.js`).
+- One page header on desktop too: eyebrow plus one 48 px title. Admin dashboard: the Telemetry lockup and
+  `#title`; a viewer's pages: `#phead` (`renderPhead` runs for `vh()` on desktop); Requests: `rq-eyebrow` and
+  `rq-title`; Books & comics: the media site's page titles (its "Books & comics" bar title is gone in a frame on
+  every screen). No Home pill (`#vhome-back`): the menu's Home does that.
+- Menu and tab names are the same list (`PLACES`): Home, Bandwidth, Servers, Streams, Users or History, Requests,
+  Books. Browser tab titles use the page names (My history, Books & comics).
+- Books & comics keeps the top bar on desktop; the frame is the window less 168 px, so the page itself never scrolls.
+- Keyboard: "Skip to content" (`.gs-skip`, first Tab stop, `ui.js`) focuses the current part's title (the card the
+  address names on the desktop dashboard), or the Books frame. `.sd-content` is `role="main"`. A stream card is a
+  group (`role="group"`), not a button: its own "Show playback details" button (`.sd-flipbtn`, shown on keyboard
+  focus) flips it and moves focus to Flip back; a mouse can still click anywhere. The hidden side of a card is
+  `inert` (`faceState`). Closing the account menu, or the history opened from it, returns focus to the account
+  button (`closeMenu(true)`, `fromMenu`).
+- Load: `viewing_hours` and `bandwidth_daily` (last 7 days) are fetched every 5 minutes, not every 10 seconds
+  (`SLOW_MS` in `dash-shim.js`). Each loaded dataset records `at`; Live now's "Updated" time falls back to the
+  streams load for people who are not given bandwidth.
+- Report issue floats on Requests lists only; title pages and Reported issues have their own.
+- Verify desktop changes at 1024 x 768, 1280 x 800, 1440 x 900 and 2560 x 1440, light and dark, viewer and admin.
 
 ## Running tests
 
