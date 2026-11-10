@@ -265,16 +265,16 @@ body.rq-noscroll { overflow: hidden; }
 }
 .sd-navbtn[aria-label="Requests"]:not([aria-current="true"]),
 .sd-tab[aria-label="Requests"]:not([aria-current="true"]) { animation: rq-pulse 2.8s ease-out infinite; }
-.rq-search:not(:focus-within) { animation: rq-pulse-pill 2.8s ease-out infinite; }
+.us--page:not(:focus-within), .us--hero:not(:focus-within) { animation: rq-pulse-pill 2.8s ease-out infinite; }
 /* On light pages lime alone is faint: add a deeper green edge. */
 .gs-app[data-look="light"] .sd-navbtn[aria-label="Requests"]:not([aria-current="true"]),
-.gs-app[data-look="light"] .rq-search:not(:focus-within) { outline: 1px solid rgba(110, 190, 40, 0.55); outline-offset: 0; }
+.gs-app[data-look="light"] .us--page:not(:focus-within) { outline: 1px solid rgba(110, 190, 40, 0.55); outline-offset: 0; }
 @media (prefers-color-scheme: light) {
   .gs-app:not([data-look="dark"]) .sd-navbtn[aria-label="Requests"]:not([aria-current="true"]),
-  .gs-app:not([data-look="dark"]) .rq-search:not(:focus-within) { outline: 1px solid rgba(110, 190, 40, 0.55); outline-offset: 0; }
+  .gs-app:not([data-look="dark"]) .us--page:not(:focus-within) { outline: 1px solid rgba(110, 190, 40, 0.55); outline-offset: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .sd-navbtn[aria-label="Requests"], .sd-tab[aria-label="Requests"], .rq-search { animation: none !important; }
+  .sd-navbtn[aria-label="Requests"], .sd-tab[aria-label="Requests"], .us--page, .us--hero { animation: none !important; }
   .sd-navbtn[aria-label="Requests"]:not([aria-current="true"]),
   .sd-tab[aria-label="Requests"]:not([aria-current="true"]) { box-shadow: 0 0 0 2px rgba(184, 252, 100, 0.7); }
 }

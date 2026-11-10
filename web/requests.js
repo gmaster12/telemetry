@@ -15,6 +15,7 @@
   var built = false;
   var body = null;
   var searchInput = null;
+  var searchBox = null;   // the shared search box (usearch.js); its input is searchInput
   var lastDashHash = '';
   var routeToken = 0;
 
@@ -165,6 +166,8 @@
     var sect = r.path[0] || 'discover';
     setTabs(sect);
     if (searchInput && sect !== 'search' && document.activeElement !== searchInput) searchInput.value = '';
+    // The Requests page always starts on Movies & shows (the box elsewhere remembers the last choice).
+    if (searchBox && !searchBox.el.contains(document.activeElement)) searchBox.setKind('video');
     body.replaceChildren(el('div', { class: 'rq-loading', role: 'status' }, el('span', { class: 'rq-spin', 'aria-hidden': 'true' }), 'Loading'));
     window.scrollTo({ top: 0 });
     loadMe().then(function () {
@@ -223,18 +226,15 @@
     if (built) return;
     built = true;
     titleEl = el('h1', { class: 'rq-title', tabindex: '-1', text: 'Discover' });
-    searchInput = el('input', { type: 'search', class: 'rq-search__input', id: 'rq-q', placeholder: 'Search movies, series and people', autocomplete: 'off', 'aria-label': 'Search movies, series and people' });
-    var timer = null;
-    searchInput.addEventListener('input', function () {
-      clearTimeout(timer);
-      timer = setTimeout(function () {
-        var v = searchInput.value.trim();
-        var r = parse();
-        var onSearch = r && r.path[0] === 'search';
-        if (!v) { if (onSearch) go('', null, true); return; }
-        go('search', { q: v }, onSearch);
-      }, 320);
-    });
+    // The shared search box: Movies & shows searches here as you type; the book kinds go to Books & comics.
+    searchBox = window.gsUSearch.create({ variant: 'page', kind: 'video', live: true, onLive: function (v) {
+      var r = parse();
+      var onSearch = r && r.path[0] === 'search';
+      if (!v) { if (onSearch) go('', null, true); return; }
+      go('search', { q: v }, onSearch);
+    } });
+    searchInput = searchBox.input;
+    searchInput.id = 'rq-q';
     searchInput.addEventListener('keydown', function (e) { if (e.key === 'Escape') { searchInput.value = ''; searchInput.dispatchEvent(new Event('input')); } });
     tabsBox = el('nav', { class: 'rq-tabs', 'aria-label': 'Requests sections' });
     body = el('div', { class: 'rq-body' });
@@ -242,7 +242,7 @@
     page.replaceChildren(reportBtn,
       el('header', { class: 'rq-top' },
         el('div', { class: 'rq-titles' }, el('span', { class: 'rq-eyebrow', text: 'Requests' }), titleEl),
-        el('label', { class: 'rq-search' }, icon('search', 18), searchInput)),
+        searchBox.el),
       tabsBox, body);
   }
   function setTitle(t) {

@@ -1,0 +1,106 @@
+/* The shared search box (usearch.js). Same shape as the media site's (UnifiedSearch.tsx). */
+.us {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--hairline);
+  color: var(--ink);
+  text-align: left;
+}
+.us:focus-within { box-shadow: inset 0 0 0 2px var(--ink); }
+.us button { font: inherit; color: inherit; cursor: pointer; }
+.us :focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.us svg { flex: none; }
+
+.us-sel { position: relative; flex: none; }
+.us-selbtn, .us-seltext {
+  display: inline-flex; align-items: center; gap: 8px;
+  height: 46px; padding: 0 14px 0 16px;
+  border: 0; border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  font-size: 14px; font-weight: 600; white-space: nowrap;
+}
+.us-seltext { background: transparent; }
+.us-selbtn:hover { background: var(--surface-page); }
+.us-selbtn[hidden], .us-seltext[hidden] { display: none; }
+
+.us-menu {
+  position: absolute; z-index: 40; top: calc(100% + 8px); left: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  width: 268px; padding: 8px;
+  border-radius: 22px;
+  background: var(--surface-raised);
+  box-shadow: inset 0 0 0 1px var(--hairline), var(--shadow-float);
+}
+.us-menu[hidden] { display: none; }
+.us-item {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 48px; padding: 6px 12px;
+  border: 0; border-radius: 14px;
+  background: transparent; text-align: left;
+}
+.us-item:hover { background: var(--surface-card); }
+.us-item[aria-checked="true"] { background: var(--surface-ink); color: var(--on-ink); }
+.us-item strong { display: block; font-size: 14px; line-height: 18px; font-weight: 600; }
+.us-item small { display: block; font-size: 12px; line-height: 16px; opacity: .78; }
+
+.us-field { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 0 8px 0 10px; color: var(--ink-muted); }
+.us-input { flex: 1; min-width: 0; height: 46px; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 16px; }
+.us-input::placeholder { color: var(--ink-muted); opacity: 1; }
+
+.us-mode { flex: none; display: flex; gap: 2px; padding: 3px; border-radius: var(--radius-pill); background: var(--surface-card); }
+.us-mode[hidden] { display: none; }
+.us-mode button { height: 40px; padding: 0 14px; border: 0; border-radius: var(--radius-pill); background: transparent; font-size: 13px; font-weight: 500; white-space: nowrap; }
+.us-mode button[aria-pressed="true"] { background: var(--surface-ink); color: var(--on-ink); font-weight: 600; }
+
+.us-go {
+  flex: none; height: 46px; padding: 0 22px;
+  border: 0; border-radius: var(--radius-pill);
+  background: var(--action); color: var(--on-action) !important;
+  font-weight: 600;
+}
+
+/* Requests page header */
+.us--page { flex: 0 1 880px; }
+/* Viewer home: the Request something door (a coloured card) and the Requests hub hero */
+.us--door { margin-top: auto; background: #fff; color: #0b0b0d; box-shadow: 0 0 0 4px rgba(11, 11, 13, .10); }
+.us--door .us-selbtn { background: #ececec; color: #0b0b0d; }
+.us--door .us-field, .us--door .us-input::placeholder { color: #58585c; }
+.us--door .us-input { color: #0b0b0d; }
+.us--door .us-mode { background: #ececec; }
+.us--door .us-mode button { color: #0b0b0d; }
+.us--door .us-mode button[aria-pressed="true"] { background: #0b0b0d; color: #fff; }
+.us--door .us-go { background: #0b0b0d; color: #fff !important; }
+.us--door .us-menu { color: var(--ink); }
+.us--hero { width: min(920px, 100%); padding: 8px; }
+.us--hero .us-selbtn, .us--hero .us-seltext, .us--hero .us-go, .us--hero .us-input { height: 54px; }
+
+/* The door is narrow: always stack there. On phones every box stacks. */
+.us--door { flex-wrap: wrap; border-radius: 26px; padding: 8px; }
+.us--door .us-sel { flex: 1 1 100%; }
+.us--door .us-selbtn { width: 100%; height: 44px; }
+.us--door .us-selbtn svg:last-child { margin-left: auto; }
+.us--door .us-menu { width: 100%; }
+.us--door .us-field { flex: 1 1 100%; }
+.us--door .us-mode { flex: 1 1 auto; }
+.us--door .us-mode button { flex: 1; padding: 0 8px; }
+.us--door .us-go { flex: 1 0 auto; }
+
+@media (max-width: 760px) {
+  .us { flex-wrap: wrap; border-radius: 26px; padding: 8px; }
+  .us-sel { flex: 1 1 100%; }
+  .us-selbtn, .us--hero .us-selbtn { width: 100%; height: 44px; }
+  .us-selbtn svg:last-child { margin-left: auto; }
+  .us-menu { width: 100%; }
+  .us-field { flex: 1 1 100%; }
+  .us-mode { flex: 1 1 auto; }
+  .us-mode button { flex: 1; padding: 0 8px; }
+  .us-go, .us--hero .us-go { flex: 1 0 auto; height: 48px; }
+  .us--hero .us-input { height: 46px; }
+}

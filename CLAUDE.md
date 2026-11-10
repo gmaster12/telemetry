@@ -218,6 +218,30 @@ files to add servers. Keep it that way.
   and tabs in this dashboard's look, so the top bar steps aside on `#/books`.
 - `books` is an access section, on for everyone by default (`add_books_section`, once); the nav button and
   phone tab show only when it is on in Settings and the person has the section.
+- Changing the frame's page without reloading it (so an audiobook keeps playing): opening `#/books/<path>` while
+  the frame exists sends `{source: 'greystar-telemetry', type: 'navigate', path}` to the media origin once the
+  frame said `ready` (before that the path waits); the media site replaces its current entry, so Back needs no
+  extra press. A plain `#/books` keeps the frame where it is. `gsBooks.usable()` = on, and a Plex sign-in.
+- The media site now talks to exactly this origin: its sign-in hand-off adds `parent=<telemetryOrigin>` (the
+  media site's own setting), and it posts only to that origin and reads only messages from the parent window at
+  that origin. The frame's search box can send `open-requests` (`q`): we open `#/requests/search?q=`.
+
+## Shared search box (Glenn's unified search, Nov 2026)
+
+One box with a selector everywhere (`web/usearch.js`, `web/usearch.css`; the media site's twin is
+`src/components/UnifiedSearch.tsx`, same kinds, words and routes; keep them in step). Kinds: Movies & shows
+(`requests` section) goes to `#/requests/search?q=`; Comics, Ebooks, Audiobooks (each with "In our library" or
+"Request new") and All books (search only) need `books`, Books & comics on and a Plex sign-in, and open the frame
+at the media site's `/library|/ebooks|/audiobooks|/search?q=` or `/requests?type=comics|ebook|audiobook&q=`
+(that page runs the search). One kind left: the selector is a plain label. The last kind is remembered per
+browser (`gs-usearch-kind`); the Requests page always starts on Movies & shows and searches as you type for it
+(book kinds wait for Search/Enter, so ComicVine and the book catalog are not hit per keystroke; picking a kind
+cancels a pending movie search). Used on the Requests page header (`searchBox` in `requests.js`, its input keeps
+id `rq-q`) and the viewer home's Request something door and Requests hub (`searchForm` in `home.js`). The lime
+pulse moved to `.us--page` / `.us--hero`.
+
+No visible scrollbars anywhere (Glenn's ask): `system.css` ends with a rule that stops painting them on every
+element; scrolling still works. Do not add visible scrollbars back.
 
 ## Servers by id (history and covers)
 

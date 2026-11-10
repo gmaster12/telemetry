@@ -14,6 +14,7 @@
 <link rel="stylesheet" href="system.css">
 <link rel="stylesheet" href="settings.css">
 <link rel="stylesheet" href="requests.css">
+<link rel="stylesheet" href="usearch.css">
 <link rel="stylesheet" href="books.css">
 <link rel="stylesheet" href="light.css">
 <link rel="stylesheet" href="people.css">
@@ -404,7 +405,7 @@
   .gs-app[data-cstyle="tiles"] .sd-carousel .sd-flip { flex-basis: calc(46% * var(--card-scale, 1)); }
   .sd-carousel .sd-scard.sd-scard--side, .sd-carousel .sd-scard.sd-scard--top, .sd-carousel .sd-scard.sd-scard--banner, .sd-carousel .sd-scard.sd-scard--tile { min-height: 0; }
   .sd-flip__inner { position: relative; }
-  .sd-back.sd-back--fit { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; padding: var(--space-4); gap: var(--space-3); }
+  .sd-back.sd-back--fit { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; padding: var(--space-4); gap: var(--space-3); }
   .sd-back--fit .sd-back__title { font-size: 20px; line-height: 26px; }
   .sd-back--fit > * { flex-shrink: 0; }  /* scroll instead of squeezing rows together */
   .sd-back--side, .sd-back--banner { --notch-w: 72px; --notch-h: 72px; border-radius: 28px; }
@@ -837,6 +838,7 @@
 <script src="user-picker.js"></script>
 <script src="people.js"></script>
 <script src="settings.js"></script>
+<script src="usearch.js"></script>
 <script src="requests.js"></script>
 <script src="books.js"></script>
 <script src="home.js"></script>

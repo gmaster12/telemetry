@@ -3,10 +3,16 @@
    signs the person in with their Plex account and shows itself in Telemetry's look. Page: #/books.
 
    The frame is made once and then only hidden, so an audiobook keeps playing while the person moves
-   around the dashboard. The media site sends a few messages (checked against its origin):
-     ready        it loaded
-     immersive    a reader opened or closed: hide or show the dashboard menu for a full-screen page
-     signed-out   its session ended: get a fresh pass and reload the frame
+   around the dashboard. The media site sends a few messages (checked against its origin and the frame's window):
+     ready          it loaded
+     immersive      a reader opened or closed: hide or show the dashboard menu for a full-screen page
+     signed-out     its session ended: get a fresh pass and reload the frame
+     open-requests  its shared search box picked Movies & shows: open #/requests/search?q=...
+
+   Opening #/books/<path> again (the shared search box, usearch.js) does not reload the frame: once it is
+   ready we send { source: 'greystar-telemetry', type: 'navigate', path } and the media site goes there,
+   replacing its current entry so Back needs no extra press. Before it is ready the path waits and goes
+   with the 'ready' message.
 
    We send the media site one message, so its own palette matches ours instead of a fixed light look:
      { source: 'greystar-telemetry', type: 'look', look: 'light' | 'dark' }
@@ -25,6 +31,8 @@
   var loading = null;
   var lastDashHash = '';
   var lastReload = 0;
+  var ready = false;        // the frame said 'ready' since it was last (re)loaded
+  var pending = null;       // a path to send once it is
   var me = window.gsMe || null;
 
   function telemetryLook() {
@@ -83,7 +91,11 @@
   function loadConfig() {
     if (!canBooks()) { cfg = null; return; }
     api('/api/books/config').then(function (c) { cfg = c; }).catch(function () { cfg = null; })
-      .then(function () { if (window.sdNavChanged) window.sdNavChanged(); route(); });
+      .then(function () {
+        if (window.sdNavChanged) window.sdNavChanged();
+        document.dispatchEvent(new CustomEvent('gs:books-config'));
+        route();
+      });
   }
   document.addEventListener('gs:me', function (e) { me = e.detail; loadConfig(); });
   if (me) loadConfig();
@@ -125,12 +137,15 @@
     loading = el('div', { class: 'bk-loading', role: 'status' }, el('span', { class: 'rq-spin', 'aria-hidden': 'true' }), el('span', { text: 'Opening Books & comics' }));
     frame = el('iframe', { class: 'bk-frame', title: 'Books & comics', allow: 'autoplay; fullscreen; clipboard-write', referrerpolicy: 'no-referrer' });
     frame.addEventListener('load', function () { setLoading(false); });
+    ready = false;
     page.append(loading, frame);
     signIn(next);
   }
 
   function signIn(next) {
     lastReload = Date.now();
+    ready = false;
+    pending = null;
     setLoading(true, 'Opening Books & comics');
     api('/api/books/link?next=' + encodeURIComponent(next || '/')).then(function (r) {
       // The look rides along (outside the signed pass, it is only cosmetic) so the media site paints in
@@ -143,22 +158,40 @@
     });
   }
 
-  function route() {
+  function navigate(path) {
+    if (!frame || !frame.contentWindow || !cfg || !cfg.origin) return;
+    if (!ready) { pending = path; return; }
+    try { frame.contentWindow.postMessage({ source: 'greystar-telemetry', type: 'navigate', path: path }, cfg.origin); }
+    catch (e) { /* the frame went away */ }
+  }
+
+  function route(force) {
     var r = parse();
     if (!r) { if (root.dataset.page === 'books') show(false); return; }
     if (cfg === null && canBooks()) return; // config still loading; route() runs again when it arrives
     if (!canBooks()) { show(false); return; }
+    var fresh = !frame;
     ensureFrame(r.next);
+    // An existing frame goes to the new page without reloading (a plain #/books keeps where it is).
+    if (!fresh && frame && (r.next !== '/' || force === true)) navigate(r.next);
     show(true);
     window.scrollTo({ top: 0 });
   }
-  window.addEventListener('hashchange', route);
+  window.addEventListener('hashchange', function () { route(); });
 
   window.addEventListener('message', function (e) {
     if (!cfg || !cfg.origin || e.origin !== cfg.origin || !frame || e.source !== frame.contentWindow) return;
     var d = e.data;
     if (!d || d.source !== 'greystar-media') return;
-    if (d.type === 'ready') { setLoading(false); sendLook(); }
+    if (d.type === 'ready') {
+      setLoading(false); sendLook(); ready = true;
+      if (pending) { var p = pending; pending = null; navigate(p); }
+    }
+    else if (d.type === 'open-requests') {
+      // The media site's box picked Movies & shows: that lives on our Requests page.
+      var q = typeof d.q === 'string' ? d.q.trim().slice(0, 200) : '';
+      window.location.hash = '#/requests' + (q ? '/search?q=' + encodeURIComponent(q) : '');
+    }
     else if (d.type === 'immersive') {
       if (d.on && root.dataset.page === 'books') root.dataset.immersive = '1'; else delete root.dataset.immersive;
     } else if (d.type === 'signed-out') {
@@ -169,10 +202,13 @@
 
   window.gsBooks = {
     available: function () { return !!(cfg && cfg.enabled); },
+    // Turned on, and this person signed in with Plex (the media site needs a Plex account to know who it is).
+    usable: function () { return !!(cfg && cfg.enabled && cfg.plex); },
     open: function (path) {
       if (!parse()) lastDashHash = location.hash;
       var target = '#/books' + (path || '');
-      if (location.hash === target) route(); else location.hash = target;
+      // The same address again (a repeated search, or the member moved around inside the frame): send it anyway.
+      if (location.hash === target) route(true); else location.hash = target;
     },
     close: function () {
       history.replaceState(null, '', location.pathname + location.search + (lastDashHash && lastDashHash.indexOf('#/books') !== 0 ? lastDashHash : ''));

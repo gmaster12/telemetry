@@ -113,6 +113,8 @@
     return d;
   }
   function searchForm(cls, placeholder) {
+    // The shared search box (usearch.js): Movies & shows, or the book kinds in Books & comics.
+    if (window.gsUSearch) return window.gsUSearch.create({ variant: cls === 'vh-search--hero' ? 'hero' : 'door' }).el;
     var input = el('input', { type: 'search', class: 'vh-search__input', name: 'q', placeholder: placeholder, 'aria-label': 'Search movies and series', autocomplete: 'off' });
     return el('form', { class: 'vh-search ' + (cls || ''), role: 'search', onsubmit: function (e) {
       e.preventDefault();
@@ -151,7 +153,7 @@
       var status = el('p', { class: 'vh-door__foot', text: 'Ask for anything that is not on Plex yet.' });
       req.append(el('div', { class: 'vh-door__body' },
         el('span', { class: 'vh-eyebrow', text: 'Request something' }),
-        el('b', { class: 'vh-door__big', text: 'Missing a movie or show? Ask for it here.' }),
+        el('b', { class: 'vh-door__big', text: (window.gsBooks && window.gsBooks.usable && window.gsBooks.usable()) ? 'Missing a movie, show or book? Ask for it here.' : 'Missing a movie or show? Ask for it here.' }),
         searchForm('vh-search--door', 'Search movies and series'), status));
       grid.appendChild(req);
       get('/api/requests/attention').then(function (a) {
