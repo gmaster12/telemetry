@@ -441,7 +441,7 @@
         box.appendChild(frame.sec);
         return { row: row, frame: frame };
       });
-      body.replaceChildren(quotaNote(), box);
+      body.replaceChildren.apply(body, [quotaNote(), box].filter(Boolean));   // replaceChildren(null) would show the word null
       lazyRows(rows);
     });
   }
@@ -1191,7 +1191,7 @@
     var top = el('div', { class: 'rq-listtop' }, filterChips('mine', q.filter, { everyone: everyone ? '1' : null }),
       me.can.viewRequests ? el('a', { class: 'rq-chip', href: link('mine', { filter: q.filter, everyone: everyone ? null : '1' }), 'aria-pressed': everyone ? 'true' : 'false', text: everyone ? 'Everyone' : 'Only mine' }) : null);
     if (everyone || (q.filter && q.filter !== 'all')) {
-      body.replaceChildren(quotaNote(), top, l.el);
+      body.replaceChildren.apply(body, [quotaNote(), top, l.el].filter(Boolean));
       return l.load();
     }
     // Own requests: one list of everything (movies, shows, comics, ebooks, audiobooks), newest first.

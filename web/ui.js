@@ -181,7 +181,7 @@
 
   // ---------- the phone bottom sheet ----------
   /* sheet(panel, { onClose, scrim, desktop }) attaches sheet behaviour to an overlay that already exists:
-     on phones the panel gets .gs-sheet (styles in phone.css) and a grab bar; dragging the bar or the panel's
+     on phones the panel gets .gs-sheet (styles in ui.css) and a grab bar; dragging the bar or the panel's
      top down by more than 90 px (or flicking) closes it; the page is held still while it is open.
      On a desktop it only holds the page still (desktop: 'menu' for a dropdown: not even that).
      Returns detach(). The caller still shows, hides and fills its panel. */
