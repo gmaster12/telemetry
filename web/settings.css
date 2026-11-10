@@ -193,7 +193,7 @@
 .st-log__empty { display: flex; flex-direction: column; gap: 4px; padding: 18px 6px; }
 .st-log__more { align-self: center; margin-top: 6px; }
 .st-log__more[hidden] { display: none; }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .st-log__row { grid-template-columns: 36px minmax(0, 1fr) auto; grid-template-areas: "p what when" "p who who" "p state state"; gap: 4px 12px; padding: 10px 12px 10px 8px; align-items: start; }
   .st-log__poster { grid-area: p; }
   .st-log__what { grid-area: what; }
@@ -219,4 +219,4 @@
 .st-misses li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: baseline; gap: 12px; padding: 7px 4px; border-bottom: 1px solid var(--hairline); }
 .st-misses__term { overflow-wrap: anywhere; }
 .st-misses b { font-variant-numeric: tabular-nums; }
-@media (max-width: 760px) { .st-misses li { grid-template-columns: minmax(0, 1fr) auto; } .st-misses li > .st-log__meta { grid-column: 1 / -1; } }
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) { .st-misses li { grid-template-columns: minmax(0, 1fr) auto; } .st-misses li > .st-log__meta { grid-column: 1 / -1; } }

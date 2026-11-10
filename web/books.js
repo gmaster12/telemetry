@@ -25,11 +25,9 @@
   var root = document.getElementById('streams-app');
   var page = document.getElementById('books-page');
   if (!root || !page) return;
-  var HEADERS = { 'X-Requested-With': 'greystar' };
   var cfg = null;          // GET /api/books/config: { enabled, origin, plex }
   var frame = null;
   var loading = null;
-  var lastDashHash = '';
   var lastReload = 0;
   var ready = false;        // the frame said 'ready' since it was last (re)loaded
   var pending = null;       // a path to send once it is
@@ -54,34 +52,9 @@
   }
   new MutationObserver(sendLook).observe(root, { attributes: true, attributeFilter: ['data-look'] });
 
-  function el(tag, props) {
-    var e = document.createElement(tag);
-    props = props || {};
-    Object.keys(props).forEach(function (k) {
-      var v = props[k];
-      if (v == null || v === false) return;
-      if (k === 'class') e.className = v;
-      else if (k === 'text') e.textContent = v;
-      else if (k.slice(0, 2) === 'on') e.addEventListener(k.slice(2), v);
-      else e.setAttribute(k, v === true ? '' : v);
-    });
-    for (var i = 2; i < arguments.length; i++) {
-      var kid = arguments[i];
-      if (kid == null || kid === false) continue;
-      e.appendChild(typeof kid === 'string' ? document.createTextNode(kid) : kid);
-    }
-    return e;
-  }
+  var el = window.gsUI.el;   // shared helpers (ui.js)
 
-  function api(path) {
-    return fetch(path, { headers: HEADERS, credentials: 'same-origin' }).then(function (r) {
-      if (r.status === 401) { window.location.replace('/login.html'); throw new Error('Signed out.'); }
-      return r.json().catch(function () { return null; }).then(function (j) {
-        if (!r.ok) { var err = new Error((j && j.detail) || ('HTTP ' + r.status)); err.status = r.status; throw err; }
-        return j;
-      });
-    });
-  }
+  function api(path) { return window.gsUI.api('GET', path); }
 
   function canBooks() {
     if (!me) return false;
@@ -175,6 +148,7 @@
     // An existing frame goes to the new page without reloading (a plain #/books keeps where it is).
     if (!fresh && frame && (r.next !== '/' || force === true)) navigate(r.next);
     show(true);
+    window.gsUI.scroll.enter();   // the frame keeps its own place; the page itself always starts at the top
     window.scrollTo({ top: 0 });
   }
   window.addEventListener('hashchange', function () { route(); });
@@ -205,15 +179,11 @@
     // Turned on, and this person signed in with Plex (the media site needs a Plex account to know who it is).
     usable: function () { return !!(cfg && cfg.enabled && cfg.plex); },
     open: function (path) {
-      if (!parse()) lastDashHash = location.hash;
       var target = '#/books' + (path || '');
       // The same address again (a repeated search, or the member moved around inside the frame): send it anyway.
       if (location.hash === target) route(true); else location.hash = target;
     },
-    close: function () {
-      history.replaceState(null, '', location.pathname + location.search + (lastDashHash && lastDashHash.indexOf('#/books') !== 0 ? lastDashHash : ''));
-      show(false);
-    }
+    close: function () { show(false); }
   };
 
   route();

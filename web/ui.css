@@ -1,0 +1,142 @@
+/* Shared pieces (ui.js) and the phone layout that makes every page behave the same.
+   The phone rule is 760 px and narrower, or a touch screen under 500 px tall (a phone on its side). */
+
+/* ---------- everywhere ---------- */
+html.gs-locked, html.gs-locked body { overflow: hidden; overscroll-behavior: none; }
+
+.gs-toast { position: fixed; left: 50%; bottom: 28px; z-index: 70; max-width: min(560px, calc(100% - 32px)); padding: 14px 20px; border-radius: 22px;
+  background: var(--surface-ink); color: var(--on-ink); box-shadow: var(--shadow-float); font-size: 14px;
+  transform: translate(-50%, 20px); opacity: 0; transition: transform 0.25s, opacity 0.25s; }
+.gs-toast.is-in { transform: translate(-50%, 0); opacity: 1; }
+.gs-toast.is-error { background: var(--danger); color: var(--on-danger); }
+
+/* A strip that scrolls sideways: a fade where more is hidden (there are no scrollbars). */
+.gs-strip.is-more-right { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 48px), transparent); }
+.gs-strip.is-more-left { -webkit-mask-image: linear-gradient(90deg, transparent, #000 48px); mask-image: linear-gradient(90deg, transparent, #000 48px); }
+.gs-strip.is-more-left.is-more-right { -webkit-mask-image: linear-gradient(90deg, transparent, #000 48px, #000 calc(100% - 48px), transparent); mask-image: linear-gradient(90deg, transparent, #000 48px, #000 calc(100% - 48px), transparent); }
+
+/* Phone-only pieces stay out of the desktop page. */
+.us-scrim, .gp-menu-scrim, .sd-sheet-scrim, .sd-more, .sd-phead { display: none; }
+.sd-more[hidden] { display: none !important; }
+
+/* Settings, Display, Appearance (on phones it is not in the top bar) */
+.st-seg--wide { display: inline-flex; flex-wrap: wrap; }
+.st-seg--wide button { display: inline-flex; align-items: center; gap: 6px; }
+
+/* One size per kind of control: buttons 44 px, chips 36 px, toggles 32 px. */
+.st-btn { height: 44px; }
+.vh-chip { height: 36px; }
+.st-seg button, .rq-sort button { height: 32px; }
+
+@media (prefers-reduced-motion: reduce) { .gs-toast { transition: none; } }
+
+/* ---------- phones ---------- */
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+  :root { --tabbar-space: calc(108px + env(safe-area-inset-bottom)); }
+
+  /* Room for the notch and the home indicator; the tab bar is pinned to the bottom of the screen. */
+  html .gs-app.gs-app { padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) var(--tabbar-space) max(16px, env(safe-area-inset-left)); }
+  html .sd-content { min-height: 0; }
+  html .sd-tabbar { position: fixed; z-index: 30; left: max(16px, env(safe-area-inset-left)); right: max(16px, env(safe-area-inset-right));
+    bottom: calc(12px + env(safe-area-inset-bottom)); margin: 0; }
+  html .sd-tab { font-size: 11px; }
+  html .sd-tab > span:not(.sd-tab__count) { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  html .sd-tab__count { font-size: 11px; }
+  /* Requests: a small lime dot instead of the ring, which read as a second selected tab. */
+  html .sd-tab[aria-label="Requests"]:not([aria-current="true"]) { animation: none; }
+  html .sd-tab[aria-label="Requests"]:not([aria-current="true"])::after { content: ""; position: absolute; top: 9px; right: 13px; width: 8px; height: 8px; border-radius: 50%;
+    background: var(--volt); box-shadow: 0 0 0 2px var(--surface-ink); }
+  html .sd-back--tile .sd-back__eyebrow, html .sd-back--tile .sd-dl dt { font-size: 11px; }
+
+  /* Top bar: Live now gets the room; Light and Dark live in Settings, Display. */
+  html .sd-look { display: none !important; }
+  /* Nothing playing: the words sit on the dark bar (an empty lime blob said nothing, and its words did not fit). */
+  html .sd-pill-lime:has(> .sd-pill-lime__none:only-child) { background: transparent; padding: 0 10px 0 0; }
+  html .sd-pill-lime__none { min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--on-ink); opacity: 0.72; }
+
+  /* One page header: an eyebrow and a 32 px title right under the top bar, never inside a card. */
+  html .sd-phead { display: flex; flex-direction: column; gap: 2px; }
+  html .sd-phead[hidden] { display: none; }
+  html .sd-phead__eyebrow, html .rq-eyebrow { font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted); }
+  html .sd-phead__title, html .rq-title, html .sd-title, html .vh-hello, html .vh-hubtitle { margin: 0; font-size: 32px !important; line-height: 36px !important; font-weight: 300; letter-spacing: -0.02em; }
+  html .sd-phead__count { margin-left: 8px; font-size: 17px; color: var(--ink-muted); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+  html .gs-app.has-phead :is(#srv-title, html #str-title, html #al-title, html #people-title, html .sd-head .sd-title, html .vh-hello, html #al-count) { display: none !important; }
+  html .gs-app.has-phead .sd-srvtitle { min-height: 0; }
+  html .gs-app.has-phead #alerts .sd-sec-head { display: none; }
+  /* Rows of cards with nothing showing on this tab would still take a gap each. */
+  html .gs-app:is([data-mtab="streams"], [data-mtab="alerts"], [data-mtab="people"]) .sd-content > :is(.sd-main, .sd-insights) { display: none; }
+  /* A viewer's Home button duplicates the Home tab. */
+  html .vh-back, html #vhome-back { display: none !important; }
+
+  /* Requests: the floating Report issue button covered content; title pages and Reported issues have their own. */
+  html .rq-report { display: none !important; }
+  /* One title per page: a title page's poster block already names it. */
+  html #requests-page:is([data-sect="movie"], html [data-sect="series"]) .rq-titles { display: none; }
+  html .rq-top { gap: 12px; }
+  /* One-line search box away from Discover and search results: the kind as a chip, Enter searches. */
+  html .us.is-compact[data-kind="video"] { flex-wrap: nowrap; padding: 5px; border-radius: var(--radius-pill); }
+  html .us.is-compact[data-kind="video"] .us-sel { flex: none; }
+  html .us.is-compact[data-kind="video"] .us-selbtn, html .us.is-compact[data-kind="video"] .us-seltext { width: auto; height: 40px; padding: 0 10px 0 12px; gap: 4px; }
+  html .us.is-compact[data-kind="video"] .us-sellabel { display: none; }
+  html .us.is-compact[data-kind="video"] .us-selbtn svg:last-child { margin-left: 0; }
+  html .us.is-compact[data-kind="video"] .us-field { flex: 1 1 auto; padding: 0 6px; }
+  html .us.is-compact[data-kind="video"] .us-input { height: 40px; }
+  html .us.is-compact[data-kind="video"] .us-go { display: none; }
+  html .us.is-compact .us-seltext { display: none; }
+
+  /* Toasts sit just above the tab bar. */
+  html .gs-toast, html .rq-toast { bottom: calc(96px + env(safe-area-inset-bottom)); }
+
+  /* ---------- the one bottom sheet (ui.js sheet) ---------- */
+  html .gs-sheet.gs-sheet { position: fixed !important; inset: auto 0 0 0 !important; z-index: 61 !important; width: auto !important; min-width: 0 !important; max-width: none !important;
+    height: auto !important; max-height: calc(100svh - max(24px, env(safe-area-inset-top))) !important; margin: 0 !important;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom)) !important; border-radius: 28px 28px 0 0 !important; overflow-y: auto !important; overscroll-behavior: contain;
+    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.3) !important; transition: transform 0.18s ease; }
+  html .gs-sheet__grab { position: relative; flex: none; width: 40px; height: 5px; margin: 2px auto 10px !important; border-radius: 3px; background: currentColor; opacity: 0.28;
+    touch-action: none; cursor: grab; }
+  html .gs-sheet__grab::before { content: ""; position: absolute; inset: -14px -80px -10px; }
+  html .gs-sheet-scrim, html .us-scrim, html .gp-menu-scrim { position: fixed; inset: 0; z-index: 60; background: rgba(7, 9, 18, 0.5); }
+  html .gp-menu-scrim, html .us-scrim { display: block; }
+  html .sd-sheet-scrim { display: block; position: fixed; inset: 0; z-index: 60; background: rgba(7, 9, 18, 0.5); }
+  html .sd-sheet-scrim[hidden] { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    html .gs-sheet.gs-sheet { animation: gs-sheet-up 0.28s cubic-bezier(0.22, 0.8, 0.2, 1); }
+    @keyframes gs-sheet-up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+  }
+  /* Each overlay as that sheet */
+  html .sd-settings-dock { z-index: 61; }
+  html .sd-settings.gs-sheet { padding: 8px 18px 0; }
+  html .gp-drawer__panel.gs-sheet { padding-top: 8px !important; }
+  html .gp-drawer__panel.gs-sheet .gp-drawer__close { top: 20px; }
+  html .gp-menu.gs-sheet { padding: 8px 12px; background: var(--surface-raised); }
+  html .us-menu.gs-sheet { padding: 8px 12px; color: var(--ink); }
+  html .sd-sheet.gs-sheet { padding: 8px 18px 0; }
+  html .sd-sheet.gs-sheet .sd-sheet__close { top: 18px; }
+  html .rq-modal { z-index: 59; }
+  html .rq-dialog.gs-sheet { padding-bottom: env(safe-area-inset-bottom) !important; overflow: hidden !important; display: flex; flex-direction: column; }
+  html .rq-dialog.gs-sheet .rq-dialog__body { overflow-y: auto; overscroll-behavior: contain; }
+
+  /* More: the tabs that do not fit */
+  html .sd-more:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 60; background: rgba(7, 9, 18, 0.5); }
+  html .sd-more__panel { background: var(--surface-raised); color: var(--ink); padding: 8px 12px 0; }
+  html .sd-more__title { margin: 0 8px 6px; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-muted); }
+  html .sd-more__item { position: relative; display: flex; align-items: center; gap: 14px; width: 100%; min-height: 56px; padding: 0 12px; border: 0; border-radius: 16px;
+    background: transparent; color: var(--ink); font: inherit; font-size: 16px; text-align: left; cursor: pointer; }
+  html .sd-more__item > span:not(.sd-tab__count) { flex: 1; }
+  html .sd-more__item .sd-tab__count { position: static; }
+  html .sd-more__item[aria-current="true"] { background: var(--surface-ink); color: var(--on-ink); }
+  html .sd-more__item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+  /* Books & comics keeps the top bar (books.css); the frame takes the rest of the screen above the tab bar. */
+  html .bk-frame { height: calc(100svh - 88px - var(--tabbar-space)); height: calc(100dvh - 88px - var(--tabbar-space)); }
+}
+
+/* A phone on its side: a slimmer tab bar with the label beside the icon, so the page keeps most of the short screen. */
+@media (max-height: 500px) and (pointer: coarse) {
+  :root { --tabbar-space: calc(80px + env(safe-area-inset-bottom)); }
+  html .sd-tabbar { height: 56px; bottom: calc(8px + env(safe-area-inset-bottom)); border-radius: 28px; }
+  html .sd-tab { flex-direction: row; gap: 8px; width: auto; min-width: 44px; height: 44px; padding: 0 16px; border-radius: 22px; font-size: 13px; }
+  html .sd-tab__count { top: 0; right: auto; left: 28px; }
+  html .sd-tab[aria-label="Requests"]:not([aria-current="true"])::after { top: 6px; right: 8px; }
+  html .gs-toast, html .rq-toast { bottom: calc(72px + env(safe-area-inset-bottom)); }
+}

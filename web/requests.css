@@ -1,5 +1,5 @@
 /* Requests: Seerr's screens in the dashboard's own look. Uses the design system tokens. */
-.gs-app[data-page="requests"] .sd-content > :not(.sd-settings-dock):not(.sd-top):not(#requests-page):not(.sd-tabbar):not(.sd-sr) { display: none !important; }
+.gs-app[data-page="requests"] .sd-content > :not(.sd-settings-dock):not(.sd-top):not(#requests-page):not(.sd-tabbar):not(.sd-sr):not(.sd-more) { display: none !important; }
 .rq { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 
 /* top: title, search, sections */
@@ -39,8 +39,8 @@
 .rq-strip { display: grid; grid-auto-flow: column; grid-auto-columns: 158px; gap: 16px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: none; padding: 2px 2px 6px; }
 .rq-strip::-webkit-scrollbar { display: none; }
 .rq-strip > * { scroll-snap-align: start; }
-.rq-ghost { aspect-ratio: 2 / 3; border-radius: 18px; background: var(--surface-card); animation: rq-pulse 1.4s ease-in-out infinite; }
-@keyframes rq-pulse { 50% { opacity: 0.55; } }
+.rq-ghost { aspect-ratio: 2 / 3; border-radius: 18px; background: var(--surface-card); animation: rq-ghost-fade 1.4s ease-in-out infinite; }
+@keyframes rq-ghost-fade { 50% { opacity: 0.55; } }   /* not rq-pulse: that name is the green ring further down */
 
 /* poster cards */
 .rq-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; color: var(--ink); text-decoration: none; }
@@ -197,7 +197,6 @@
 .rq-num { text-align: right !important; font-variant-numeric: tabular-nums; }
 .rq-advbox summary { cursor: pointer; font-size: 14px; font-weight: 600; }
 .rq-advbox[open] summary { margin-bottom: 10px; }
-body.rq-noscroll { overflow: hidden; }
 
 /* states */
 .rq-loading { display: flex; align-items: center; gap: 10px; padding: 40px 0; color: var(--ink-muted); font-size: 14px; }
@@ -206,11 +205,8 @@ body.rq-noscroll { overflow: hidden; }
 .rq-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: var(--space-6); border-radius: var(--radius-lg); background: var(--surface-card); font-size: 14px; color: var(--ink-muted); }
 .rq-empty b { font-size: 20px; line-height: 26px; font-weight: 300; color: var(--ink); }
 .rq-empty--error b { color: var(--danger); }
-.rq-toast { position: fixed; left: 50%; bottom: 28px; z-index: 50; max-width: min(560px, calc(100% - 32px)); padding: 14px 20px; border-radius: 22px; background: var(--surface-ink); color: var(--on-ink); box-shadow: var(--shadow-float); font-size: 14px; transform: translate(-50%, 20px); opacity: 0; transition: transform 0.25s, opacity 0.25s; }
-.rq-toast.is-in { transform: translate(-50%, 0); opacity: 1; }
-.rq-toast.is-error { background: var(--danger); color: var(--on-danger); }
 
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .rq-title { font-size: 34px; line-height: 40px; }
   .rq-search { flex-basis: 100%; height: 48px; }
   .rq-strip { grid-auto-columns: 118px; gap: 12px; }
@@ -238,7 +234,7 @@ body.rq-noscroll { overflow: hidden; }
 }
 @media (prefers-reduced-motion: reduce) {
   .rq-ghost, .rq-spin { animation: none; }
-  .rq-card__art img, .rq-toast, .rq-season__btn > svg { transition: none; }
+  .rq-card__art img, .rq-season__btn > svg { transition: none; }
 }
 
 /* Report an issue: pick the title */
@@ -285,7 +281,7 @@ body.rq-noscroll { overflow: hidden; }
 .rq-report:hover { background: #b02424; }
 .rq-report:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
 .rq-report[hidden], .gs-app:not([data-page="requests"]) .rq-report { display: none; }
-@media (max-width: 760px) { .rq-report { right: 16px; bottom: 98px; height: 50px; padding: 0 18px 0 14px; font-size: 14px; } }
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) { .rq-report { right: 16px; bottom: 98px; height: 50px; padding: 0 18px 0 14px; font-size: 14px; } }
 
 /* My requests: boxes for failed and waiting requests, and Your servers beside. */
 .rq-mine { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-5); align-items: start; }
@@ -311,7 +307,7 @@ body.rq-noscroll { overflow: hidden; }
 .rq-waittag { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: var(--radius-pill); background: var(--amber); color: var(--on-fill); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .rq-iconbtn--sm { width: 34px; height: 34px; border: 1px solid var(--hairline); background: transparent; }
 .rq-iconbtn--sm.is-sure { width: auto; padding: 0 12px; border-radius: var(--radius-pill); background: #c62f2f; color: #fff; border-color: #c62f2f; font: inherit; font-size: 13px; font-weight: 600; }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .rq-attn__item { grid-template-columns: 40px minmax(0, 1fr); }
   .rq-attn__item .rq-rrow__poster { width: 40px; }
   .rq-attn__actions, .rq-attn__item > .rq-waittag { grid-column: 2; justify-self: start; }
@@ -333,7 +329,7 @@ body.rq-noscroll { overflow: hidden; }
 .rq-sort button[aria-pressed="true"] { background: var(--surface-ink); color: var(--on-ink); }
 .rq-sort button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .rq-score { display: inline-flex; align-items: center; gap: 6px; }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .rq-card__chips { left: 5px; right: 5px; bottom: 5px; }
   .rq-chipx { height: 20px; padding: 0 6px; font-size: 11px; gap: 4px; }
   .rq-sortbar { justify-content: stretch; }
@@ -364,7 +360,7 @@ body.rq-noscroll { overflow: hidden; }
 .rq-ev-notes { display: flex; flex-direction: column; gap: 8px; }
 .rq-ev-down { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 18px; background: var(--surface-card); box-shadow: inset 0 0 0 1px var(--amber); font-size: 14px; }
 .rq-ev-down svg { flex: none; color: var(--amber); }
-@media (max-width: 760px) {
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   .rq-ev-row { grid-template-columns: 52px minmax(0, 1fr); }
   .rq-ev-time, .rq-ev-row .rq-rrow__status, .rq-ev-row .rq-rrow__actions { grid-column: 2; justify-content: flex-start; }
   .rq-ev-sort { margin-left: 0; }

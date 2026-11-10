@@ -126,7 +126,9 @@
       fire();
     },
     setLink: function (id) {
-      try { window.history.replaceState(null, '', '#' + id); } catch (e) { /* ignore */ }
+      // Kept for older callers: the page's addresses are #/home, #/streams and so on (app.js); keep the entry's scroll key.
+      var to = { summary: 'home', 'servers-card': 'servers', 'streams-card': 'streams', 'people-card': 'users', 'bandwidth-card': 'bandwidth', alerts: 'alerts' }[id] || 'home';
+      try { window.history.replaceState(window.history.state, '', '#/' + to); } catch (e) { /* ignore */ }
     },
     refresh: function () { return refresh(); },
     me: function () { return me; },

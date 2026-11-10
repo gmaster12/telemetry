@@ -112,7 +112,8 @@
     left: ['M19 12H5', 'm11 6-6 6 6 6'],
     external: ['M14 4h6v6', 'M20 4 11 13', 'M18 14v6H4V6h6'],
     refresh: ['M4 12a8 8 0 0 1 14-5.3', 'M20 4v5h-5', 'M20 12a8 8 0 0 1-14 5.3', 'M4 20v-5h5'],
-    trash: ['M5 7h14', 'M10 7V5h4v2', 'M7 7l1 13h8l1-13']
+    trash: ['M5 7h14', 'M10 7V5h4v2', 'M7 7l1 13h8l1-13'],
+    dots: ['M4 12a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0Z', 'M10.4 12a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0Z', 'M16.8 12a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0Z']
   };
   function icon(name, size) {
     const s = document.createElementNS(svgNS, 'svg');
@@ -124,12 +125,7 @@
   }
   window.sdIcon = icon;
   window.sdArtFor = (r) => artFor(r);
-  function el(tag, cls, text) {
-    const e = document.createElement(tag);
-    if (cls) e.className = cls;
-    if (text != null) e.textContent = text;
-    return e;
-  }
+  const el = window.gsUI.elc;   // shared helpers (ui.js)
   function avatar(name, size) {
     const hash = Array.from(String(name)).reduce((h, c) => h + c.charCodeAt(0), 0) % 4;
     const letter = (String(name).replace(/[^A-Za-z0-9]/g, '')[0] || '?').toUpperCase();
@@ -185,35 +181,55 @@
   const METHOD_TONE = { 'Direct play': 'neutral', 'Direct stream': 'info', Transcode: 'accent' };
 
   /* Static pieces: navigation, icons, arrow buttons */
+  /* Addresses: every page has one, so Back, reload and links work the same everywhere.
+       #/home  #/servers  #/streams  #/alerts  #/users (admins) or #/history (viewers)  #/subscription  #/bandwidth
+     beside #/requests/... (requests.js) and #/books/... (books.js). On a phone each is its own tab; on a desktop
+     they are places on the one long page. The old anchors (#streams-card and so on) still open the right one. */
+  const LEGACY = { summary: 'home', vhome: 'home', top: 'home', 'servers-card': 'servers', 'capacity-card': 'servers', 'streams-card': 'streams',
+    'people-card': 'people', 'bandwidth-card': 'bandwidth', alerts: 'alerts', 'sub-card': 'subscription' };
+  const ROUTE_OF = { home: 'home', servers: 'servers', streams: 'streams', alerts: 'alerts', users: 'people', history: 'people', bandwidth: 'bandwidth', subscription: 'subscription' };
+  const CARD_OF = { servers: 'servers-card', streams: 'streams-card', alerts: 'servers-card', people: 'people-card', bandwidth: 'bandwidth-card', subscription: 'sub-card' };
+  function hashFor(r) {
+    if (r === 'people') return isAdmin() ? '#/users' : '#/history';
+    if (r === 'requests' || r === 'books') return '#/' + r;
+    return '#/' + (ROUTE_OF[r] ? r : 'home');
+  }
+  /** The dashboard place in the address bar, or null when Requests or Books & comics own it. */
+  function dashRoute() {
+    const h = location.hash.replace(/^#\/?/, '').split('?')[0];
+    if (!h) return 'home';
+    if (/^(requests|books)(\/|$)/.test(h)) return null;
+    return LEGACY[h] || ROUTE_OF[h] || 'home';
+  }
+  // Scroll to a part of the dashboard (desktop), or open its tab (phone).
   const goTo = (id) => {
+    const r = LEGACY[id] || 'home';
+    if (isMobile()) { goTab(r === 'bandwidth' ? 'home' : r); return; }
     const target = id === 'top' ? root : document.getElementById(id);
-    if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); dash.setLink(id === 'top' ? 'summary' : id); }
+    if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); window.gsUI.replace(hashFor(r)); }
   };
   const can = (s) => !window.dash.me || !window.dash.me() || window.dash.can(s);
   const isAdmin = () => !!(window.dash.isAdmin && window.dash.isAdmin());
   const vh = () => !!(window.gsHome && window.gsHome.active());
-  const VH_VIEW = { vhome: 'home', 'streams-card': 'streams', 'people-card': 'history' };
-  const NAV = [
-    { id: 'vhome', label: 'Home', icon: 'grid', ok: () => vh() },
-    { id: 'summary', label: 'Overview', icon: 'grid', ok: () => can('streams') && !vh() },
-    { id: 'bandwidth-card', label: 'Bandwidth', icon: 'activity', ok: () => can('bandwidth') },
-    { id: 'servers-card', label: 'Servers', icon: 'server', ok: () => can('servers') },
-    { id: 'streams-card', label: 'Streams', icon: 'play', ok: () => can('streams') },
-    { id: 'people-card', label: 'Users', icon: 'users', ok: () => isAdmin() },
-    { id: 'people-card', label: 'My history', icon: 'history', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') },
-    { id: 'requests', label: 'Requests', icon: 'film', ok: () => can('requests') },
-    { id: 'books', label: 'Books & comics', icon: 'book', ok: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) }
+  const VH_OF_ROUTE = { home: 'home', streams: 'streams', people: 'history', subscription: 'subscription' };
+  /* Every place, once: the desktop menu (nav) and the phone tab bar (tab) both come from this list.
+     route is the address (#/route); more: on a phone it goes under More when there are more than five tabs. */
+  const v = (x) => (typeof x === 'function' ? x() : x);
+  const PLACES = [
+    { route: 'home', nav: () => (vh() ? 'Home' : 'Overview'), tab: 'Home', icon: 'grid',
+      navOk: () => vh() || can('streams'), tabOk: () => vh() || can('streams') || can('bandwidth') || can('viewing') },
+    { route: 'bandwidth', nav: 'Bandwidth', icon: 'activity', navOk: () => can('bandwidth'), tabOk: () => false },
+    { route: 'servers', nav: 'Servers', tab: 'Servers', icon: 'server', more: true, navOk: () => can('servers'), tabOk: () => can('servers') },
+    { route: 'streams', nav: 'Streams', tab: 'Streams', icon: 'play', navOk: () => can('streams'), tabOk: () => can('streams') },
+    { route: 'alerts', tab: 'Alerts', icon: 'bell', more: true, navOk: () => false, tabOk: () => can('streams') && can('servers') },
+    { route: 'people', nav: () => (isAdmin() ? 'Users' : 'My history'), tab: () => (isAdmin() ? 'Users' : 'History'), icon: () => (isAdmin() ? 'users' : 'history'),
+      more: () => isAdmin(), navOk: () => isAdmin() || (!!window.dash.me && !!window.dash.me() && can('history')), tabOk: () => isAdmin() || (!!window.dash.me && !!window.dash.me() && can('history')) },
+    { route: 'requests', nav: 'Requests', tab: 'Requests', icon: 'film', navOk: () => can('requests'), tabOk: () => can('requests') },
+    { route: 'books', nav: 'Books & comics', tab: 'Books', icon: 'book', navOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()), tabOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) }
   ];
-  let navActive = 'summary';
-  // Requests and Books & comics are their own pages; leaving one for the other closes it.
-  const PAGES = { requests: () => window.gsRequests, books: () => window.gsBooks };
-  function openPage(id) {
-    Object.keys(PAGES).forEach((k) => { if (k !== id && root.dataset.page === k && PAGES[k]()) PAGES[k]().close(); });
-    if (PAGES[id]()) PAGES[id]().open();
-  }
-  function closePages() {
-    Object.keys(PAGES).forEach((k) => { if (root.dataset.page === k && PAGES[k]()) PAGES[k]().close(); });
-  }
+  let navActive = 'home';
+  // Requests and Books & comics are their own pages, shown by their own scripts when the address is theirs.
+  const PAGES = { requests: 1, books: 1 };
   function renderNav() {
     const nav = document.getElementById('nav');
     nav.replaceChildren();
@@ -222,20 +238,15 @@
     const mark = el('img'); mark.src = 'assets/mark-glow.png'; mark.alt = ''; mark.width = 160; mark.height = 126;
     brand.appendChild(mark);
     nav.appendChild(brand);
-    NAV.filter((n) => n.ok()).forEach((n) => {
+    const page = root.dataset.page;
+    PLACES.filter((n) => n.navOk()).forEach((n) => {
       const b = el('button', 'sd-navbtn');
-      b.type = 'button'; b.title = n.label; b.setAttribute('aria-label', n.label);
-      const page = root.dataset.page;
-      const cur = PAGES[page] ? n.id === page : vh() ? VH_VIEW[n.id] === window.gsHome.view() : navActive === n.id;
+      const label = v(n.nav);
+      b.type = 'button'; b.title = label; b.setAttribute('aria-label', label);
+      const cur = PAGES[page] ? n.route === page : vh() ? VH_OF_ROUTE[n.route] === window.gsHome.view() : navActive === n.route;
       b.setAttribute('aria-current', cur ? 'true' : 'false');
-      b.appendChild(icon(n.icon, 22));
-      b.addEventListener('click', () => {
-        if (PAGES[n.id]) { openPage(n.id); return; }
-        closePages();
-        if (vh() && VH_VIEW[n.id]) { window.gsHome.show(VH_VIEW[n.id]); return; }
-        navActive = n.id;
-        renderNav(); requestAnimationFrame(() => goTo(n.id));
-      });
+      b.appendChild(icon(v(n.icon), 22));
+      b.addEventListener('click', () => window.gsUI.go(hashFor(n.route)));
       nav.appendChild(b);
     });
   }
@@ -275,7 +286,7 @@
   document.getElementById('view-table').addEventListener('click', () => setView('table'));
   document.getElementById('view-rows').addEventListener('click', () => setView('rows'));
   document.getElementById('view-carousel').addEventListener('click', () => setView('carousel'));
-  const mq = window.matchMedia('(max-width: 760px)');
+  const mq = window.gsUI.phoneQuery;   // 760 px and narrower, or a phone on its side
   const isMobile = () => mq.matches;
   let sheetId = null;
   let mtab = 'home';
@@ -330,7 +341,9 @@
       if (!liveMsg.shown) { liveMsg.shown = true; box.classList.remove('is-flash'); void box.offsetWidth; box.classList.add('is-flash'); }
       return;
     }
-    sortedStreams().slice(0, 3).forEach((r) => {
+    const newest = sortedStreams().slice(0, 3);
+    if (!newest.length) box.appendChild(el('span', 'sd-pill-lime__label sd-pill-lime__none', 'Nothing playing'));
+    newest.forEach((r) => {
       const item = el('div', 'sd-newest');
       item.appendChild(avatar(r.user, 'sm'));
       const t = el('div', 'sd-newest__text');
@@ -836,7 +849,7 @@
         fetch('/api/streams/' + encodeURIComponent(r.id) + '/stop', { method: 'POST', credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'greystar' }, body: JSON.stringify({ reason: st.reason }) })
           .then((res) => res.json().catch(() => ({})).then((j) => { if (!res.ok) throw new Error(j.detail || ('HTTP ' + res.status)); }))
-          .then(() => { st.busy = false; st.done = true; paint(); setTimeout(() => dash.refresh && dash.refresh(), 1500); })
+          .then(() => { st.busy = false; st.done = true; paint(); window.gsUI.toast('Stream stopped.'); setTimeout(() => dash.refresh && dash.refresh(), 1500); })
           .catch((e) => { st.busy = false; st.error = e.message; paint(); });
       };
       go.addEventListener('click', send);
@@ -1114,16 +1127,23 @@
     pulseMarks(b, r);
     return b;
   }
+  let sheetDetach = null;
+  const sheetScrim = document.getElementById('sheet-scrim');
+  function closeSheet() { sheetId = null; renderStreams(); }
   function renderSheet() {
     const sheet = document.getElementById('sheet');
     sheet.replaceChildren();
     const d = dash.data('streams');
     const r = view === 'rows' && sheetId && d.status === 'ok' ? d.data.find((x) => x.id === sheetId) : null;
-    if (!r) { sheet.hidden = true; return; }
-    sheet.hidden = false;
+    if (!r) {
+      sheet.hidden = true; sheetScrim.hidden = true;
+      if (sheetDetach) { sheetDetach(); sheetDetach = null; }
+      return;
+    }
+    sheet.hidden = false; sheetScrim.hidden = false;
     const close = el('button', 'sd-sheet__close'); close.type = 'button'; close.setAttribute('aria-label', 'Close playback details');
     close.appendChild(icon('close', 18));
-    close.addEventListener('click', () => { sheetId = null; renderStreams(); });
+    close.addEventListener('click', closeSheet);
     const back = streamBack(r);
     const parts = Array.from(back.children).slice(2);
     const head = parts[0];
@@ -1140,7 +1160,8 @@
       hb.addEventListener('click', () => window.gsPeople.openHistory(r.user_id, r.user));
       body.appendChild(hb);
     }
-    sheet.append(el('div', 'sd-sheet__grab'), close, top, body);
+    sheet.append(el('div', 'sd-sheet__grab gs-sheet__grab'), close, top, body);
+    if (!sheetDetach) sheetDetach = window.gsUI.sheet(sheet, { onClose: closeSheet, scrim: sheetScrim });
   }
 
   /* Alerts: what needs attention now */
@@ -1188,50 +1209,136 @@
     return list.length;
   }
 
-  /* Phone tab bar */
-  const TABS = [
-    { id: 'home', label: 'Home', icon: 'grid', link: 'summary', ok: () => vh() || can('streams') || can('bandwidth') || can('viewing') },
-    { id: 'servers', label: 'Servers', icon: 'server', link: 'servers-card', ok: () => can('servers') },
-    { id: 'streams', label: 'Streams', icon: 'play', link: 'streams-card', ok: () => can('streams') },
-    { id: 'alerts', label: 'Alerts', icon: 'bell', link: 'alerts', ok: () => can('streams') && can('servers') },
-    { id: 'people', label: 'Users', icon: 'users', link: 'people-card', ok: () => isAdmin() },
-    { id: 'people', label: 'History', icon: 'history', link: 'people-card', ok: () => !isAdmin() && window.dash.me && window.dash.me() && can('history') },
-    { id: 'requests', label: 'Requests', icon: 'film', link: 'requests', ok: () => can('requests') },
-    { id: 'books', label: 'Books', icon: 'book', link: 'books', ok: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) }
-  ];
+  /* Phone tab bar (from PLACES). At most five: when there are more, Servers, Alerts and Users go under More. */
+  const TABS = PLACES.map((p) => ({ id: p.route, get label() { return v(p.tab); }, get icon() { return v(p.icon); }, get more() { return !!v(p.more); }, ok: p.tabOk }));
   const okTabs = () => TABS.filter((t) => t.ok());
+  function barTabs() {
+    const all = okTabs();
+    if (all.length <= 5) return { bar: all, more: [] };
+    return { bar: all.filter((t) => !t.more), more: all.filter((t) => t.more) };
+  }
   window.sdGoTab = (id) => { if (isMobile()) goTab(id); };
   window.sdSetMtab = (id) => { mtab = id; root.dataset.mtab = id; };
-  function goTab(id) {
-    if (PAGES[id]) { openPage(id); return; }
-    closePages();
-    if (vh()) { const v = { home: 'home', streams: 'streams', people: 'history' }[id]; if (v) { mtab = id; root.dataset.mtab = id; window.gsHome.show(v); return; } }
-    mtab = id;
-    root.dataset.mtab = id;
-    renderAll();
-    root.scrollIntoView({ block: 'start' });
-    const t = TABS.find((x) => x.id === id);
-    if (t) dash.setLink(t.link);
+  function goTab(id) { window.gsUI.go(hashFor(id)); }
+  /** Which tab is on screen: a page of its own, the viewer home's view, or the dashboard tab. */
+  function currentTab() {
+    if (PAGES[root.dataset.page]) return root.dataset.page;
+    if (vh()) return ({ home: 'home', streams: 'streams', history: 'people', subscription: 'home' })[window.gsHome.view()] || 'home';
+    return mtab;
   }
+  let alertsNow = 0;
   function renderTabbar(alertCount) {
+    alertsNow = alertCount || 0;
     const bar = document.getElementById('tabbar');
     bar.replaceChildren();
-    const tabs = okTabs();
-    bar.classList.toggle('is-single', tabs.length < 2);
+    const { bar: tabs, more } = barTabs();
+    const cur = currentTab();
+    bar.classList.toggle('is-single', tabs.length + (more.length ? 1 : 0) < 2);
     tabs.forEach((t) => {
       const b = el('button', 'sd-tab'); b.type = 'button';
-      const curT = PAGES[root.dataset.page] ? t.id === root.dataset.page : vh() ? ({ home: 'home', streams: 'streams', people: 'history' })[t.id] === window.gsHome.view() : mtab === t.id;
-      b.setAttribute('aria-current', curT ? 'true' : 'false');
+      b.setAttribute('aria-current', t.id === cur ? 'true' : 'false');
       b.setAttribute('aria-label', t.label + (t.id === 'alerts' && alertCount ? ', ' + alertCount + ' alerts' : ''));
       b.append(icon(t.icon, 20), el('span', null, t.label));
       if (t.id === 'alerts' && alertCount) b.appendChild(el('span', 'sd-tab__count', String(alertCount)));
       b.addEventListener('click', () => goTab(t.id));
       bar.appendChild(b);
     });
+    if (more.length) {
+      const inMore = more.some((t) => t.id === cur);
+      const withAlerts = more.some((t) => t.id === 'alerts') && alertCount;
+      const b = el('button', 'sd-tab sd-tab--more'); b.type = 'button';
+      b.setAttribute('aria-current', inMore ? 'true' : 'false');
+      b.setAttribute('aria-haspopup', 'dialog');
+      b.setAttribute('aria-label', 'More: ' + more.map((t) => t.label).join(', ') + (withAlerts ? ', ' + alertCount + ' alerts' : ''));
+      b.append(icon('dots', 20), el('span', null, inMore ? (more.find((t) => t.id === cur) || {}).label || 'More' : 'More'));
+      if (withAlerts) b.appendChild(el('span', 'sd-tab__count', String(alertCount)));
+      b.addEventListener('click', () => openMore(more));
+      bar.appendChild(b);
+    }
   }
+  // More: a bottom sheet with the tabs that do not fit.
+  const moreBox = document.getElementById('more-sheet');
+  const morePanel = moreBox.querySelector('.sd-more__panel');
+  let moreDetach = null;
+  function closeMore() {
+    if (moreBox.hidden) return;
+    moreBox.hidden = true;
+    if (moreDetach) { moreDetach(); moreDetach = null; }
+    const b = document.querySelector('#tabbar .sd-tab--more'); if (b) b.focus();
+  }
+  function openMore(more) {
+    const cur = currentTab();
+    morePanel.replaceChildren(el('h2', 'sd-more__title', 'More'));
+    more.forEach((t) => {
+      const b = el('button', 'sd-more__item'); b.type = 'button';
+      b.setAttribute('aria-current', t.id === cur ? 'true' : 'false');
+      b.append(icon(t.icon, 20), el('span', null, t.label));
+      if (t.id === 'alerts' && alertsNow) b.appendChild(el('span', 'sd-tab__count', String(alertsNow)));
+      b.appendChild(icon('right', 18));
+      b.addEventListener('click', () => { closeMore(); goTab(t.id); });
+      morePanel.appendChild(b);
+    });
+    moreBox.hidden = false;
+    moreDetach = window.gsUI.sheet(morePanel, { onClose: closeMore, scrim: moreBox });
+    const first = morePanel.querySelector('.sd-more__item'); if (first) first.focus();
+  }
+  moreBox.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMore(); });
+
+  /* Following the address: a tab change, Back and Forward, a reload or a link all come through here. */
+  function applyRoute() {
+    const r = dashRoute();
+    if (r == null) { closeMore(); return; }      // Requests or Books & comics: their scripts take it
+    closeMore();
+    const h = location.hash.replace(/^#\/?/, '').split('?')[0];
+    if (LEGACY[h]) window.gsUI.replace(hashFor(LEGACY[h]));   // an old #streams-card link: show the new address
+    const y = window.gsUI.scroll.enter();
+    if (vh()) {
+      const v = VH_OF_ROUTE[r] || 'home';
+      window.gsHome.setView(v);
+      mtab = { home: 'home', streams: 'streams', history: 'people', subscription: 'home' }[v];
+      root.dataset.mtab = mtab;
+    } else {
+      navActive = r === 'alerts' || r === 'subscription' ? 'home' : r;
+      let t = r === 'subscription' || r === 'bandwidth' ? 'home' : r;
+      if (!okTabs().some((x) => x.id === t)) t = (okTabs()[0] || { id: 'home' }).id;
+      mtab = t; root.dataset.mtab = t;
+    }
+    renderAll();
+    if (y != null) { window.gsUI.scroll.restore(y); return; }
+    if (isMobile() || vh() || r === 'home') { window.gsUI.scroll.top(); return; }
+    const target = document.getElementById(CARD_OF[r]);
+    if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  }
+  window.addEventListener('hashchange', applyRoute);
+  let routed = false;
+
+  /* Phones: one page header (eyebrow and title) right under the top bar, the same on every screen. The cards and
+     sections keep their titles on a desktop; on a phone the ones that would repeat it are hidden (ui.css). */
+  const phead = document.getElementById('phead');
+  function renderPhead() {
+    let title = null, count = '';
+    const txt = (id, fb) => { const e = document.getElementById(id); return (e && e.textContent.trim()) || fb; };
+    if (isMobile() && !PAGES[root.dataset.page]) {
+      if (vh()) {
+        const v = window.gsHome.view();
+        if (v === 'home') { const h = document.querySelector('#vhome .vh-hello'); title = h ? h.textContent : null; }  // hub and month have their own title
+        else if (v === 'streams') title = txt('str-title', 'Your streams');
+        else if (v === 'history') title = txt('people-title', 'My history');
+        else if (v === 'subscription') title = 'My subscription';
+      } else {
+        title = { home: txt('title', 'Active streams'), servers: 'Servers', streams: txt('str-title', 'Live streams'), alerts: 'Alerts', people: txt('people-title', 'Users') }[mtab] || null;
+        if (mtab === 'alerts') count = txt('al-count', '');
+      }
+    }
+    phead.hidden = !title;
+    root.classList.toggle('has-phead', !!title);
+    if (title) { document.getElementById('phead-title').textContent = title; document.getElementById('phead-count').textContent = count; }
+  }
+  window.sdPhead = renderPhead;
 
   /* Appearance: light, dark or follow the device */
   const LOOKS = [{ id: 'light', label: 'Light', icon: 'sun' }, { id: 'dark', label: 'Dark', icon: 'moon' }, { id: 'auto', label: 'Match device', icon: 'auto' }];
+  // Desktop: three buttons in the top bar. Phones: Settings, Display, Appearance (the top bar keeps its room for Live now).
   function renderLook() {
     const look = dash.params().look || 'auto';
     if (look === 'auto') delete root.dataset.look; else root.dataset.look = look;
@@ -1242,12 +1349,20 @@
       b.type = 'button'; b.title = l.label; b.setAttribute('aria-label', l.label);
       b.setAttribute('aria-pressed', look === l.id ? 'true' : 'false');
       b.appendChild(icon(l.icon, 20));
-      b.addEventListener('click', () => {
-        if (isMobile() && look === l.id) { const i = LOOKS.findIndex((x) => x.id === l.id); dash.setParams({ look: LOOKS[(i + 1) % LOOKS.length].id }); }
-        else dash.setParams({ look: l.id });
-      });
+      b.addEventListener('click', () => dash.setParams({ look: l.id }));
       box.appendChild(b);
     });
+    const seg = document.getElementById('look-seg');
+    if (seg) {
+      seg.replaceChildren();
+      LOOKS.forEach((l) => {
+        const b = el('button'); b.type = 'button';
+        b.setAttribute('aria-pressed', look === l.id ? 'true' : 'false');
+        b.append(icon(l.icon, 16), document.createTextNode(l.label));
+        b.addEventListener('click', () => dash.setParams({ look: l.id }));
+        seg.appendChild(b);
+      });
+    }
   }
 
   /* Viewing heatmap */
@@ -1492,11 +1607,16 @@
   if ('ResizeObserver' in window) new ResizeObserver(() => zoomPreviews()).observe(document.getElementById('settings'));
 
   // ---- open and close ----
+  let setDetach = null;
   function openSettings(open, fresh) {
     const was = !dock.hidden;
     dock.hidden = !open;
     gear.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (!open) { pvVideos.forEach((v) => v.pause()); if (was) gear.focus(); return; }
+    if (!open) {
+      if (setDetach) { setDetach(); setDetach = null; }
+      pvVideos.forEach((v) => v.pause()); if (was) gear.focus(); return;
+    }
+    if (!setDetach) setDetach = window.gsUI.sheet(document.getElementById('settings'), { onClose: () => openSettings(false), scrim: document.getElementById('set-scrim') });
     if (window.stOnOpen) window.stOnOpen(fresh);   // settings.js picks the home (admins) or Display (viewers)
     syncHomeLayout();
     renderPreviews();
@@ -1528,7 +1648,7 @@
   homeBox.addEventListener('change', (e) => {
     if (e.target.name !== 'vhome') return;
     dash.setParams({ vhome: e.target.value });
-    if (window.gsHome) { window.gsHome.show('home'); }
+    if (window.gsHome) window.gsHome.refresh();
   });
   window.sdSyncHomeLayout = syncHomeLayout;
   lightInput.addEventListener('input', () => applyLight(Number(lightInput.value)));
@@ -1582,6 +1702,7 @@
   document.addEventListener('gs:ready', playIntro, { once: true });
 
   function renderAll() {
+    if (!routed && window.dash.me && window.dash.me()) { routed = true; applyRoute(); return; }
     const tabs = okTabs();
     if (tabs.length && !tabs.some((t) => t.id === mtab)) mtab = tabs[0].id;
     root.dataset.mtab = mtab;
@@ -1602,9 +1723,10 @@
     renderChips();
     renderStreams();
     renderTabbar(renderAlerts());
+    renderPhead();
     if (!dock.hidden) renderPreviews();
   }
   mq.addEventListener('change', renderAll);
-  window.sdNavChanged = () => { renderNav(); renderTabbar(renderAlerts()); };
+  window.sdNavChanged = () => { renderNav(); renderTabbar(renderAlerts()); renderPhead(); };
   dash.onData(renderAll);
 })();
