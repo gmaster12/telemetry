@@ -39,4 +39,4 @@ def test_summary_counts_servers_people_and_problems(main):
     assert out["alerts"]["hot_cpu_pct"] == M.poller.cfg.hot_cpu_pct
     if out["netdata"]["mode"] == "cloud":
         assert out["netdata"]["unlinked"] == ["Lyra"]
-    assert out["requests"] == {"connected": False, "error": None, "pending": None, "links": 0, "log": {"total": 0, "day": 0, "week": 0, "people": 0}}
+    assert out["requests"] == {"connected": False, "error": None, "pending": None, "links": 0, "log": {"total": 0, "day": 0, "week": 0, "people": 0}, "needs_you": 0}

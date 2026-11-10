@@ -252,6 +252,7 @@
     if (s.billing.connected && s.billing.error) out.push({ view: 'billing', tone: 'danger', text: 'Stripe: the last sync failed.' });
     if (s.requests && s.requests.connected && s.requests.error) out.push({ view: 'requests', tone: 'danger', text: 'Seerr: ' + s.requests.error });
     if (s.requests && s.requests.pending) out.push({ view: 'requests', tone: 'warning', text: s.requests.pending + (s.requests.pending === 1 ? ' request is' : ' requests are') + ' waiting for approval.', go: '#/requests/manage' });
+    if (s.requests && s.requests.needs_you) out.push({ view: 'reqlog', tone: 'danger', text: s.requests.needs_you + (s.requests.needs_you === 1 ? ' failed request needs' : ' failed requests need') + ' you: tried again once, then sent to you.' });
     if (s.billing.connected && s.billing.unmatched) out.push({ view: 'billing', tone: 'warning', text: s.billing.unmatched + ' Stripe ' + (s.billing.unmatched === 1 ? 'customer is' : 'customers are') + ' not matched to a Plex user.' });
     return out;
   }
@@ -1302,6 +1303,54 @@
     if (!pane) return;
     if (fresh || !lg.ui) buildLog(pane);
     loadLog(false);
+    loadNeeds();
+    loadMisses();
+  }
+  // Needs you: failed requests a person tried again once and then sent to the admin (app/request_help.py).
+  function loadNeeds() {
+    if (!isAdmin() || !lg.ui) return;
+    api('GET', '/api/settings/requests/help').then(function (d) { paintNeeds(d.rows || []); }).catch(function () { paintNeeds([]); });
+  }
+  function paintNeeds(rows) {
+    var box = lg.ui && lg.ui.needs;
+    if (!box) return;
+    box.hidden = !rows.length;
+    if (!rows.length) { box.replaceChildren(); return; }
+    box.replaceChildren(
+      el('h3', { class: 'st-needs__title' }, el('span', { class: 'st-needs__mark', 'aria-hidden': 'true' }), 'Needs you (' + rows.length + ')'),
+      el('p', { class: 'st-note', text: 'Each of these failed, the person tried it again once, it failed again, and they asked you to look.' }),
+      el('ul', { class: 'st-needs' }, rows.map(function (r) {
+        var done = el('button', { type: 'button', class: 'st-btn', text: 'Mark handled', onclick: function () {
+          done.disabled = true; done.textContent = 'Saving…';
+          api('POST', '/api/settings/requests/help/' + r.request + '/handled').then(function () { loadNeeds(); }).catch(function (e) { done.disabled = false; done.textContent = 'Mark handled'; lg.msg = { kind: 'error', text: e.message }; paintLog(); });
+        } });
+        return el('li', null,
+          el('div', { class: 'st-needs__what' },
+            el('a', { class: 'st-log__title', href: '#/requests/' + (r.kind === 'tv' ? 'series/' : 'movie/') + r.tmdb, text: r.title, onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } }),
+            el('span', { class: 'st-log__meta', text: [r.kind === 'tv' ? 'Series' : 'Movie', r.who, 'asked ' + ago(r.notified_at)].join(' · ') })),
+          done);
+      })));
+  }
+  // Searches for movies and shows that found nothing: the words and how often, never who searched.
+  var missDays = 7;
+  function loadMisses() {
+    if (!isAdmin() || !lg.ui) return;
+    api('GET', '/api/settings/requests/misses?days=' + missDays).then(function (d) { paintMisses(d.rows || []); }).catch(function () { paintMisses(null); });
+  }
+  function paintMisses(rows) {
+    var box = lg.ui && lg.ui.misses;
+    if (!box) return;
+    var seg = el('div', { class: 'st-seg', role: 'group', 'aria-label': 'Period' }, [7, 30].map(function (n) {
+      return el('button', { type: 'button', 'aria-pressed': n === missDays ? 'true' : 'false', text: n + ' days', onclick: function () { missDays = n; loadMisses(); } });
+    }));
+    box.replaceChildren(
+      el('div', { class: 'st-row' }, el('h3', { text: 'Searches that found nothing' }), el('span', { class: 'st-spacer' }), seg),
+      el('p', { class: 'st-note', text: 'Movie and show searches with no results here. Only the words are kept, not who searched. Book searches are in the media site, Administration, Requests.' }),
+      rows === null ? el('p', { class: 'st-note', text: 'Could not load.' })
+        : !rows.length ? el('p', { class: 'st-note', text: 'None in the last ' + missDays + ' days.' })
+        : el('ol', { class: 'st-misses' }, rows.map(function (r) {
+          return el('li', null, el('span', { class: 'st-misses__term', text: r.term }), el('b', { text: r.count + (r.count === 1 ? ' time' : ' times') }), el('span', { class: 'st-log__meta', text: 'last ' + ago(r.last_at) }));
+        })));
   }
   function loadLog(more) {
     if (!isAdmin()) return Promise.resolve();
@@ -1335,17 +1384,21 @@
       chips: el('div', { class: 'st-log__chips', role: 'group', 'aria-label': 'Status' }),
       msg: el('div', { class: 'st-log__msg' }),
       list: el('ol', { class: 'st-log', 'aria-live': 'polite', 'aria-busy': 'false' }),
-      more: el('button', { type: 'button', class: 'st-btn st-log__more', text: 'Show more', onclick: function () { loadLog(true); } })
+      more: el('button', { type: 'button', class: 'st-btn st-log__more', text: 'Show more', onclick: function () { loadLog(true); } }),
+      needs: el('section', { class: 'st-section st-needs__box', hidden: true }),
+      misses: el('section', { class: 'st-section st-misses__box' })
     };
     if (window.sdIcon) ui.csv.prepend(window.sdIcon('down', 16));
     lg.ui = ui;
     pane.replaceChildren(
+      ui.needs,
       el('section', { class: 'st-section st-log__top' },
         el('div', { class: 'st-row' }, ui.facts, el('span', { class: 'st-spacer' }), ui.imp, ui.csv),
         el('div', { class: 'st-log__tools' }, search, kinds),
         ui.chips),
       ui.msg,
-      el('section', { class: 'st-section st-log__box' }, ui.list, ui.more));
+      el('section', { class: 'st-section st-log__box' }, ui.list, ui.more),
+      ui.misses);
   }
   function importLog() {
     var b = lg.ui && lg.ui.imp;
@@ -1382,7 +1435,9 @@
       poster,
       el('div', { class: 'st-log__what' },
         el('a', { class: 'st-log__title', href: href, text: r.title, onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } }),
-        el('span', { class: 'st-log__meta' }, bits, r.is4k ? el('span', { class: 'st-tag', text: '4K' }) : null, r.source === 'imported' ? el('span', { class: 'st-tag', text: 'Imported', title: 'Brought in from Seerr; logged before the request log existed.' }) : null)),
+        el('span', { class: 'st-log__meta' }, bits, r.is4k ? el('span', { class: 'st-tag', text: '4K' }) : null, r.source === 'imported' ? el('span', { class: 'st-tag', text: 'Imported', title: 'Brought in from Seerr; logged before the request log existed.' }) : null,
+          r.help === 'notified' ? el('span', { class: 'st-tag st-tag--danger', text: 'Needs you', title: 'They tried it again once and then asked you to look.' })
+            : r.help === 'retried' ? el('span', { class: 'st-tag', text: 'Tried again', title: 'They used their one try again.' }) : null)),
       el('div', { class: 'st-log__who' },
         el('button', { type: 'button', class: 'st-log__name', text: r.who.name, title: 'Show only ' + r.who.name + '’s requests', onclick: function () {
           var q = r.who.username || r.who.email || r.who.name;

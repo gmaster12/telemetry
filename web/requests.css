@@ -369,3 +369,11 @@ body.rq-noscroll { overflow: hidden; }
   .rq-ev-time, .rq-ev-row .rq-rrow__status, .rq-ev-row .rq-rrow__actions { grid-column: 2; justify-content: flex-start; }
   .rq-ev-sort { margin-left: 0; }
 }
+
+/* Notify me too (title page) and Request more seasons (search cards): app/request_help.py, followBox / posterCard */
+.rq-follow { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.rq-follow__note { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; opacity: .85; }
+.rq-follow__dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid currentColor; flex: none; }
+.rq-card__more { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; margin-top: 6px; padding: 4px 10px;
+  border-radius: 999px; background: var(--lime, #b8fc64); color: #0b0b0b; font-size: 12px; font-weight: 700; line-height: 1.2; cursor: pointer; }
+.rq-card__more:hover { filter: brightness(1.05); }

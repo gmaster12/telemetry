@@ -10,6 +10,7 @@ import datetime as dt
 import logging
 import os
 from typing import Any, Callable
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -108,6 +109,8 @@ def page_of(res: dict | None, items: list) -> dict:
 
 
 EVERYTHING_PAGE = 30
+BOOK_KINDS = ("comic", "ebook", "audiobook")
+BOOK_ACTIONS = ("retry", "notify", "cancel", "stop", "watch", "unwatch")
 
 
 def unify_seerr(x: dict, wait: dict | None) -> dict:
@@ -185,6 +188,19 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 "canRetry": status == "failed" and (mine or manage), "canRemove": status == "failed" and (mine or manage),
                 "downloading": bool(m.get("downloadStatus4k" if q.get("is4k") else "downloadStatus")),
                 "media": {"status": MEDIA_STATUS.get(m.get("status4k" if q.get("is4k") else "status"), "unknown"), "tmdbId": m.get("tmdbId")}}
+
+    def with_help(items: list[dict], manage: bool) -> list[dict]:
+        """Glenn's rule on failed requests: one Try again, then Notify admin, then "Admin notified". Managers: no limit."""
+        if manage:
+            return items
+        flags = svc.help.flags([x["id"] for x in items if x.get("status") == "failed" or x.get("state") == "problem"])
+        for x in items:
+            if x.get("status") != "failed" and not (x.get("source") == "seerr" and x.get("state") == "problem"):
+                continue
+            f = flags.get(x["id"]) or {}
+            told = bool(f.get("notified_at")) and not f.get("handled_at")
+            x.update(canRetry=not f.get("retried_at"), canNotify=bool(f.get("retried_at")) and not told, notified=told)
+        return items
 
     async def waiting_reason(row: dict) -> dict:
         """Why an approved request has not downloaded yet: not out yet (with the date it comes out, from TMDB through
@@ -360,6 +376,8 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         if not q:
             return {"items": [], "page": 1, "totalPages": 1, "more": False}
         res = await run(svc.get("/search", params={"query": q, "page": page}, ttl=FAST))
+        if page == 1 and not (res or {}).get("results"):
+            svc.help.miss(q, "movies & shows")  # the words only, never who searched
         return page_of(res, [card(x) for x in (res or {}).get("results", [])])
 
     # ---------- titles ----------
@@ -371,11 +389,27 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 "crew": [{"id": c.get("id"), "name": c.get("name"), "job": c.get("job")} for c in crew if c.get("job") in ("Director", "Screenplay", "Writer", "Producer", "Creator")][:6],
                 "trailer": (vids[0].get("url") if vids else None)}
 
-    def requests_on(mi: dict | None) -> list:
-        return [{"id": q.get("id"), "status": REQUEST_STATUS.get(q.get("status"), "unknown"), "is4k": bool(q.get("is4k")),
-                 "seasons": sorted(s.get("seasonNumber") for s in (q.get("seasons") or []) if s.get("seasonNumber") is not None),
-                 "by": {"id": (q.get("requestedBy") or {}).get("id"), "name": (q.get("requestedBy") or {}).get("displayName")},
-                 "created": q.get("createdAt")} for q in (mi or {}).get("requests") or []]
+    def requests_on(mi: dict | None, me_id: int | None = None, manage: bool = False, watching: frozenset = frozenset()) -> list:
+        """Requests on a title. Who made someone else's request is only sent to request managers (Glenn: privacy);
+        everyone else sees "another member"."""
+        out = []
+        for q in (mi or {}).get("requests") or []:
+            by = q.get("requestedBy") or {}
+            mine = me_id is not None and by.get("id") == me_id
+            out.append({"id": q.get("id"), "status": REQUEST_STATUS.get(q.get("status"), "unknown"), "is4k": bool(q.get("is4k")),
+                        "seasons": sorted(s.get("seasonNumber") for s in (q.get("seasons") or []) if s.get("seasonNumber") is not None),
+                        "by": {"id": by.get("id"), "name": by.get("displayName")} if (mine or manage) else None,
+                        "mine": mine, "watching": q.get("id") in watching, "created": q.get("createdAt")})
+        return out
+
+    async def viewer(p, uid: int | None) -> tuple[int | None, bool, frozenset]:
+        """This person's Seerr id, whether they may see who asked, and the requests they follow (Notify me too)."""
+        try:
+            u = await me_info(uid)
+        except SeerrError:
+            u = {}
+        return u.get("id"), has(u.get("permissions"), "MANAGE_REQUESTS", "REQUEST_VIEW"), \
+            frozenset(int(w["request_id"]) for w in svc.help.watched(p.subject))
 
     @r.get("/scores")
     async def scores(request: Request, ids: str = ""):
@@ -390,8 +424,9 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
 
     @r.get("/movie/{tmdb_id}")
     async def movie(request: Request, tmdb_id: int):
-        _, uid = await who(request)
+        p, uid = await who(request)
         d = await run(svc.get(f"/movie/{tmdb_id}", user=uid, ttl=FAST))
+        me_id, manage, watching = await viewer(p, uid)
         mi = d.get("mediaInfo") or {}
         return {"kind": "movie", "id": d.get("id"), "title": d.get("title"), "year": year(d), "poster": d.get("posterPath"),
                 "backdrop": d.get("backdropPath"), "overview": d.get("overview"), "tagline": d.get("tagline"), "runtime": d.get("runtime"),
@@ -401,13 +436,14 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                                        for x in c.get("release_dates") or [] if x.get("certification")), None),
                 "studios": [{"id": c.get("id"), "name": c.get("name")} for c in (d.get("productionCompanies") or [])[:3]],
                 "collection": {"id": d["collection"]["id"], "name": d["collection"].get("name"), "poster": d["collection"].get("posterPath")} if d.get("collection") else None,
-                "media": media_state(mi), "requests": requests_on(mi), "watchlisted": bool(d.get("onUserWatchlist")),
+                "media": media_state(mi), "requests": requests_on(mi, me_id, manage, watching), "watchlisted": bool(d.get("onUserWatchlist")),
                 **detail_extra(d)}
 
     @r.get("/tv/{tmdb_id}")
     async def tv(request: Request, tmdb_id: int):
-        _, uid = await who(request)
+        p, uid = await who(request)
         d = await run(svc.get(f"/tv/{tmdb_id}", user=uid, ttl=FAST))
+        me_id, manage, watching = await viewer(p, uid)
         mi = d.get("mediaInfo") or {}
         have = {s.get("seasonNumber"): s for s in mi.get("seasons") or []}
         asked = {}
@@ -432,7 +468,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 "networks": [{"id": n.get("id"), "name": n.get("name")} for n in (d.get("networks") or [])[:3]],
                 "tvdbId": (d.get("externalIds") or {}).get("tvdbId"), "episodeRuntime": (d.get("episodeRunTime") or [None])[0],
                 "certification": next((c.get("rating") for c in ((d.get("contentRatings") or {}).get("results") or []) if c.get("iso_3166_1") == "US"), None),
-                "seasons": seasons, "media": media_state(mi), "requests": requests_on(mi), "watchlisted": bool(d.get("onUserWatchlist")),
+                "seasons": seasons, "media": media_state(mi), "requests": requests_on(mi, me_id, manage, watching), "watchlisted": bool(d.get("onUserWatchlist")),
                 "next": (d.get("nextEpisodeToAir") or {}).get("airDate"), **detail_extra(d)}
 
     @r.get("/tv/{tmdb_id}/season/{number}")
@@ -521,8 +557,10 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
 
     @r.post("/request/{request_id}/{decision}")
     async def decide(request: Request, request_id: int, decision: str):
-        if decision == "retry":  # this route is matched first; the retry route below does the work
+        if decision == "retry":  # this route is matched first; the retry and notify routes below do the work
             return await retry_request(request, request_id)
+        if decision == "notify":
+            return await notify_admin(request, request_id)
         _, uid = await who(request)
         if decision not in ("approve", "decline"):
             raise HTTPException(404, "No such action.")
@@ -538,7 +576,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         base = {"take": 50, "skip": 0, "sort": "added", "sortDirection": "desc", "requestedBy": u.get("id")}
         failed_res, open_res = await asyncio.gather(run(svc.get("/request", user=uid, params={**base, "filter": "failed"}, ttl=FAST)),
                                                     run(svc.get("/request", user=uid, params={**base, "filter": "unavailable"}, ttl=FAST)))
-        failed = (await requests_page(failed_res, u.get("id"), manage))["items"]
+        failed = with_help((await requests_page(failed_res, u.get("id"), manage))["items"], manage)
         rows = (await requests_page(open_res, u.get("id"), manage))["items"]
         waiting = [x for x in rows if x["status"] == "approved" and not x["downloading"]
                    and x["media"]["status"] in ("processing", "partial", "pending", "unknown")]
@@ -557,13 +595,75 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             raise HTTPException(403, "That is not your request.")
         return q
 
+    async def flag_info(q: dict) -> dict:
+        m = q.get("media") or {}
+        kind = q.get("type") or m.get("mediaType") or "movie"
+        info = await title_info(kind, m.get("tmdbId") or 0)
+        return {"kind": kind, "tmdbId": m.get("tmdbId"), "title": info.get("title")}
+
     @r.post("/request/{request_id}/retry")
     async def retry_request(request: Request, request_id: int):
-        """Send a failed request to Radarr or Sonarr again (Seerr's own retry)."""
-        _, uid = await who(request)
-        await own_failed(uid, request_id)
+        """Send a failed request to Radarr or Sonarr again (Seerr's own retry). Glenn's rule: people get one try;
+        after that, Notify admin. Request managers are not limited."""
+        p, uid = await who(request)
+        q = await own_failed(uid, request_id)
+        manage = has((await run(me_info(uid))).get("permissions"), "MANAGE_REQUESTS")
+        if not manage and (svc.help.flag(request_id) or {}).get("retried_at"):
+            raise HTTPException(409, "You have already tried this one again. Use Notify admin and the admin will look at it.")
         res = await run(svc.send("POST", f"/request/{request_id}/retry", user=None))
+        if not manage:
+            svc.help.mark_retried(request_id, p.subject, await flag_info(q))
         return {"ok": True, "status": REQUEST_STATUS.get((res or {}).get("status"), "approved")}
+
+    @r.post("/request/{request_id}/notify")
+    async def notify_admin(request: Request, request_id: int):
+        """It failed again after the one retry: put it on the admins' Needs you list."""
+        p, uid = await who(request)
+        q = await own_failed(uid, request_id)
+        f = svc.help.flag(request_id) or {}
+        if not f.get("retried_at"):
+            raise HTTPException(409, "Try it again once first.")
+        if f.get("notified_at") and not f.get("handled_at"):
+            return {"ok": True, "already": True}
+        svc.help.mark_notified(request_id, p.subject, await flag_info(q))
+        return {"ok": True}
+
+    # ---------- Notify me too: follow someone else's request (their name is never sent) ----------
+    @r.post("/watch/{request_id}")
+    async def watch(request: Request, request_id: int):
+        p, uid = await who(request)
+        u = await run(me_info(uid))
+        q = await run(svc.get(f"/request/{request_id}"))  # as Seerr's admin: people cannot read others' requests
+        if not isinstance(q, dict) or not q.get("id"):
+            raise HTTPException(404, "No such request.")
+        if (q.get("requestedBy") or {}).get("id") == u.get("id"):
+            raise HTTPException(409, "This is your own request; it is already in My requests.")
+        if REQUEST_STATUS.get(q.get("status")) == "declined":
+            raise HTTPException(409, "That request is closed. You can request the title yourself.")
+        svc.help.watch(request_id, p.subject, await flag_info(q))
+        return {"ok": True, "watching": True}
+
+    @r.delete("/watch/{request_id}")
+    async def unwatch(request: Request, request_id: int):
+        p, _ = await who(request)
+        svc.help.unwatch(request_id, p.subject)
+        return {"ok": True, "watching": False}
+
+    # ---------- comics, ebooks and audiobooks in My requests: actions go to the media site, signed ----------
+    @r.post("/books/{kind}/{item_id}/{action}")
+    async def book_action(request: Request, kind: str, item_id: int, action: str):
+        p = need(request, "requests")
+        if kind not in BOOK_KINDS or action not in BOOK_ACTIONS or item_id < 1:
+            raise HTTPException(404, "No such action.")
+        if not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+            raise HTTPException(409, "Books & comics is not available for this sign-in.")
+        try:
+            await media.call("POST", f"/api/telemetry/requests/{kind}/{item_id}/{action}?sub={quote(str(p.subject), safe='')}")
+        except Exception as e:  # noqa: BLE001  (MediaError carries the media site's own words)
+            raise HTTPException(409, str(e) or "The media site did not answer.")
+        finally:
+            media.forget_member(p.subject)
+        return {"ok": True}
 
     @r.get("/mine")
     async def mine(request: Request, filter: str = "all", page: int = 1, everyone: bool = False):
@@ -584,14 +684,17 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         """My requests, all of them in one list: movies and shows from Seerr merged with comics, ebooks and audiobooks
         from the media site (for Plex sign-ins with Books & comics), newest first (order=asc for oldest first).
 
-        `cursor` is "<Seerr rows used>.<book items used>"; each answer gives the next one. When one side does not
-        answer, the other still shows and `sources` says which: ok, down, or off (not set up / not for this person)."""
+        `cursor` is "<Seerr rows used>.<book items used>.<followed requests used>"; each answer gives the next one. When
+        one side does not answer, the other still shows and `sources` says which: ok, down, or off (not set up / not for
+        this person). Requests by others that this person follows (Notify me too) come along, never with the other
+        person's name."""
         p = need(request, "requests")
         asc = order == "asc"
         try:
-            s_skip, b_skip = (max(0, int(v)) for v in cursor.split(".", 1))
+            parts = [max(0, int(v)) for v in cursor.split(".")][:3]
         except ValueError:
-            s_skip = b_skip = 0
+            parts = []
+        s_skip, b_skip, w_skip = (parts + [0, 0, 0])[:3]
         page = EVERYTHING_PAGE
         sources: dict[str, str] = {}
 
@@ -611,7 +714,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                              and x["media"]["status"] in ("processing", "pending", "unknown")]
                 waits = dict(zip([x["id"] for x in need_wait], await asyncio.gather(*[waiting_reason(x) for x in need_wait])))
                 sources["seerr"] = "ok"
-                return [unify_seerr(x, waits.get(x["id"])) for x in rows], bool(pg["more"])
+                return with_help([unify_seerr(x, waits.get(x["id"])) for x in rows], manage), bool(pg["more"])
             except (SeerrError, HTTPException) as e:
                 log.info("My requests: Seerr part failed: %s", getattr(e, "message", None) or getattr(e, "detail", e))
                 sources["seerr"] = "down"
@@ -631,22 +734,51 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 items = list(reversed(items))
             chunk = items[b_skip:b_skip + page]
             sources["books"] = "ok"
-            return [{**x, "source": "books", "poster": None, "wait": None, "canRetry": False, "canRemove": False,
+            return [{**x, "source": "books", "poster": None, "wait": None, "canRemove": False, "canRetry": bool(x.get("canRetry")),
                      "open": ("#/books" + x["open"]) if isinstance(x.get("open"), str) and x["open"].startswith("/") else None}
                     for x in chunk], len(items) > b_skip + page
 
-        (seerr_items, seerr_more), (book_items, book_more) = await asyncio.gather(seerr_part(), books_part())
+        async def watched_part() -> tuple[list[dict], bool]:
+            follows = svc.help.watched(p.subject) if svc.configured() else []
+            if not follows:
+                return [], False
+
+            async def one(w: dict) -> dict | None:
+                try:
+                    q = await svc.get(f"/request/{int(w['request_id'])}", ttl=FAST)
+                except SeerrError as e:
+                    if e.status == 404:  # gone from Seerr: stop following it
+                        svc.help.unwatch(w["request_id"], p.subject)
+                    return None
+                m = q.get("media") or {}
+                info = await title_info(q.get("type") or m.get("mediaType") or "movie", m.get("tmdbId") or 0)
+                row = req_row(q, info, None, False)
+                wait = None
+                if row["status"] == "approved" and not row["downloading"] and row["media"]["status"] in ("processing", "pending", "unknown"):
+                    wait = await waiting_reason(row)
+                at = dt.datetime.fromtimestamp(int(w["created"]), dt.timezone.utc).isoformat().replace("+00:00", "Z")
+                item = unify_seerr(row, wait)
+                return {**item, "key": f"seerr-watch:{row['id']}", "created": at, "sortAt": at, "watching": True,
+                        "note": "Requested by another member" + (". " + item["note"] if item.get("note") else ""),
+                        "canRetry": False, "canRemove": False}
+            got = [x for x in await asyncio.gather(*[one(w) for w in follows]) if x]
+            got.sort(key=lambda x: x["sortAt"], reverse=not asc)
+            return got[w_skip:w_skip + page], len(got) > w_skip + page
+
+        (seerr_items, seerr_more), (book_items, book_more), (watch_items, watch_more) = await asyncio.gather(
+            seerr_part(), books_part(), watched_part())
         def when(x: dict) -> float:
             try:
                 return dt.datetime.fromisoformat(str(x.get("sortAt") or "").replace("Z", "+00:00")).timestamp()
             except ValueError:
                 return 0.0
-        merged = sorted(seerr_items + book_items, key=lambda x: (when(x), x["key"]), reverse=not asc)
+        merged = sorted(seerr_items + book_items + watch_items, key=lambda x: (when(x), x["key"]), reverse=not asc)
         taken = merged[:page]
-        used_s = sum(1 for x in taken if x["source"] == "seerr")
+        used_s = sum(1 for x in taken if x["source"] == "seerr" and not x.get("watching"))
         used_b = sum(1 for x in taken if x["source"] == "books")
-        more = seerr_more or book_more or used_s < len(seerr_items) or used_b < len(book_items)
-        return {"items": [x for x in taken if x["state"] != "hidden"], "cursor": f"{s_skip + used_s}.{b_skip + used_b}",
+        used_w = sum(1 for x in taken if x["source"] == "seerr" and x.get("watching"))
+        more = seerr_more or book_more or watch_more or used_s < len(seerr_items) or used_b < len(book_items) or used_w < len(watch_items)
+        return {"items": [x for x in taken if x["state"] != "hidden"], "cursor": f"{s_skip + used_s}.{b_skip + used_b}.{w_skip + used_w}",
                 "more": more, "sources": sources}
 
     @r.get("/services/{kind}")

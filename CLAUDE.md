@@ -194,6 +194,25 @@ files to add servers. Keep it that way.
   ("Seerr did not make a request ...") instead of "requested" (that showed success while nothing reached My
   requests). The picker (`seasonOpen` in `requests.js`) offers only qualifying seasons, and explains partly-on-Plex
   seasons (use Report issue) and failed ones (Try again in My requests).
+- Request rules (Glenn's answers, Nov 2026; `app/request_help.py`, tables `request_flags`, `request_watch`,
+  `search_misses`; the media site has the same rules for books in `server/request_help.ts`). Glenn approves everything
+  (turn on Seerr's default Auto-Approve and Auto-Approve 4K permissions in Seerr itself; the dashboard does not change
+  Seerr's permissions). A person's failed request gets ONE Try again (`POST /request/{id}/retry`, then 409); after that
+  Notify admin (`POST /request/{id}/notify`), then "Admin notified" (`helpBtn` in `requests.js`; `with_help` adds
+  `canRetry`, `canNotify`, `notified` to My requests and the red attention box). Request managers are not limited.
+  Admins see them in Settings, Request log, "Needs you" (Mark handled, `/api/settings/requests/help`), a "Needs you"
+  tag on the log row, and a line in the Settings home's "needs a look" (`requests.needs_you` in the summary).
+- Notify me too: on a title someone else requested and that is not on Plex yet, `followBox` shows "Requested by
+  another member" and Notify me too (`POST/DELETE /api/requests/watch/{request id}`). Followed requests show in My
+  requests (`seerr-watch:<id>`, `watching`, "Stop notifying me"). Who made someone else's request is never sent to
+  people who are not request managers (`requests_on` sends `by: null` and `mine`); `tests/test_request_help.py`
+  checks this. My requests' cursor is now "<Seerr>.<books>.<followed>".
+- Book rows in My requests act through `POST /api/requests/books/{comic|ebook|audiobook}/{id}/{retry|notify|cancel|stop|watch|unwatch}`,
+  sent on to the media site signed (`Media.call`), then `forget_member` so the list refreshes.
+- A partly available series' search card gets "Request more seasons" (`.rq-card__more`): it opens the series with
+  `?more=1`, which opens the season picker once (the button there reads "Request more seasons").
+- Movie and show searches with no results are counted by words only (`svc.help.miss`), never who searched:
+  Settings, Request log, "Searches that found nothing" (7 or 30 days, `/api/settings/requests/misses`).
 - A red floating "Report issue" button (`.rq-report`, Glenn's pick, option 2) on every Requests page opens
   the title picker; the list tab is "Reported issues".
 - `requests` is an access section, on for everyone by default (a one-time

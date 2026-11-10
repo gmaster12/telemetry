@@ -437,14 +437,15 @@ async def settings_summary():
 
 async def requests_summary() -> dict:
     if not seerr.configured():
-        return {"connected": False, "error": None, "pending": None, "links": 0, "log": seerr.log_counts()}
+        return {"connected": False, "error": None, "pending": None, "links": 0, "log": seerr.log_counts(), "needs_you": seerr.help.needs_count()}
     pending = None
     try:
         pending = (await asyncio.wait_for(seerr.get("/request/count", ttl=60), 6) or {}).get("pending")
         seerr.last_error = None
     except (SeerrError, asyncio.TimeoutError) as e:
         seerr.last_error = getattr(e, "message", None) or "Seerr did not answer in time."
-    return {"connected": True, "error": seerr.last_error, "pending": pending, "links": len(seerr.links()), "log": seerr.log_counts()}
+    return {"connected": True, "error": seerr.last_error, "pending": pending, "links": len(seerr.links()), "log": seerr.log_counts(),
+            "needs_you": seerr.help.needs_count()}
 
 
 @app.post("/api/settings/servers/test")
@@ -1211,6 +1212,10 @@ def requests_unlink(plex_id: str):
 async def requests_log(q: str = "", kind: str = "", group: str = "all", page: int = 1, size: int = 50):
     """Every request made through this site: who, what, when, and where it stands in Seerr now."""
     rows, error = await request_log.build(seerr, directory)
+    flags = seerr.help.flags([r["request"] for r in rows if r.get("request")])
+    for r in rows:  # the one retry and Notify admin (app/request_help.py)
+        f = flags.get(r.get("request") or 0) or {}
+        r["help"] = "notified" if f.get("notified_at") and not f.get("handled_at") else "retried" if f.get("retried_at") else None
     base = [r for r in rows if request_log.matches(r, q.strip(), kind, "all")]
     hit = [r for r in base if request_log.matches(r, "", "", group)]
     return {**request_log.page_of(hit, page, max(10, min(size, 200))), "counts": request_log.counts(base), "error": error,
@@ -1233,6 +1238,30 @@ async def requests_log_import():
         return await request_log.import_earlier(seerr, directory, seerr.title_of)
     except SeerrError as e:
         raise HTTPException(e.status if 400 <= e.status < 600 else 502, e.message)
+
+
+@app.get("/api/settings/requests/help")
+def requests_help():
+    """Failed requests a person tried again once and then asked the admin to look at (Notify admin)."""
+    out = []
+    for f in seerr.help.needs_you():
+        u = directory.get_user(f["subject"]) or {}
+        out.append({"request": f["request_id"], "kind": f["kind"], "tmdb": f["tmdb_id"], "title": f["title"] or "Unknown title",
+                    "who": u.get("title") or u.get("username") or f["subject"], "notified_at": f["notified_at"]})
+    return {"count": len(out), "rows": out}
+
+
+@app.post("/api/settings/requests/help/{request_id}/handled")
+def requests_help_handled(request_id: int):
+    seerr.help.mark_handled(request_id)
+    return {"ok": True, "count": seerr.help.needs_count()}
+
+
+@app.get("/api/settings/requests/misses")
+def requests_misses(days: int = 7):
+    """Movie and show searches that found nothing: the words and how often, never who searched."""
+    d = 30 if days == 30 else 7
+    return {"days": d, "rows": seerr.help.misses(d)}
 
 
 # ---------- Books & comics (the Greystar media site in a frame) ----------

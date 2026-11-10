@@ -179,7 +179,7 @@
       var view = {
         discover: discover, movies: function () { return browseKind('movies', r); }, tv: function () { return browseKind('tv', r); },
         search: function () { return search(r.q.q || ''); }, movie: function () { return detail('movie', id); },
-        series: function () { return detail('tv', id); }, person: function () { return person(id); },
+        series: function () { return detail('tv', id, r.q); }, person: function () { return person(id); },
         collection: function () { return collection(id); }, browse: function () { return browse(r.path[1], r.path[2], r.q.title); },
         mine: function () { return mine(r.q); }, watchlist: watchlist, issues: function () { return issues(r.q); },
         manage: function () { return manage(r.q); }
@@ -276,8 +276,14 @@
     var art = el('span', { class: 'rq-card__art' },
       it.poster ? el('img', { src: img(it.poster, 'w300'), alt: '', loading: 'lazy' }) : el('span', { class: 'rq-card__none', text: it.title }),
       b ? el('span', { class: 'rq-card__badge' }, b) : null, chips);
+    var moreSeasons = it.kind === 'tv' && it.status === 'partial' && me && me.can && me.can.tv;
     var card = el('a', { class: 'rq-card', href: link((it.kind === 'tv' ? 'series/' : 'movie/') + it.id), title: it.title },
-      art, el('span', { class: 'rq-card__title', text: it.title }), el('span', { class: 'rq-card__meta', text: [it.year, KIND_NAME[it.kind]].filter(Boolean).join(' · ') }));
+      art, el('span', { class: 'rq-card__title', text: it.title }), el('span', { class: 'rq-card__meta', text: [it.year, KIND_NAME[it.kind]].filter(Boolean).join(' · ') }),
+      moreSeasons ? el('span', { class: 'rq-card__more', title: 'Some seasons are on Plex. Pick more to request.', onclick: function (e) {
+        // The card opens the series; this part opens it with the season picker up.
+        e.preventDefault(); e.stopPropagation();
+        location.hash = link('series/' + it.id, { more: 1 });
+      } }, icon('plus', 14), 'Request more seasons') : null);
     card.dataset.key = it.kind + ':' + it.id;
     wantScores(it.kind, it.id, function (sc) { paintChips(chips, sc); });
     return card;
@@ -547,7 +553,7 @@
   }
 
   // ---------- a movie or series ----------
-  function detail(kind, id) {
+  function detail(kind, id, opts) {
     return get('/api/requests/' + kind + '/' + encodeURIComponent(id), 30000).then(function (d) {
       setTitle(d.title);
       var hero = el('section', { class: 'sd-card rq-hero' });
@@ -570,11 +576,11 @@
           d.overview ? el('p', { class: 'rq-hero__overview', text: d.overview }) : null));
       var out = [hero];
       var side = facts(kind, d);
-      var mineReqs = (d.requests || []).filter(function (q) { return me.can.viewRequests || (me.user && q.by && q.by.id === me.user.id); });
+      var mineReqs = (d.requests || []).filter(function (q) { return me.can.viewRequests || q.mine; });
       if (mineReqs.length) {
         out.push(el('section', { class: 'rq-panel' }, el('h2', { class: 'rq-h2', text: me.can.viewRequests ? 'Requests for this title' : 'Your request' }),
           el('ul', { class: 'rq-reqlist' }, mineReqs.map(function (q) {
-            return el('li', null, requestBadge(q.status), el('span', { text: (q.by && me.user && q.by.id === me.user.id ? 'You' : (q.by && q.by.name) || 'Someone') + (q.is4k ? ' · 4K' : '') + (q.seasons.length ? ' · ' + seasonText(q.seasons) : '') }),
+            return el('li', null, requestBadge(q.status), el('span', { text: (q.mine ? 'You' : (q.by && q.by.name) || 'Another member') + (q.is4k ? ' · 4K' : '') + (q.seasons.length ? ' · ' + seasonText(q.seasons) : '') }),
               el('span', { class: 'rq-muted', text: fmtDate(q.created) }));
           }))));
       }
@@ -605,6 +611,12 @@
       });
       body.replaceChildren.apply(body, out);
       titleEl.focus({ preventScroll: true });
+      // A search card's "Request more seasons" lands here with ?more=1: open the season picker once.
+      if (opts && opts.more) {
+        history.replaceState(null, '', link((kind === 'tv' ? 'series/' : 'movie/') + id));
+        var more = hero.querySelector('[data-more]');
+        if (more) more.click();
+      }
     });
   }
 
@@ -646,6 +658,32 @@
     return el('section', { class: 'rq-panel' }, el('h2', { class: 'rq-h2', text: 'About' }), dl);
   }
 
+  // Notify me too (Glenn's pick): someone else already asked for this and it is not on Plex yet. Who asked is never shown.
+  function followBox(d) {
+    var reqs = d.requests || [];
+    if (reqs.some(function (q) { return q.mine && q.status !== 'declined'; })) return null;
+    if (d.media.status === 'available') return null;
+    var theirs = reqs.filter(function (q) { return !q.mine && ['pending', 'approved', 'failed'].indexOf(q.status) >= 0; });
+    if (!theirs.length) return null;
+    var q = theirs.find(function (x) { return x.watching; }) || theirs[0];
+    var on = !!q.watching;
+    var b = el('button', { type: 'button', class: 'rq-btn' });
+    var paint = function () {
+      b.replaceChildren(icon(on ? 'check' : 'bell', 18), on ? 'You will be notified' : 'Notify me too');
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      b.className = 'rq-btn' + (on ? ' rq-btn--ghost' : ' rq-btn--ink');
+    };
+    paint();
+    b.addEventListener('click', function () {
+      b.disabled = true;
+      api(on ? 'DELETE' : 'POST', '/api/requests/watch/' + q.id).then(function () {
+        on = !on; forget(); paint();
+        toast(on ? 'It is in My requests now. You can see when it is ready there.' : 'You will not be told about it.');
+      }).catch(function (e) { toast(e.message, 'error'); }).then(function () { b.disabled = false; });
+    });
+    return el('div', { class: 'rq-follow' }, el('span', { class: 'rq-follow__note' }, el('span', { class: 'rq-follow__dot', 'aria-hidden': 'true' }), 'Requested by another member'), b);
+  }
+
   // The buttons under a title: request (standard and 4K), play, trailer, watchlist, report a problem.
   function actions(kind, d) {
     var box = el('div', { class: 'rq-actions' });
@@ -659,8 +697,10 @@
     };
     var mayStd = open(d.media.status) && (kind === 'movie' || tvLeft(false));
     var may4k = me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] && can4k && open(d.media.status4k) && (kind === 'movie' || tvLeft(true));
-    if (canKind && mayStd) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--accent', onclick: function () { requestDialog(kind, d, false); } }, icon('plus', 18), d.media.status === 'partial' ? 'Request more' : 'Request'));
+    if (canKind && mayStd) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--accent', 'data-more': d.media.status === 'partial' ? '1' : null, onclick: function () { requestDialog(kind, d, false); } }, icon('plus', 18), d.media.status === 'partial' ? (kind === 'tv' ? 'Request more seasons' : 'Request more') : 'Request'));
     else if (['pending', 'processing'].indexOf(d.media.status) >= 0) box.appendChild(el('span', { class: 'rq-btn rq-btn--ghost', 'aria-disabled': 'true' }, icon('clock', 18), d.media.status === 'pending' ? 'Requested' : 'Downloading'));
+    var follow = followBox(d);
+    if (follow) box.appendChild(follow);
     if (may4k) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--ink', onclick: function () { requestDialog(kind, d, true); } }, icon('plus', 18), 'Request in 4K'));
     if (d.media.plexUrl) box.appendChild(el('a', { class: 'rq-btn', href: d.media.plexUrl, target: '_blank', rel: 'noopener' }, icon('play', 18), 'Play on Plex'));
     if (d.trailer) box.appendChild(el('a', { class: 'rq-btn', href: d.trailer, target: '_blank', rel: 'noopener' }, icon('external', 18), 'Trailer'));
@@ -959,6 +999,22 @@
     });
     return b;
   }
+  // Glenn's rule for a failed request: one Try again, then Notify admin, then "Admin notified" (app/request_help.py).
+  function helpBtn(q, onChange, accent) {
+    if (q.notified) return el('span', { class: 'rq-btn rq-btn--sm rq-btn--ghost', 'aria-disabled': 'true' }, icon('check', 16), 'Admin notified');
+    if (q.canNotify) return actBtn('Notify admin', 'bell', 'POST', '/api/requests/request/' + q.id + '/notify', 'The admin has been told about ' + q.title + '.', onChange, accent);
+    return q.canRetry ? retryBtn(q, onChange, accent) : null;
+  }
+  function actBtn(label, ic, method, path, done, onChange, accent, confirmText) {
+    var b = el('button', { type: 'button', class: 'rq-btn rq-btn--sm' + (accent ? ' rq-btn--accent' : '') }, icon(ic, 16), label);
+    b.addEventListener('click', function () {
+      if (confirmText && b.dataset.sure !== '1') { b.dataset.sure = '1'; b.classList.add('is-sure'); b.replaceChildren(document.createTextNode(confirmText)); return; }
+      b.disabled = true;
+      api(method, path).then(function () { forget(); toast(done); onChange(); })
+        .catch(function (e) { toast(e.message, 'error'); b.disabled = false; });
+    });
+    return b;
+  }
   function removeBtn(q, onChange) {
     var b = el('button', { type: 'button', class: 'rq-iconbtn rq-iconbtn--sm', 'aria-label': 'Remove ' + q.title + ' from your list', title: 'Remove from your list' }, icon('trash', 16));
     b.addEventListener('click', function () {
@@ -1002,7 +1058,7 @@
           el('b', { text: plural(d.failed.length, 'request', 'requests') + ' failed' }),
           el('span', { class: 'rq-muted', text: 'Something went wrong getting ' + (d.failed.length === 1 ? 'it' : 'them') + '. Try again, or remove ' + (d.failed.length === 1 ? 'it' : 'them') + ' from your list.' }), all),
         el('ul', { class: 'rq-attn__list' }, d.failed.map(function (q) {
-          return attnItem(q, { end: el('div', { class: 'rq-attn__actions' }, d.failed.length > 1 ? retryBtn(q, onChange) : retryBtn(q, onChange, true), removeBtn(q, onChange)) });
+          return attnItem(q, { end: el('div', { class: 'rq-attn__actions' }, helpBtn(q, onChange, d.failed.length === 1), removeBtn(q, onChange)) });
         }))));
     }
     if (d.waiting.length) {
@@ -1063,11 +1119,24 @@
       ? el('img', { src: img(x.poster, 'w185'), alt: '', loading: 'lazy' })
       : el('span', { class: 'rq-ev-tile rq-ev-tile--' + x.kind, text: (x.title || '?').charAt(0).toUpperCase() });
     var note = x.wait ? waitText({ wait: x.wait, seasons: x.seasons || [] }).text : x.note;
+    if (x.watching && x.wait) note = 'Requested by another member. ' + note;
     var actions = el('div', { class: 'rq-rrow__actions' });
-    if (x.state === 'ready' && x.open) actions.appendChild(el('a', { class: 'rq-btn rq-btn--sm', href: x.open, text: 'Open' }));
-    if (x.source === 'seerr' && x.state === 'problem') {
-      if (x.canRetry) actions.appendChild(retryBtn({ id: x.id, title: x.title }, onChange, true));
-      if (x.canRemove) actions.appendChild(removeBtn({ id: x.id, title: x.title }, onChange));
+    var add = function (n) { if (n) actions.appendChild(n); };
+    var book = x.source === 'books' ? '/api/requests/books/' + x.kind + '/' + x.id + '/' : null;
+    if (x.state === 'ready' && x.open) add(el('a', { class: 'rq-btn rq-btn--sm', href: x.open, text: 'Open' }));
+    if (x.watching) {
+      // Someone else's request this person follows (Notify me too); never says who asked.
+      add(actBtn('Stop notifying me', 'close', x.source === 'books' ? 'POST' : 'DELETE', x.source === 'books' ? book + 'unwatch' : '/api/requests/watch/' + x.id,
+        'You will not be told about ' + x.title + '.', onChange, false, 'Stop?'));
+    } else if (x.state === 'problem' && x.source === 'seerr') {
+      add(helpBtn({ id: x.id, title: x.title, canRetry: x.canRetry, canNotify: x.canNotify, notified: x.notified }, onChange, true));
+      if (x.canRemove) add(removeBtn({ id: x.id, title: x.title }, onChange));
+    } else if (book) {
+      if (x.notified) add(el('span', { class: 'rq-btn rq-btn--sm rq-btn--ghost', 'aria-disabled': 'true' }, icon('check', 16), 'Admin notified'));
+      else if (x.canNotify) add(actBtn('Notify admin', 'bell', 'POST', book + 'notify', 'The admin has been told about ' + x.title + '.', onChange, true));
+      else if (x.canRetry) add(actBtn('Try again', 'refresh', 'POST', book + 'retry', x.title + ' was sent again.', onChange, true));
+      if (x.canStop) add(actBtn('Stop following', 'close', 'POST', book + 'stop', 'New issues of ' + x.title + ' will not be fetched.', onChange, false, 'Stop?'));
+      else if (x.canCancel) add(actBtn('Cancel', 'close', 'POST', book + 'cancel', x.title + ' was cancelled.', onChange, false, 'Cancel it?'));
     }
     var titleEl = x.open ? el('a', { class: 'rq-rrow__title', href: x.open, text: x.title }) : el('span', { class: 'rq-rrow__title', text: x.title });
     return el('li', { class: 'rq-rrow rq-ev-row', 'data-state': x.state },

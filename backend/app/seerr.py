@@ -162,6 +162,8 @@ class Requests:
         with store.lock:
             store.db.executescript(SCHEMA)
             store.db.commit()
+        from .request_help import RequestHelp
+        self.help = RequestHelp(store)  # one retry then Notify admin, Notify me too, searches that found nothing
         self._cache: dict[str, tuple[float, Any]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self.last_error: str | None = None
