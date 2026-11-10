@@ -174,6 +174,19 @@ files to add servers. Keep it that way.
   browse, search) get Sort: Popular, Highest rated, Biggest hit (`sortBar`, reorders the cards on screen; titles
   without the number go last). A title's About list gets Rotten Tomatoes, IMDb, TMDB users, Budget, Worldwide gross
   and Profit rows (`facts`). Series have no money numbers.
+- My requests is one list of everything a person asked for (Glenn's unified requests, Nov 2026): `GET
+  /api/requests/everything?cursor=&order=` (`everything` in `requests_api.py`, `unify_seerr`) merges their Seerr
+  requests with their comic, ebook and audiobook requests from the media site (`Media.member_requests`, a signed
+  server-to-server call to `GET /api/telemetry/requests?sub=<plex id>`, header `X-Greystar-Telemetry`
+  `v1.<ts>.<nonce>.<HMAC-SHA256(media_secret, "v1.<ts>.<nonce>.<METHOD> <path?query>")>`, cached 20 s; Plex sign-ins
+  with the `books` section only). Newest activity first (`order=asc` oldest), 30 a page; `cursor` is "<Seerr rows
+  used>.<book items used>" so the two sides page together without gaps. Shared words: work (In progress), release
+  (Waiting for release, Airing), follow (Following: an ongoing comic series, moves up when a new issue arrives), ready,
+  problem (Needs attention); declined and cancelled are left out. One side not answering: `sources` says `down` and the
+  page shows the rest with a note. The page (`everything` in `requests.js`) groups by day in the browser's time zone,
+  filters by kind and status (on what is loaded; it loads more on its own when a filter shows little), and keeps the
+  old Seerr-only list for request viewers behind "Everyone (movies and shows)" (`mine?everyone=1`). Book covers are
+  not shown (this site's CSP allows only TMDB images): a coloured letter tile stands in.
 - Season requests follow Seerr's own rule (`server/entity/MediaRequest.ts`): a season can be requested only when it
   is not on Plex at all (`unknown`, or `deleted`) and no request holds it; a FAILED request still holds its seasons
   (only declined and completed ones free them). Seerr answers HTTP 202 "No seasons available to request" and makes

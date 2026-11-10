@@ -40,7 +40,7 @@ store = Store(DB_PATH, box)
 directory = Directory(store)
 poller = Poller(store)
 seerr = Requests(store, poller.http)
-media = Media(store)
+media = Media(store, poller.http)
 add_requests_section(store)
 add_mystreams_section(store)
 add_books_section(store)
@@ -1282,7 +1282,7 @@ def delete_books_settings():
     return media.settings()
 
 
-app.include_router(make_router(seerr, directory, need))
+app.include_router(make_router(seerr, directory, need, media))
 
 
 # ---------- static dashboard ----------

@@ -12,6 +12,13 @@ makes an approved account when there is none. Listening to audiobooks there need
 
 Only Plex sign-ins get a pass: a local admin login is not a Plex account, so the media site could not tell
 who it is.
+
+My requests (one list of everything a member asked for) also needs their comic, ebook and audiobook requests.
+`member_requests` asks the media site for them server to server (`GET /api/telemetry/requests?sub=<plex id>`,
+`server/telemetry_feed.ts` there), signed with the same shared secret:
+  X-Greystar-Telemetry: v1.<unix seconds>.<nonce>.<base64url HMAC-SHA256(secret, "v1.<ts>.<nonce>.<METHOD> <path?query>")>
+The media site accepts a signature for two minutes and answers with that member's items already in the shared
+words (work, release, follow, ready, problem). Answers are kept 20 seconds per member.
 """
 from __future__ import annotations
 
@@ -24,9 +31,23 @@ import secrets
 import time
 from urllib.parse import quote, urlparse
 
+import httpx
+
 from .store import Store
 
 DEFAULT_MEDIA_URL = "https://media.greystarnetworks.com"
+FEED_SECONDS = 20
+
+
+class MediaError(Exception):
+    """The media site could not be reached or refused the call."""
+
+
+def sign_call(secret: str, method: str, path_and_query: str, now: int | None = None, nonce: str | None = None) -> str:
+    t = int(time.time()) if now is None else now
+    n = nonce or secrets.token_urlsafe(12)
+    base = f"v1.{t}.{n}.{method.upper()} {path_and_query}"
+    return f"v1.{t}.{n}.{_b64(hmac.new(secret.encode(), base.encode(), hashlib.sha256).digest())}"
 PASS_SECONDS = 60
 _NEXT_RE = re.compile(r"^/[A-Za-z0-9/_\-.~?=&%:+,]*$")
 
@@ -68,8 +89,10 @@ def sign_pass(secret: str, user: dict, next_path: str = "/", now: int | None = N
 
 
 class Media:
-    def __init__(self, store: Store):
+    def __init__(self, store: Store, http: httpx.AsyncClient | None = None):
         self.store = store
+        self.http = http
+        self._feed: dict[str, tuple[float, list]] = {}
 
     def url(self) -> str:
         return media_origin(self.store.get_setting("media_url")) or DEFAULT_MEDIA_URL
@@ -107,6 +130,39 @@ class Media:
     def forget_secret(self) -> None:
         self.store.set_setting("media_secret", None)
         self.store.set_setting("media_enabled", "0")
+
+    async def call(self, method: str, path_and_query: str) -> dict:
+        """A signed server-to-server call to the media site. Raises MediaError when it does not answer well."""
+        secret = self.store.get_setting("media_secret") or ""
+        if not (self.enabled() and secret):
+            raise MediaError("Books & comics is not set up.")
+        if self.http is None:
+            self.http = httpx.AsyncClient(timeout=8.0)
+        try:
+            r = await self.http.request(method, f"{self.url()}{path_and_query}", timeout=8.0,
+                                        headers={"X-Greystar-Telemetry": sign_call(secret, method, path_and_query)})
+        except httpx.HTTPError as e:
+            raise MediaError(f"The media site did not answer ({type(e).__name__}).") from None
+        try:
+            body = r.json()
+        except ValueError:
+            body = {}
+        if r.status_code >= 400:
+            raise MediaError((body or {}).get("error") or f"The media site answered HTTP {r.status_code}.")
+        return body if isinstance(body, dict) else {}
+
+    async def member_requests(self, plex_id: str) -> list[dict]:
+        """One member's comic, ebook and audiobook requests, newest activity first (cached 20 s)."""
+        hit = self._feed.get(plex_id)
+        if hit and time.time() - hit[0] < FEED_SECONDS:
+            return hit[1]
+        body = await self.call("GET", f"/api/telemetry/requests?sub={quote(str(plex_id), safe='')}")
+        items = [x for x in (body.get("items") or []) if isinstance(x, dict)]
+        self._feed[plex_id] = (time.time(), items)
+        return items
+
+    def forget_member(self, plex_id: str) -> None:
+        self._feed.pop(plex_id, None)
 
     def sign_in_url(self, user: dict, next_path: str = "/") -> str:
         secret = self.store.get_setting("media_secret") or ""

@@ -1034,6 +1034,130 @@
     more.addEventListener('click', function () { load().catch(function (e) { toast(e.message, 'error'); }); });
     return { el: el('div', null, list, more), load: load };
   }
+  // ---------- My requests: everything in one list (Glenn's unified requests, Nov 2026) ----------
+  // Movies and shows (Seerr) and comics, ebooks and audiobooks (the media site, for Plex sign-ins with Books &
+  // comics) in one list, newest first, grouped by day in this browser's time zone. GET /api/requests/everything
+  // pages both sides together (cursor). Filters work on what is loaded and load more when they show little.
+  var EV_KINDS = [['all', 'Everything'], ['movie', 'Movies'], ['show', 'Shows'], ['comic', 'Comics'], ['ebook', 'Ebooks'], ['audiobook', 'Audiobooks']];
+  var EV_STATES = [['all', 'Any status'], ['work', 'In progress'], ['release', 'Waiting for release'], ['follow', 'Following'], ['ready', 'Ready'], ['problem', 'Needs attention']];
+  var EV_KIND_WORD = { movie: 'Movie', show: 'Show', comic: 'Comic', ebook: 'Ebook', audiobook: 'Audiobook' };
+  var EV_KIND_ICON = { movie: 'film', show: 'film', comic: 'book', ebook: 'book', audiobook: 'book' };
+  function evBadge(x) {
+    var tone = { ready: 'success', work: 'info', release: 'neutral', follow: 'neutral', problem: 'danger' }[x.state] || 'neutral';
+    var b = badge(tone, x.label);
+    b.classList.add('rq-ev-badge', 'rq-ev-badge--' + x.state);
+    return b;
+  }
+  function evDayKey(d) { return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+  function evDayLabel(d) {
+    var now = new Date();
+    var y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    if (evDayKey(d) === evDayKey(now)) return 'Today';
+    if (evDayKey(d) === evDayKey(y)) return 'Yesterday';
+    return d.toLocaleDateString(undefined, d.getFullYear() === now.getFullYear()
+      ? { weekday: 'long', month: 'short', day: 'numeric' } : { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+  function evRow(x, onChange) {
+    var when = new Date(x.sortAt || x.created);
+    var poster = x.poster
+      ? el('img', { src: img(x.poster, 'w185'), alt: '', loading: 'lazy' })
+      : el('span', { class: 'rq-ev-tile rq-ev-tile--' + x.kind, text: (x.title || '?').charAt(0).toUpperCase() });
+    var note = x.wait ? waitText({ wait: x.wait, seasons: x.seasons || [] }).text : x.note;
+    var actions = el('div', { class: 'rq-rrow__actions' });
+    if (x.state === 'ready' && x.open) actions.appendChild(el('a', { class: 'rq-btn rq-btn--sm', href: x.open, text: 'Open' }));
+    if (x.source === 'seerr' && x.state === 'problem') {
+      if (x.canRetry) actions.appendChild(retryBtn({ id: x.id, title: x.title }, onChange, true));
+      if (x.canRemove) actions.appendChild(removeBtn({ id: x.id, title: x.title }, onChange));
+    }
+    var titleEl = x.open ? el('a', { class: 'rq-rrow__title', href: x.open, text: x.title }) : el('span', { class: 'rq-rrow__title', text: x.title });
+    return el('li', { class: 'rq-rrow rq-ev-row', 'data-state': x.state },
+      x.open ? el('a', { class: 'rq-rrow__poster', href: x.open, 'aria-hidden': 'true', tabindex: '-1' }, poster) : el('span', { class: 'rq-rrow__poster', 'aria-hidden': 'true' }, poster),
+      el('div', { class: 'rq-rrow__main' }, titleEl,
+        el('span', { class: 'rq-rrow__meta' }, el('span', { class: 'rq-ev-kind' }, icon(EV_KIND_ICON[x.kind] || 'book', 14), EV_KIND_WORD[x.kind] || ''),
+          x.sub ? el('span', { text: x.sub }) : null),
+        note ? el('span', { class: 'rq-ev-note', text: note }) : null),
+      el('span', { class: 'rq-ev-time', text: when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) }),
+      el('div', { class: 'rq-rrow__status' }, evBadge(x)),
+      actions);
+  }
+  function everything(top) {
+    var st = { items: [], cursor: '0.0', more: true, order: 'desc', kind: 'all', state: 'all', sources: {}, busy: false, auto: 0 };
+    var notes = el('div', { class: 'rq-ev-notes', role: 'status' });
+    var kinds = el('div', { class: 'rq-chips rq-ev-chips', role: 'group', 'aria-label': 'Filter by kind' });
+    var states = el('div', { class: 'rq-chips rq-ev-chips', role: 'group', 'aria-label': 'Filter by status' });
+    var sortBtn = el('button', { type: 'button', class: 'rq-chip rq-ev-sort' });
+    var list = el('div', { class: 'rq-ev' });
+    var more = el('button', { type: 'button', class: 'rq-btn rq-more', text: 'Load more' });
+    var reload = function () { route(); };
+    sortBtn.addEventListener('click', function () {
+      st.order = st.order === 'desc' ? 'asc' : 'desc';
+      st.items = []; st.cursor = '0.0'; st.more = true; st.auto = 0;
+      load();
+    });
+    more.addEventListener('click', function () { st.auto = 0; load(); });
+    function chip(box, defs, key, counts) {
+      box.replaceChildren();
+      defs.forEach(function (d) {
+        if (d[0] !== 'all' && key === 'kind' && !counts[d[0]]) return;
+        box.appendChild(el('button', { type: 'button', class: 'rq-chip', 'aria-pressed': st[key] === d[0] ? 'true' : 'false',
+          onclick: function () { st[key] = d[0]; st.auto = 0; paint(); fill(); } }, d[1], el('em', { text: ' ' + (d[0] === 'all' ? counts.all : (counts[d[0]] || 0)) })));
+      });
+    }
+    function paint() {
+      var kc = { all: st.items.length };
+      st.items.forEach(function (x) { kc[x.kind] = (kc[x.kind] || 0) + 1; });
+      var byKind = st.items.filter(function (x) { return st.kind === 'all' || x.kind === st.kind; });
+      var sc = { all: byKind.length };
+      byKind.forEach(function (x) { sc[x.state] = (sc[x.state] || 0) + 1; });
+      chip(kinds, EV_KINDS, 'kind', kc);
+      chip(states, EV_STATES, 'state', sc);
+      sortBtn.textContent = st.order === 'desc' ? 'Newest first' : 'Oldest first';
+      var shown = byKind.filter(function (x) { return st.state === 'all' || x.state === st.state; });
+      list.replaceChildren();
+      var day = null, ul = null;
+      shown.forEach(function (x) {
+        var d = new Date(x.sortAt || x.created);
+        var k = isNaN(d) ? '?' : evDayKey(d);
+        if (k !== day) {
+          day = k;
+          ul = el('ul', { class: 'rq-rlist' });
+          list.appendChild(el('section', { class: 'rq-ev-day' }, el('h2', { class: 'rq-ev-dayname', text: isNaN(d) ? 'Earlier' : evDayLabel(d) }), ul));
+        }
+        ul.appendChild(evRow(x, reload));
+      });
+      if (!shown.length && !st.more) {
+        list.appendChild(el('div', { class: 'rq-empty' },
+          el('b', { text: st.items.length ? 'No requests match' : 'You have not requested anything yet' }),
+          el('span', { text: st.items.length ? 'Try a different kind or status.' : 'Use the search above: pick what you are looking for, then Request.' })));
+      }
+      notes.replaceChildren();
+      if (st.sources.seerr === 'down') notes.appendChild(el('div', { class: 'rq-ev-down' }, icon('clock', 16), 'Movies and shows could not load right now. Showing the rest.'));
+      if (st.sources.books === 'down') notes.appendChild(el('div', { class: 'rq-ev-down' }, icon('clock', 16), 'Comics, ebooks and audiobooks could not load right now. Showing the rest.'));
+      more.hidden = !st.more;
+      more.disabled = st.busy;
+      return shown.length;
+    }
+    // A filter that shows little pulls in more pages on its own (a few at a time).
+    function fill() {
+      var shown = list.querySelectorAll('.rq-ev-row').length;
+      if (shown < 8 && st.more && !st.busy && st.auto < 4) { st.auto++; load(); }
+    }
+    function load() {
+      st.busy = true; more.disabled = true;
+      return api('GET', '/api/requests/everything?' + qs({ cursor: st.cursor, order: st.order })).then(function (d) {
+        var have = {};
+        st.items.forEach(function (x) { have[x.key] = 1; });
+        (d.items || []).forEach(function (x) { if (!have[x.key]) st.items.push(x); });
+        st.cursor = d.cursor; st.more = !!d.more; st.sources = d.sources || {}; st.busy = false;
+        paint(); fill();
+      }).catch(function (e) { st.busy = false; more.disabled = false; toast(e.message, 'error'); });
+    }
+    body.replaceChildren(quotaNote() || '', top, notes,
+      el('div', { class: 'rq-ev-filters' }, kinds, el('div', { class: 'rq-ev-filterrow' }, states, sortBtn)), list, more);
+    paint();
+    return load();
+  }
+
   function mine(q) {
     setTitle('My requests');
     var everyone = q.everyone === '1' && me.can.viewRequests;
@@ -1044,6 +1168,11 @@
     if (everyone || (q.filter && q.filter !== 'all')) {
       body.replaceChildren(quotaNote(), top, l.el);
       return l.load();
+    }
+    // Own requests: one list of everything (movies, shows, comics, ebooks, audiobooks), newest first.
+    if (!q.classic) {
+      var evTop = me.can.viewRequests ? el('div', { class: 'rq-listtop' }, el('a', { class: 'rq-chip', href: link('mine', { everyone: '1' }), 'aria-pressed': 'false', text: 'Everyone (movies and shows)' })) : '';
+      return everything(evTop);
     }
     // Own requests, all of them: what failed and what is waiting come first, in their own boxes; the servers
     // this person is on sit beside (on top on phones).

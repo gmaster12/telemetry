@@ -107,7 +107,41 @@ def page_of(res: dict | None, items: list) -> dict:
     return {"items": [i for i in items if i], "page": page, "totalPages": pages, "more": page < pages}
 
 
-def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -> APIRouter:
+EVERYTHING_PAGE = 30
+
+
+def unify_seerr(x: dict, wait: dict | None) -> dict:
+    """One Seerr request (a req_row) in My requests' shared words (the media site's feed uses the same ones):
+    work (In progress), release (Waiting for release), follow, ready, problem (Needs attention), or hidden."""
+    tv = x.get("kind") == "tv"
+    seasons = x.get("seasons") or []
+    sub = ", ".join(p for p in [x.get("year") or "", "4K" if x.get("is4k") else "",
+                                ("Season " if len(seasons) == 1 else "Seasons ") + ", ".join(str(n) for n in seasons) if seasons else ""] if p) or None
+    out = {"key": f"seerr:{x['id']}", "source": "seerr", "kind": "show" if tv else "movie", "id": x["id"], "tmdbId": x.get("tmdbId"),
+           "title": x.get("title") or "Unknown title", "sub": sub, "poster": x.get("poster"), "created": x.get("created"),
+           "sortAt": x.get("created"), "progress": None, "wait": None, "note": None, "seasons": seasons,
+           "open": f"#/requests/{'series' if tv else 'movie'}/{x.get('tmdbId')}",
+           "canRetry": bool(x.get("canRetry")), "canRemove": bool(x.get("canRemove"))}
+    status, media = x.get("status"), (x.get("media") or {}).get("status")
+    if status == "declined":
+        return {**out, "state": "hidden", "label": "Declined"}
+    if status == "failed":
+        return {**out, "state": "problem", "label": "Failed", "note": "Something went wrong getting it."}
+    if media == "available" or status == "completed":
+        return {**out, "state": "ready", "label": "Available"}
+    if media == "partial":
+        return {**out, "state": "ready", "label": "Partly available", "note": "Some of it is on Plex; the rest is on its way."}
+    if status == "pending":
+        return {**out, "state": "work", "label": "Waiting for approval"}
+    if x.get("downloading"):
+        return {**out, "state": "work", "label": "Downloading"}
+    w = wait or {"reason": "searching"}
+    if w.get("reason") in ("unreleased", "airing"):
+        return {**out, "state": "release", "label": "Airing" if w.get("reason") == "airing" else "Waiting for release", "wait": w}
+    return {**out, "state": "work", "label": "Searching", "wait": w}
+
+
+def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], media=None) -> APIRouter:
     r = APIRouter(prefix="/api/requests")
 
     async def who(request: Request) -> tuple[Any, int | None]:
@@ -544,6 +578,76 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any]) -
             params["requestedBy"] = u.get("id")
         res = await run(svc.get("/request", user=uid, params=params))
         return await requests_page(res, u.get("id"), manage)
+
+    @r.get("/everything")
+    async def everything(request: Request, cursor: str = "0.0", order: str = "desc"):
+        """My requests, all of them in one list: movies and shows from Seerr merged with comics, ebooks and audiobooks
+        from the media site (for Plex sign-ins with Books & comics), newest first (order=asc for oldest first).
+
+        `cursor` is "<Seerr rows used>.<book items used>"; each answer gives the next one. When one side does not
+        answer, the other still shows and `sources` says which: ok, down, or off (not set up / not for this person)."""
+        p = need(request, "requests")
+        asc = order == "asc"
+        try:
+            s_skip, b_skip = (max(0, int(v)) for v in cursor.split(".", 1))
+        except ValueError:
+            s_skip = b_skip = 0
+        page = EVERYTHING_PAGE
+        sources: dict[str, str] = {}
+
+        async def seerr_part() -> tuple[list[dict], bool]:
+            if not svc.configured():
+                sources["seerr"] = "off"
+                return [], False
+            try:
+                uid = await svc.seerr_user(p, directory)
+                u = await me_info(uid)
+                manage = has(u.get("permissions"), "MANAGE_REQUESTS")
+                res = await svc.get("/request", user=uid, ttl=FAST, params={"filter": "all", "take": page, "skip": s_skip, "sort": "added",
+                                                                        "sortDirection": "asc" if asc else "desc", "requestedBy": u.get("id")})
+                pg = await requests_page(res, u.get("id"), manage)
+                rows = pg["items"]
+                need_wait = [x for x in rows if x["status"] == "approved" and not x["downloading"]
+                             and x["media"]["status"] in ("processing", "pending", "unknown")]
+                waits = dict(zip([x["id"] for x in need_wait], await asyncio.gather(*[waiting_reason(x) for x in need_wait])))
+                sources["seerr"] = "ok"
+                return [unify_seerr(x, waits.get(x["id"])) for x in rows], bool(pg["more"])
+            except (SeerrError, HTTPException) as e:
+                log.info("My requests: Seerr part failed: %s", getattr(e, "message", None) or getattr(e, "detail", e))
+                sources["seerr"] = "down"
+                return [], False
+
+        async def books_part() -> tuple[list[dict], bool]:
+            if not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+                sources["books"] = "off"
+                return [], False
+            try:
+                items = await media.member_requests(p.subject)
+            except Exception as e:  # noqa: BLE001  (MediaError, or anything odd from the other site)
+                log.info("My requests: media site part failed: %s", e)
+                sources["books"] = "down"
+                return [], False
+            if asc:
+                items = list(reversed(items))
+            chunk = items[b_skip:b_skip + page]
+            sources["books"] = "ok"
+            return [{**x, "source": "books", "poster": None, "wait": None, "canRetry": False, "canRemove": False,
+                     "open": ("#/books" + x["open"]) if isinstance(x.get("open"), str) and x["open"].startswith("/") else None}
+                    for x in chunk], len(items) > b_skip + page
+
+        (seerr_items, seerr_more), (book_items, book_more) = await asyncio.gather(seerr_part(), books_part())
+        def when(x: dict) -> float:
+            try:
+                return dt.datetime.fromisoformat(str(x.get("sortAt") or "").replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                return 0.0
+        merged = sorted(seerr_items + book_items, key=lambda x: (when(x), x["key"]), reverse=not asc)
+        taken = merged[:page]
+        used_s = sum(1 for x in taken if x["source"] == "seerr")
+        used_b = sum(1 for x in taken if x["source"] == "books")
+        more = seerr_more or book_more or used_s < len(seerr_items) or used_b < len(book_items)
+        return {"items": [x for x in taken if x["state"] != "hidden"], "cursor": f"{s_skip + used_s}.{b_skip + used_b}",
+                "more": more, "sources": sources}
 
     @r.get("/services/{kind}")
     async def services(request: Request, kind: str, is4k: bool = False):
