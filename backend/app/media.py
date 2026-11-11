@@ -37,6 +37,7 @@ from .store import Store
 
 DEFAULT_MEDIA_URL = "https://media.greystarnetworks.com"
 FEED_SECONDS = 20
+RECENT_SECONDS = 60  # everyone's recent requests (the viewer home's Recently requested)
 
 
 class MediaError(Exception):
@@ -159,6 +160,19 @@ class Media:
         body = await self.call("GET", f"/api/telemetry/requests?sub={quote(str(plex_id), safe='')}")
         items = [x for x in (body.get("items") or []) if isinstance(x, dict)]
         self._feed[plex_id] = (time.time(), items)
+        return items
+
+    async def recent_requests(self, days: int = 7) -> list[dict]:
+        """Everyone's comic, ebook and audiobook requests from the last `days` days, newest first, with nothing that
+        says who asked (`GET /api/telemetry/recent`; kind, title, sub, created, state, label). Cached a minute."""
+        key = f"recent:{int(days)}"
+        hit = self._feed.get(key)
+        if hit and time.time() - hit[0] < RECENT_SECONDS:
+            return hit[1]
+        body = await self.call("GET", f"/api/telemetry/recent?days={int(days)}")
+        keep = ("kind", "title", "sub", "created", "state", "label")
+        items = [{k: x.get(k) for k in keep} for x in (body.get("items") or []) if isinstance(x, dict)]
+        self._feed[key] = (time.time(), items)
         return items
 
     def forget_member(self, plex_id: str) -> None:

@@ -130,6 +130,22 @@
 .vh-hours__axis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); font-size: 11.5px; color: var(--ink-muted); }
 .vh-empty { display: flex; flex-direction: column; gap: 6px; padding: 28px; border-radius: 28px; background: var(--surface-card); }
 
+/* Recently requested (recent.js draws the rows; recent.css styles them).
+   Doors: a full-width door under the first two (beside them when there are only three doors), days side by side.
+   Hub: a section between Your requests and Trending. My month: a full-width panel at the end. */
+.vh-doors:not([data-count="3"]) > .vh-door--recent { grid-column: 1 / -1; }
+.vh-door--recent .vh-door__body { gap: 12px; }
+.vh-door--recent .rr-days { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px 22px; align-items: start; }
+.vh-door--recent .vh-door__foot { color: var(--ink); }
+.vh-recent { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.vh-recent__lead { margin: -6px 0 0; }
+.vh-recent .rr-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 8px 12px; }
+.vh-panel--recent { gap: 12px; }
+.vh-recent__total { display: flex; align-items: baseline; gap: 10px; }
+.vh-recent__all { align-self: flex-start; display: inline-flex; align-items: center; height: 44px; padding: 0 22px; border-radius: var(--radius-pill);
+  background: var(--action); color: var(--on-action); text-decoration: none; font-weight: 600; }
+.vh-recent__all:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+
 /* Light theme: the same shadows as the rest of the page. */
 .gs-app[data-look="light"] :is(.vh-door, .vh-stage, .vh-tile, .vh-panel, .vh-chip, .vh-seg, .vh-back, .vh-empty) { box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 12px 26px rgba(16, 24, 40, 0.10); }
 @media (prefers-color-scheme: light) {
@@ -174,6 +190,8 @@
   .vh-top__row { grid-template-columns: 16px 30px minmax(0, 1fr); }
   .vh-top__bar { display: none; }
   .vh-hour { height: 26px; border-radius: 3px; }
+  .vh-recent .rr-list { grid-template-columns: minmax(0, 1fr); }
+  .vh-recent__all { align-self: stretch; justify-content: center; }
   .vh-seg { width: 100%; }
   .vh-seg__b { flex: 1; padding: 0 8px; }
 }

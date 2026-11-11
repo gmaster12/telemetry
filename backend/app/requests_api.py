@@ -144,6 +144,25 @@ def unify_seerr(x: dict, wait: dict | None) -> dict:
     return {**out, "state": "work", "label": "Searching", "wait": w}
 
 
+RECENT_DAYS, RECENT_SHOWN = 7, 80
+
+
+def public_status(state: str, label: str | None) -> tuple[str, str]:
+    """The viewer home's Recently requested shows a few plain words, each with its shape (never colour alone):
+    Available or Following (circle), Downloading (triangle), Not out yet (ring), Searching (square). A failed or
+    waiting request reads Searching there: what went wrong is the requester's business (My requests)."""
+    label = label or ""
+    if state == "ready":
+        return ("Partly available" if label == "Partly available" else "Available"), "circle"
+    if state == "follow":
+        return "Following", "circle"
+    if state == "release":
+        return "Not out yet", "ring"
+    if state == "work" and (label.startswith("Downloading") or label.startswith("Adding")):
+        return "Downloading", "triangle"
+    return "Searching", "square"
+
+
 def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], media=None) -> APIRouter:
     r = APIRouter(prefix="/api/requests")
 
@@ -780,6 +799,86 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         more = seerr_more or book_more or watch_more or used_s < len(seerr_items) or used_b < len(book_items) or used_w < len(watch_items)
         return {"items": [x for x in taken if x["state"] != "hidden"], "cursor": f"{s_skip + used_s}.{b_skip + used_b}.{w_skip + used_w}",
                 "more": more, "sources": sources}
+
+    @r.get("/recent")
+    async def recent(request: Request, days: int = RECENT_DAYS):
+        """Recently requested (the viewer home, Glenn's pick B): what everyone asked for in the last `days` days (1 to
+        14), newest first. Movies and shows come from Seerr's full request list (as its admin, cached a minute), comics,
+        ebooks and audiobooks from the media site (for Plex sign-ins with Books & comics). Nothing here says who asked:
+        no names, ids or avatars. The same title asked for more than once shows once, with `times`."""
+        p = need(request, "requests")
+        days = max(1, min(14, int(days)))
+        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+        sources: dict[str, str] = {}
+
+        def stamp(v) -> float:
+            try:
+                t = dt.datetime.fromisoformat(str(v or "").replace("Z", "+00:00").replace(" ", "T"))
+            except ValueError:
+                return 0.0
+            return (t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)).timestamp()
+
+        async def seerr_part() -> list[dict]:
+            if not svc.configured():
+                sources["seerr"] = "off"
+                return []
+            try:
+                every = await svc.all_requests()
+            except SeerrError as e:
+                log.info("Recently requested: Seerr part failed: %s", e.message)
+                sources["seerr"] = "down"
+                return []
+            rows = [q for q in every.values() if stamp(q.get("createdAt")) >= cutoff.timestamp()
+                    and REQUEST_STATUS.get(q.get("status")) != "declined"]
+            rows.sort(key=lambda q: stamp(q.get("createdAt")), reverse=True)
+            rows = rows[:200]
+            infos = await asyncio.gather(*[title_info(q.get("type") or (q.get("media") or {}).get("mediaType") or "movie",
+                                                      (q.get("media") or {}).get("tmdbId") or 0) for q in rows])
+            sources["seerr"] = "ok"
+            out = []
+            for q, info in zip(rows, infos):
+                u = unify_seerr(req_row(q, info, None, False), None)
+                if u["state"] != "hidden":
+                    out.append({"kind": u["kind"], "title": u["title"], "sub": u.get("sub"), "poster": u.get("poster"),
+                                "created": u.get("created"), "state": u["state"], "label": u.get("label"), "open": u.get("open")})
+            return out
+
+        async def books_part() -> list[dict]:
+            if not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+                sources["books"] = "off"
+                return []
+            try:
+                items = await media.recent_requests(days)
+            except Exception as e:  # noqa: BLE001  (MediaError, or anything odd from the other site)
+                log.info("Recently requested: media site part failed: %s", e)
+                sources["books"] = "down"
+                return []
+            sources["books"] = "ok"
+            return [{"kind": x.get("kind"), "title": x.get("title") or "Untitled", "sub": x.get("sub"), "poster": None,
+                     "created": x.get("created"), "state": x.get("state"), "label": x.get("label"), "open": None}
+                    for x in items if x.get("kind") in BOOK_KINDS and stamp(x.get("created")) >= cutoff.timestamp()]
+
+        seerr_items, book_items = await asyncio.gather(seerr_part(), books_part())
+        merged = sorted(seerr_items + book_items, key=lambda x: stamp(x.get("created")), reverse=True)
+        seen: dict[tuple, dict] = {}
+        items: list[dict] = []
+        for x in merged:
+            k = (x["kind"], str(x["title"]).strip().lower())
+            if k in seen:
+                seen[k]["times"] += 1
+                continue
+            word, shape = public_status(x["state"], x.get("label"))
+            row = {"kind": x["kind"], "title": x["title"], "sub": x.get("sub"), "poster": x.get("poster"),
+                   "created": x.get("created"), "status": word, "shape": shape, "times": 1, "open": x.get("open")}
+            seen[k] = row
+            items.append(row)
+        counts = {k: 0 for k in ("movie", "show", "ebook", "audiobook", "comic")}
+        status: dict[str, int] = {}
+        for x in items:
+            counts[x["kind"]] = counts.get(x["kind"], 0) + 1
+            status[x["status"]] = status.get(x["status"], 0) + 1
+        return {"days": days, "total": len(items), "counts": counts, "status": status,
+                "items": items[:RECENT_SHOWN], "more": len(items) > RECENT_SHOWN, "sources": sources}
 
     @r.get("/services/{kind}")
     async def services(request: Request, kind: str, is4k: bool = False):

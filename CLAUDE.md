@@ -207,6 +207,18 @@ files to add servers. Keep it that way.
   requests (`seerr-watch:<id>`, `watching`, "Stop notifying me"). Who made someone else's request is never sent to
   people who are not request managers (`requests_on` sends `by: null` and `mine`); `tests/test_request_help.py`
   checks this. My requests' cursor is now "<Seerr>.<books>.<followed>".
+- Recently requested (Glenn's pick B, the activity feed, Nov 2026): `GET /api/requests/recent?days=7` (`recent` in
+  `requests_api.py`, `requests` section, 1 to 14 days) is what EVERYONE asked for, newest first, never who asked (no
+  names, ids, avatars; `tests/test_recent_requests.py` checks this). Movies and shows come from Seerr's full list
+  (`all_requests`, as its admin, cached 60 s; declined left out, 200 newest), titles and posters through `title_info`;
+  comics, ebooks and audiobooks from the media site's signed `GET /api/telemetry/recent?days=` (`Media.recent_requests`,
+  cached 60 s, only kind, title, sub, created, state, label kept; Plex sign-ins with `books` only). The same kind and title
+  shows once with `times`. `public_status` turns the shared words into four plain ones, each with a shape: Available or
+  Following (circle), Downloading (triangle), Not out yet (ring), Searching (square; a failed or waiting request reads
+  Searching here: what went wrong is the requester's business). Reply: `{days, total, counts, status, items (80), more,
+  sources}`. `web/recent.js` (`gsRecent`) and `web/recent.css` draw it everywhere: kind tiles in the pastel tints (TMDB
+  poster when there is one), rows grouped by day in the browser's time zone, count chips (filters on the full page), the
+  mix bar. Full list: `#/requests/recent`, the "Recently requested" tab after My requests (`recentPage` in `requests.js`).
 - Book rows in My requests act through `POST /api/requests/books/{comic|ebook|audiobook}/{id}/{retry|notify|cancel|stop|watch|unwatch}`,
   sent on to the media site signed (`Media.call`), then `forget_member` so the list refreshes.
 - A partly available series' search card gets "Request more seasons" (`.rq-card__more`): it opens the series with
@@ -494,7 +506,12 @@ design system). The dashboard adds its own patterns:
   subscription), `hub` Requests hub (big search, your requests as Ready to watch / On its way / Waiting for
   approval / Failed, trending row), `month` My month (`GET /api/me/recap?period=week|month|year&tz=`,
   `recap_for` in `main.py`: hours vs the same stretch before, plays, longest streak, prime time, most watched,
-  hours of the day). A layout needing a section the person lacks falls back to doors. Doors and cards open
+  hours of the day). Every layout shows Recently requested when the person has `requests` (see Requests; `recentDoor`,
+  `recentSection`, `recentPanel` in `home.js`): Doors gets a "Recently requested" door after Request something (full
+  width when there are more than three doors, the last two days, days side by side on desktop), the hub a section
+  between Your requests and Trending this week (type chips that filter, three days), My month a "Requested on Greystar"
+  panel at the end (total, mix bar, two days; always the last 7 days, it does not follow the period switch). Each links
+  to `#/requests/recent`. A layout needing a section the person lacks falls back to doors. Doors and cards open
   the page's own sections via `gsHome.show('streams'|'history'|'subscription')` with a "Home" button
   (`#vhome-back`); `.gs-vh[data-vview]` in `home.css` decides what each view shows. The Home nav button and
   phone tab go back to it. Admins never get it. Cards "Sweep in" (Glenn's pick C, `sweepIn` in `home.js`, end of

@@ -132,7 +132,7 @@
         search: function () { return search(r.q.q || ''); }, movie: function () { return detail('movie', id); },
         series: function () { return detail('tv', id, r.q); }, person: function () { return person(id); },
         collection: function () { return collection(id); }, browse: function () { return browse(r.path[1], r.path[2], r.q.title); },
-        mine: function () { return mine(r.q); }, watchlist: watchlist, issues: function () { return issues(r.q); },
+        mine: function () { return mine(r.q); }, recent: recentPage, watchlist: watchlist, issues: function () { return issues(r.q); },
         manage: function () { return manage(r.q); }
       }[sect] || discover;
       return Promise.resolve(view()).then(function () {
@@ -169,6 +169,7 @@
     { id: 'movies', label: 'Movies', path: 'movies' },
     { id: 'tv', label: 'Series', path: 'tv' },
     { id: 'mine', label: 'My requests', path: 'mine' },
+    { id: 'recent', label: 'Recently requested', path: 'recent' },
     { id: 'watchlist', label: 'Watchlist', path: 'watchlist' },
     { id: 'issues', label: 'Reported issues', path: 'issues', ok: function () { return me && me.can && me.can.viewIssues; } },
     { id: 'manage', label: 'Approve', path: 'manage', ok: function () { return me && me.can && me.can.manage; } }
@@ -1221,6 +1222,30 @@
     var l = requestList('/api/requests/mine?' + qs({ filter: f, everyone: 'true' }), f === 'pending' ? 'Nothing waiting for approval' : 'No requests match');
     body.replaceChildren(filterChips('manage', f), l.el);
     return l.load();
+  }
+  // ---------- Recently requested: everyone's last 7 days, never who asked (recent.js; the viewer home shows a part) ----------
+  var recentKind = 'all';
+  function recentPage() {
+    setTitle('Recently requested');
+    if (!window.gsRecent) return;
+    if (me && me.images) window.gsRecent.setImages(me.images);
+    return window.gsRecent.load(true).then(function (data) {
+      var lead = el('p', { class: 'rr-lead', text: data.total
+        ? 'Everything people asked for in the last ' + data.days + ' days, newest first. ' + data.total + ' in all. Who asked is never shown.'
+        : 'Nothing has been asked for in the last ' + data.days + ' days. Who asks is never shown.' });
+      var chips = el('div');
+      var listBox = el('div');
+      function paint() {
+        chips.replaceChildren(window.gsRecent.counts(data, { active: recentKind, pick: function (k) { recentKind = k; paint(); } }));
+        var items = window.gsRecent.filter(data.items, recentKind);
+        listBox.replaceChildren(items.length ? window.gsRecent.list(items, { dates: true })
+          : el('div', { class: 'rq-empty' }, el('b', { text: 'Nothing of this type this week' }), el('span', { text: 'Pick All to see everything.' })));
+        if (data.more && recentKind === 'all') listBox.appendChild(el('p', { class: 'rr-note', text: 'Showing the newest ' + data.items.length + '.' }));
+      }
+      var page = el('div', { class: 'rr-page' }, lead, window.gsRecent.notes(data), data.total ? chips : null, listBox);
+      if (data.total) paint();
+      body.replaceChildren(page);
+    });
   }
   function watchlist() {
     setTitle('Watchlist');

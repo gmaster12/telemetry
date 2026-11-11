@@ -1,8 +1,9 @@
 /* Viewer home (Glenn's pick): people who sign in with Plex and are not the administrator land on a calm home in
    the layout they choose in Settings, Display (saved per browser as `vhome`):
-     doors  Four big doors (default): Watching now, Request something, My history, My subscription.
-     hub    Requests hub: a big search, your requests by stage, trending.
-     month  My month: your own viewing for the week, month or year.
+     doors  Big doors (default): Watching now, Request something, Recently requested, My history, My subscription.
+     hub    Requests hub: a big search, your requests by stage, Recently requested, trending.
+     month  My month: your own viewing for the week, month or year, then Requested on Greystar.
+   Recently requested (recent.js, GET /api/requests/recent) is what everyone asked for in the last 7 days, never who.
    Each door or card opens the sections the page already has (streams, history, subscription) with a Home button
    to come back. The admin page is unchanged. Server status stays at the end of the lime bar. */
 (function () {
@@ -148,6 +149,7 @@
         var fresh = ((d && d.items) || []).filter(function (x) { return !x.created || Date.parse(x.created) > weekAgo; });
         if (fresh.length && !status.querySelector('.vh-alert')) status.textContent = plural(fresh.length, 'of your requests is', 'of your requests are') + ' ready to watch.';
       }).catch(function () {});
+      grid.appendChild(recentDoor());
     }
     // My history
     if (can('history')) {
@@ -186,6 +188,71 @@
     grid.dataset.count = String(grid.children.length);
     return [el('h1', { class: 'vh-hello', text: 'Hi ' + ((me() && me().name) || 'there') }), grid];
   }
+  // ---------- Recently requested (everyone, last 7 days; recent.js draws the rows) ----------
+  var RECENT_PAGE = '#/requests/recent';
+  var recentKind = 'all';
+  function recentReady() {
+    return get('/api/requests/me', 600000).then(function (m) { if (m && m.images && window.gsRecent) window.gsRecent.setImages(m.images); })
+      .catch(function () {}).then(function () { return window.gsRecent.load(); });
+  }
+  function weekLine(n) { return n === 1 ? '1 thing asked for this week' : n + ' things asked for this week'; }
+  // Doors: its own door after Request something, the last two days.
+  function recentDoor() {
+    var d = door('vh-door--recent', 'Recently requested', function () { window.gsUI.go(RECENT_PAGE); });
+    var body = el('div', { class: 'vh-door__body rr-on-card' }, el('span', { class: 'vh-eyebrow', text: 'Recently requested' }), el('b', { class: 'vh-door__big', text: '…' }));
+    d.appendChild(body);
+    if (!window.gsRecent) return d;
+    recentReady().then(function (data) {
+      body.replaceChildren(el('span', { class: 'vh-eyebrow', text: 'Recently requested' }),
+        el('b', { class: 'vh-door__big', text: data.total ? weekLine(data.total) : 'Nothing asked for this week yet' }));
+      if (!data.total) {
+        add(body, [el('p', { class: 'rr-empty', text: 'Search above to be the first. Who asks is never shown.' }), window.gsRecent.notes(data)]);
+        return;
+      }
+      add(body, [window.gsRecent.counts(data), window.gsRecent.list(data.items, { days: 2, max: 5, sub: false, time: 'inline' }),
+        window.gsRecent.notes(data), el('a', { class: 'vh-door__foot vh-link', href: RECENT_PAGE, text: 'See the whole week' })]);
+    }).catch(function () { body.replaceChildren(el('span', { class: 'vh-eyebrow', text: 'Recently requested' }), el('p', { class: 'rr-empty', text: 'Recent requests could not load right now.' })); });
+    return d;
+  }
+  // Requests hub: a section between Your requests and Trending, with type chips.
+  function recentSection() {
+    var lead = el('p', { class: 'vh-muted vh-recent__lead', text: 'What everyone asked for in the last 7 days.' });
+    var chips = el('div', { class: 'vh-recent__chips' });
+    var listBox = el('div', { class: 'vh-recent__list' });
+    var sec = el('section', { class: 'vh-recent', 'aria-labelledby': 'vh-recent-h' },
+      el('div', { class: 'vh-sechead' }, el('h2', { class: 'vh-h2', id: 'vh-recent-h', text: 'Recently requested' }), el('a', { class: 'vh-link', href: RECENT_PAGE, text: 'See all' })),
+      lead, chips, listBox);
+    if (!window.gsRecent) return sec;
+    function paint(data) {
+      chips.replaceChildren(window.gsRecent.counts(data, { active: recentKind, pick: function (k) { recentKind = k; paint(data); } }));
+      var items = window.gsRecent.filter(data.items, recentKind);
+      listBox.replaceChildren(items.length ? window.gsRecent.list(items, { days: 3, max: 10 }) : el('p', { class: 'rr-empty', text: 'Nothing of this type this week.' }));
+      var note = window.gsRecent.notes(data);
+      if (note) listBox.appendChild(note);
+    }
+    recentReady().then(function (data) {
+      lead.textContent = data.total ? 'What everyone asked for in the last 7 days. ' + data.total + ' so far.' : 'Nothing asked for in the last 7 days yet. Who asks is never shown.';
+      if (data.total) paint(data); else { var n = window.gsRecent.notes(data); if (n) listBox.replaceChildren(n); }
+    }).catch(function () { listBox.replaceChildren(el('p', { class: 'rr-empty', text: 'Recent requests could not load right now.' })); });
+    return sec;
+  }
+  // My month: a panel under your own viewing, always the last 7 days (it does not follow the period switch).
+  function recentPanel() {
+    var p = el('section', { class: 'vh-panel vh-panel--recent rr-on-card', 'aria-labelledby': 'vh-rp-h' },
+      el('div', { class: 'vh-sechead' }, el('h2', { class: 'vh-h2', id: 'vh-rp-h', text: 'Requested on Greystar' }), el('span', { class: 'vh-muted vh-small', text: 'Last 7 days' })),
+      el('p', { class: 'vh-muted vh-small', text: 'Loading…' }));
+    if (!window.gsRecent) return p;
+    recentReady().then(function (data) {
+      var head = p.firstChild;
+      p.replaceChildren(head,
+        el('div', { class: 'vh-recent__total' }, el('b', { class: 'vh-tile__big vh-tile__big--sm', text: String(data.total) }), el('span', { class: 'vh-muted', text: data.total === 1 ? 'request from everyone' : 'requests from everyone' })));
+      if (!data.total) { add(p, [el('p', { class: 'rr-empty', text: 'Nothing asked for this week yet. Who asks is never shown.' }), window.gsRecent.notes(data)]); return; }
+      add(p, [window.gsRecent.mix(data), el('div', { class: 'rr-flat' }, window.gsRecent.list(data.items, { days: 2, max: 6, sub: false, time: 'inline' })),
+        window.gsRecent.notes(data), el('a', { class: 'vh-recent__all', href: RECENT_PAGE, text: data.total === 1 ? 'See the request' : 'See all ' + data.total + ' requests' })]);
+    }).catch(function () { p.lastChild.textContent = 'Recent requests could not load right now.'; });
+    return p;
+  }
+
   var nowBody = null;
   function fillNow() {
     var body = nowBody;
@@ -235,6 +302,7 @@
           }))),
       el('div', { class: 'vh-sechead' }, el('h2', { class: 'vh-h2', text: 'Your requests' }), el('a', { class: 'vh-link', href: rqLink('mine'), text: 'See all' })),
       stages,
+      recentSection(),
       el('div', { class: 'vh-sechead' }, el('h2', { class: 'vh-h2', text: 'Trending this week' }), el('a', { class: 'vh-link', href: rqLink(''), text: 'More' })),
       trend
     ];
@@ -308,7 +376,7 @@
             el('div', { class: 'vh-hours__axis', 'aria-hidden': 'true' }, el('span', { text: '12 AM' }), el('span', { text: '6 AM' }), el('span', { text: '12 PM' }), el('span', { text: '6 PM' })),
             el('p', { class: 'vh-muted vh-small', text: 'Darker means more watching at that hour.' }))));
     }).catch(function () { body.replaceChildren(el('p', { class: 'vh-muted', text: 'Your viewing could not be loaded right now.' })); });
-    return [head, body];
+    return can('requests') ? [head, body, recentPanel()] : [head, body];
   }
 
   // ---------- Sweep in: cards fade in one at a time (the border sweep plays on hover, in home.css) ----------
