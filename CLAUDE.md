@@ -212,7 +212,13 @@ files to add servers. Keep it that way.
   names, ids, avatars; `tests/test_recent_requests.py` checks this). Movies and shows come from Seerr's full list
   (`all_requests`, as its admin, cached 60 s; declined left out, 200 newest), titles and posters through `title_info`;
   comics, ebooks and audiobooks from the media site's signed `GET /api/telemetry/recent?days=` (`Media.recent_requests`,
-  cached 60 s, only kind, title, sub, created, state, label kept; Plex sign-ins with `books` only). The same kind and title
+  cached 60 s, only ref, kind, title, sub, created, state, label kept; Plex sign-ins with `books` only). Book rows get
+  covers through this site: `poster` is `/api/requests/recent/cover/<kind>/<id>` (from the media site's `ref`), which
+  fetches the media site's signed `GET /api/telemetry/cover/<kind>/<id>` (a 184 px WebP: library cover, else the cover
+  saved with the request, else its Open Library / Google Books lookup) via `Media.cover` (kept in memory: a day, an hour
+  for none, 400 at most) and serves it from here, so the CSP stays images-from-this-site-and-TMDB. Tiles load the picture
+  with a detached `new Image()` and swap it in on load; never `loading="lazy"` there (a lazy image not on the page never
+  loads, which left every tile a letter). The same kind and title
   shows once with `times`. `public_status` turns the shared words into four plain ones, each with a shape: Available or
   Following (circle), Downloading (triangle), Not out yet (ring), Searching (square; a failed or waiting request reads
   Searching here: what went wrong is the requester's business). Reply: `{days, total, counts, status, items (80), more,

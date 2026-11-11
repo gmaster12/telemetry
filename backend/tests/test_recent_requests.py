@@ -23,6 +23,9 @@ class RecentMedia:
     def enabled(self):
         return True
 
+    async def cover(self, kind, item_id):
+        return b"RIFFxxxxWEBP" if (kind, item_id) == ("ebook", 7) else None
+
     async def recent_requests(self, days=7):
         self.calls += 1
         if self.fail:
@@ -78,3 +81,16 @@ def test_books_only_with_the_section_and_one_side_down(env):
 
 def test_needs_the_requests_section(env):
     assert client(env, RecentMedia(), sections=("history",)).get("/api/requests/recent").status_code == 403
+
+
+def test_book_rows_get_covers_from_this_site(env):
+    media = RecentMedia([{**bk("ebook", "Dune", "ready", "Available", ago(0, 1)), "ref": "ebook:7"},
+                         {**bk("comic", "Saga", "work", "Searching", ago(0, 2)), "ref": "nonsense"}])
+    c = client(env, media)
+    items = c.get("/api/requests/recent").json()["items"]
+    assert [x["poster"] for x in items] == ["/api/requests/recent/cover/ebook/7", None]
+    r = c.get("/api/requests/recent/cover/ebook/7")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/webp" and r.content.startswith(b"RIFF")
+    assert c.get("/api/requests/recent/cover/ebook/8").status_code == 404
+    assert c.get("/api/requests/recent/cover/movie/7").status_code == 404
+    assert client(env, media, sections=("requests",)).get("/api/requests/recent/cover/ebook/7").status_code == 404

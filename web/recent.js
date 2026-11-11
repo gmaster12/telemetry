@@ -59,11 +59,14 @@
 
   function tile(x) {
     var t = el('span', { class: 'rr-tile rr-tile--' + x.kind, 'aria-hidden': 'true' });
-    var src = !x.poster ? null : /^(https?:|\/api\/)/.test(x.poster) ? x.poster : images + 'w92' + x.poster;
+    // TMDB posters for movies and shows; comic, ebook and audiobook covers come through this site
+    // (/api/requests/recent/cover/...). The letter stays until the picture has loaded, and if there is none.
+    // Not loading="lazy": a lazy image that is not on the page yet never loads, which left every tile a letter.
+    var src = !x.poster ? null : /^(https?:|\/api\/)/.test(x.poster) ? x.poster : images + 'w185' + x.poster;
     if (src) {
       var im = new Image();
       im.alt = '';
-      im.loading = 'lazy';
+      im.decoding = 'async';
       im.onload = function () { t.classList.add('has-img'); t.replaceChildren(im); };
       im.src = src;
     }

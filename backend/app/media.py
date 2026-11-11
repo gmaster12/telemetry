@@ -38,6 +38,7 @@ from .store import Store
 DEFAULT_MEDIA_URL = "https://media.greystarnetworks.com"
 FEED_SECONDS = 20
 RECENT_SECONDS = 60  # everyone's recent requests (the viewer home's Recently requested)
+COVER_KEEP = 400     # request covers kept in memory
 
 
 class MediaError(Exception):
@@ -94,6 +95,7 @@ class Media:
         self.store = store
         self.http = http
         self._feed: dict[str, tuple[float, list]] = {}
+        self._covers: dict[str, tuple[float, bytes | None]] = {}
 
     def url(self) -> str:
         return media_origin(self.store.get_setting("media_url")) or DEFAULT_MEDIA_URL
@@ -170,10 +172,34 @@ class Media:
         if hit and time.time() - hit[0] < RECENT_SECONDS:
             return hit[1]
         body = await self.call("GET", f"/api/telemetry/recent?days={int(days)}")
-        keep = ("kind", "title", "sub", "created", "state", "label")
+        keep = ("ref", "kind", "title", "sub", "created", "state", "label")
         items = [{k: x.get(k) for k in keep} for x in (body.get("items") or []) if isinstance(x, dict)]
         self._feed[key] = (time.time(), items)
         return items
+
+    async def cover(self, kind: str, item_id: int) -> bytes | None:
+        """One request's cover from the media site (`GET /api/telemetry/cover/<kind>/<id>`, a small WebP), or None.
+        Kept in memory: a day for a cover, an hour for none, at most COVER_KEEP of them."""
+        key = f"{kind}:{int(item_id)}"
+        hit = self._covers.get(key)
+        if hit and time.time() < hit[0]:
+            return hit[1]
+        secret = self.store.get_setting("media_secret") or ""
+        if not (self.enabled() and secret):
+            return None
+        if self.http is None:
+            self.http = httpx.AsyncClient(timeout=8.0)
+        path = f"/api/telemetry/cover/{quote(kind, safe='')}/{int(item_id)}"
+        try:
+            r = await self.http.get(f"{self.url()}{path}", timeout=15.0, headers={"X-Greystar-Telemetry": sign_call(secret, "GET", path)})
+        except httpx.HTTPError:
+            return None  # not remembered: try again next time
+        body = r.content if r.status_code == 200 and r.headers.get("content-type", "").startswith("image/") and len(r.content) <= 2_000_000 else None
+        if r.status_code in (200, 404):
+            if len(self._covers) >= COVER_KEEP:
+                self._covers.pop(next(iter(self._covers)))
+            self._covers[key] = (time.time() + (86400 if body else 3600), body)
+        return body
 
     def forget_member(self, plex_id: str) -> None:
         self._feed.pop(plex_id, None)

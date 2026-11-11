@@ -13,6 +13,7 @@ from typing import Any, Callable
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from .seerr import MEDIA_STATUS, REQUEST_STATUS, Requests, SeerrError, has
@@ -854,7 +855,11 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 sources["books"] = "down"
                 return []
             sources["books"] = "ok"
-            return [{"kind": x.get("kind"), "title": x.get("title") or "Untitled", "sub": x.get("sub"), "poster": None,
+
+            def cover(x: dict) -> str | None:
+                kind, _, num = str(x.get("ref") or "").partition(":")
+                return f"/api/requests/recent/cover/{kind}/{int(num)}" if kind == x.get("kind") and num.isdigit() else None
+            return [{"kind": x.get("kind"), "title": x.get("title") or "Untitled", "sub": x.get("sub"), "poster": cover(x),
                      "created": x.get("created"), "state": x.get("state"), "label": x.get("label"), "open": None}
                     for x in items if x.get("kind") in BOOK_KINDS and stamp(x.get("created")) >= cutoff.timestamp()]
 
@@ -879,6 +884,18 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             status[x["status"]] = status.get(x["status"], 0) + 1
         return {"days": days, "total": len(items), "counts": counts, "status": status,
                 "items": items[:RECENT_SHOWN], "more": len(items) > RECENT_SHOWN, "sources": sources}
+
+    @r.get("/recent/cover/{kind}/{item_id}")
+    async def recent_cover(request: Request, kind: str, item_id: int):
+        """A comic, ebook or audiobook request's cover, fetched from the media site (signed) and served from here, so
+        this site's CSP stays images-from-itself-and-TMDB. 404 when there is none: the page keeps the letter tile."""
+        p = need(request, "requests")
+        if kind not in BOOK_KINDS or item_id < 1 or not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+            raise HTTPException(404, "No cover.")
+        body = await media.cover(kind, item_id)
+        if not body:
+            raise HTTPException(404, "No cover.")
+        return Response(content=body, media_type="image/webp", headers={"Cache-Control": "private, max-age=86400"})
 
     @r.get("/services/{kind}")
     async def services(request: Request, kind: str, is4k: bool = False):
