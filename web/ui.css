@@ -55,6 +55,8 @@ html .gs-app:not([data-look="dark"]) .sd-navbtn[aria-label="Requests"]:not([aria
 /* Settings, Display for someone who is not given streams: Appearance and the home layout only. */
 html .gs-no-streams .st-display { grid-template-columns: minmax(0, 1fr); }
 html .gs-no-streams .st-display :is(#card-style, .sd-field:has(#card-size), #art-light-field, #clip-mode, #clip-count-field, .st-preview) { display: none; }
+/* The page itself takes focus after Skip to content or Stop on Now listening: no ring around the whole page. */
+#content:focus { outline: none; }
 /* Skip link: the first Tab stop on every page, shown only while focused. */
 .gs-skip { position: fixed; top: 12px; left: 12px; z-index: 80; padding: 12px 20px; border-radius: var(--radius-pill, 999px); background: var(--surface-ink, #0b0b0d); color: var(--on-ink, #f6f6f4);
   font: 600 15px/20px var(--font-sans, system-ui); text-decoration: none; transform: translateY(-160%); }
