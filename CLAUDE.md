@@ -245,9 +245,22 @@ files to add servers. Keep it that way.
   otherwise `frame-src 'none'` as before. The media site lists this site in its `frame-ancestors`.
 - The frame is made once and only hidden afterwards, so an audiobook keeps playing around the dashboard.
   Messages from the frame (checked against the media origin and the frame's window): `ready`, `immersive`
-  (a reader opened: `data-immersive` hides the menu and the frame fills the screen), `signed-out` (get a
-  fresh pass, at most every 15 s). The media site in a frame draws its own search and tabs in this
-  dashboard's look under the dashboard's top bar (which stays on `#/books`, phones and desktop).
+  (a reader or the full audiobook player opened: `data-immersive` hides the menu and the frame fills the
+  screen; kept as state in `books.js`, so leaving and coming back to `#/books` puts it back), `signed-out` (get a
+  fresh pass, at most every 15 s), `audiobook` (below).
+- Audiobooks (Glenn's audiobook review, Nov 2026). The media site's player has one of each thing (in the
+  frame and on the site itself): the mini player has the book (opens the full player), rewind, play or pause, forward and Stop
+  (square icon); the full player has Minimize ("keeps playing") and an outlined Stop pill at the top, and its
+  speeds and sleep times open from their buttons. On every other Telemetry page a "Now listening" bar (`.np`,
+  `renderNp` in `books.js`, styles at the end of `books.css`) shows the book with Playing or Paused (word plus
+  circle or square), the time left and a thin progress line, a Play/Pause button and Stop; the book opens
+  `#/books` and the full player. Desktop: bottom left of the content (Report issue is bottom right); phones:
+  above the tab bar. The frame sends `{type: 'audiobook', state: {title, author, chapter, playing, positionMs,
+  durationMs} | null}` on changes and every 5 s of listening (`cleanNp` checks it; text only, never as HTML);
+  we send `{type: 'audiobook', action: 'toggle' | 'stop' | 'open'}`. Stop from the keyboard puts focus on the
+  page (`#content`).
+- The media site in a frame draws its own search and tabs in this dashboard's look under the dashboard's top
+  bar (which stays on `#/books`, phones and desktop).
 - `books` is an access section, on for everyone by default (`add_books_section`, once); the nav button and
   phone tab show only when it is on in Settings and the person has the section.
 - Changing the frame's page without reloading it (so an audiobook keeps playing): opening `#/books/<path>` while

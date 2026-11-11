@@ -65,3 +65,54 @@ html:has(.gs-app[data-page="books"]) { scrollbar-width: none; -ms-overflow-style
 html:has(.gs-app[data-page="books"])::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .gs-app[data-page="books"] { scrollbar-width: none; }
 .gs-app[data-page="books"]::-webkit-scrollbar { display: none; width: 0; height: 0; }
+
+/* ---------- Now listening (books.js) ----------
+   The audiobook player keeps playing in the hidden frame on every other page, so this bar follows the person:
+   the book (opens the full player), Play or Pause, and Stop. Desktop: at the bottom left of the content, clear of
+   the Report issue button at the right. Phone: just above the tab bar. Playing or Paused is a word and a shape. */
+.np[hidden] { display: none; }
+.np {
+  position: fixed;
+  left: calc(108px + max(0px, (100vw - 108px - 1600px) / 2));
+  bottom: 20px;
+  z-index: 40;
+  width: min(440px, calc(100vw - 140px));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 8px 10px 8px;
+  border-radius: 28px;
+  background: var(--surface-ink, #16141f);
+  color: var(--on-ink, #f6f6f4);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+  overflow: hidden;
+}
+.np__open { min-width: 0; display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 10px; padding: 0 6px 0 0;
+  border: 0; border-radius: 22px; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.np__icon { width: 44px; height: 44px; display: grid; place-items: center; border-radius: 50%; background: var(--volt, #b8fc64); color: var(--on-fill, #16141f); }
+.np__text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.np__state { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.72; }
+.np__shape { width: 7px; height: 7px; border-radius: 1px; background: currentColor; }           /* Paused: a square */
+.np.is-playing .np__shape { border-radius: 50%; background: var(--volt, #b8fc64); }           /* Playing: a lime circle */
+.np__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; line-height: 20px; font-weight: 600; }
+.np__sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; line-height: 18px; opacity: 0.72; }
+.np__open:hover .np__title { text-decoration: underline; text-underline-offset: 3px; }
+.np__btn { width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(255, 255, 255, 0.1); color: inherit; cursor: pointer; }
+.np__btn:hover { background: rgba(255, 255, 255, 0.18); }
+.np__play { background: var(--volt, #b8fc64); color: var(--on-fill, #16141f); }
+.np__play:hover { background: var(--volt, #b8fc64); filter: brightness(1.06); }
+.np :focus-visible { outline: 2px solid var(--volt, #b8fc64); outline-offset: 2px; }
+.np__track { position: absolute; left: 28px; right: 28px; bottom: 4px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.16); }
+.np__track i { display: block; height: 100%; border-radius: inherit; background: var(--volt, #b8fc64); }
+/* Room at the end of the page so the bar never hides the last things on it. */
+.gs-app.has-np .sd-content { padding-bottom: 88px; }
+
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+  .np { left: max(16px, env(safe-area-inset-left)); right: max(16px, env(safe-area-inset-right)); width: auto;
+    bottom: calc(var(--tabbar-space) - 4px); border-radius: 24px; padding: 6px 6px 9px 6px; }
+  .gs-app.has-np .sd-content { padding-bottom: 72px; }
+  .np__title { font-size: 14px; line-height: 18px; }
+  .np__sub { font-size: 12px; line-height: 16px; }
+}
+@media (max-height: 500px) and (pointer: coarse) { .np { left: auto; width: 400px; } }
