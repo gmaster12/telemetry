@@ -248,8 +248,8 @@ files to add servers. Keep it that way.
   (a reader or the full audiobook player opened: `data-immersive` hides the menu and the frame fills the
   screen; kept as state in `books.js`, so leaving and coming back to `#/books` puts it back), `signed-out` (get a
   fresh pass, at most every 15 s), `audiobook` (below).
-- Audiobooks (Glenn's audiobook review, Nov 2026). Inside the frame the media site's player is cut down to one
-  of each thing: the mini player has the book (opens the full player), rewind, play or pause, forward and Stop
+- Audiobooks (Glenn's audiobook review, Nov 2026). The media site's player has one of each thing (in the
+  frame and on the site itself): the mini player has the book (opens the full player), rewind, play or pause, forward and Stop
   (square icon); the full player has Minimize ("keeps playing") and an outlined Stop pill at the top, and its
   speeds and sleep times open from their buttons. On every other Telemetry page a "Now listening" bar (`.np`,
   `renderNp` in `books.js`, styles at the end of `books.css`) shows the book with Playing or Paused (word plus
