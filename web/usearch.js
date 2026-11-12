@@ -1,10 +1,10 @@
 /* Greystar Telemetry: the shared search box. One field with a selector for what to look for:
 
      Movies & shows   Seerr, on the Requests page (#/requests/search?q=...)
-     Comics           the Greystar media site in the Books & comics frame: our library, or Request new
-     Ebooks             (the media site's request page for that kind, with the search already run)
-     Audiobooks
-     All books        every book library at once (search only)
+     Comics           the Greystar media site in the Books & comics frame: its results page,
+     Ebooks             /find?type=<kind>&q=, which lists what the library has first and what can be
+     Audiobooks         requested second (Glenn's pick C, Nov 12 2026: no "In our library / Request new" switch)
+     All books        every book library at once (no catalog)
 
    The media site's own box (src/components/UnifiedSearch.tsx in gmaster12/media) uses the same kinds, words
    and routes, so a member sees one box everywhere. Keep the two in step.
@@ -16,6 +16,9 @@
    The last kind picked is remembered in this browser (`gs-usearch-kind`). The Requests page always starts on
    Movies & shows. Book searches go to the frame with window.gsBooks.open(path); books.js sends the frame there
    without reloading it, so an audiobook keeps playing.
+
+   The media site's own box (the one inside the frame) also suggests titles as you type; this box cannot, because
+   the media site's library and catalog are only reachable from inside the frame, so Enter opens the results page.
 
    window.gsUSearch.create({ variant, kind, live, onLive }) -> { el, input, kind(), setKind(k), setValue(q), refresh() }
      variant  'page' (Requests page header), 'door' (viewer home door), 'hero' (Requests hub)
@@ -56,7 +59,6 @@
   }
   var el = window.gsUI.el;   // shared helpers (ui.js)
 
-  function isBook(k) { return k === 'comics' || k === 'ebook' || k === 'audiobook'; }
 
   function can(section) { return !!(window.dash && window.dash.can && window.dash.can(section)); }
 
@@ -68,12 +70,12 @@
     return out;
   }
 
-  /** The media site's in-app path for a book search (same as routeFor in the media site's UnifiedSearch). */
-  function bookPath(kind, mode, q) {
-    var qs = q ? 'q=' + encodeURIComponent(q) : '';
-    if (isBook(kind) && mode === 'request') return '/requests?type=' + kind + (qs ? '&' + qs : '');
-    var base = kind === 'comics' ? '/library' : kind === 'ebook' ? '/ebooks' : kind === 'audiobook' ? '/audiobooks' : '/search';
-    return qs ? base + '?' + qs : base;
+  /** The media site's in-app path for a book search (same as routeFor in the media site's UnifiedSearch): its
+   *  results page with words, the kind's library page without. */
+  function bookPath(kind, q) {
+    q = (q || '').trim();
+    if (q) return '/find?type=' + kind + '&q=' + encodeURIComponent(q);
+    return kind === 'comics' ? '/library' : kind === 'ebook' ? '/ebooks' : kind === 'audiobook' ? '/audiobooks' : '/search';
   }
 
   function saved() {
@@ -83,28 +85,30 @@
     try { window.localStorage.setItem(KEY, k); } catch (e) { /* storage blocked */ }
   }
 
-  function placeholder(kind, mode) {
+  function placeholder(kind) {
     // A phone has room for a few words only.
-    if (kind === 'video') return window.gsUI.isPhone() ? 'Movies, series, people' : 'Search movies, series and people';
-    if (kind === 'books') return 'Search comics, ebooks and audiobooks';
-    if (mode === 'request') return kind === 'comics' ? 'Find a comic series to request' : kind === 'ebook' ? 'Find an ebook to request' : 'Find an audiobook to request';
-    return 'Search ' + KINDS[kind].label.toLowerCase() + ' in the library';
+    var phone = window.gsUI.isPhone();
+    if (kind === 'video') return phone ? 'Movies, series, people' : 'Search movies, series and people';
+    if (kind === 'books') return phone ? 'Comics, ebooks, audiobooks' : 'Search comics, ebooks and audiobooks';
+    if (kind === 'comics') return 'Find a comic series';
+    if (kind === 'ebook') return phone ? 'Ebook title or author' : 'Find an ebook by title or author';
+    return phone ? 'Title, author or narrator' : 'Find an audiobook by title, author or narrator';
   }
 
   /** Go to the right page for a search. */
-  function go(kind, mode, q) {
+  function go(kind, q) {
     q = (q || '').trim();
     if (kind === 'video') {
       window.location.hash = '#/requests' + (q ? '/search?q=' + encodeURIComponent(q) : '');
       return;
     }
-    if (window.gsBooks && window.gsBooks.open) window.gsBooks.open(bookPath(kind, kind === 'books' ? 'library' : mode, q));
+    if (window.gsBooks && window.gsBooks.open) window.gsBooks.open(bookPath(kind, q));
   }
 
   function create(opts) {
     opts = opts || {};
     var variant = opts.variant || 'page';
-    var state = { kind: null, mode: 'library', open: false };
+    var state = { kind: null, open: false };
     var liveTimer = null;
 
     var input = el('input', { type: 'search', class: 'us-input', autocomplete: 'off' });
@@ -112,12 +116,9 @@
     var selText = el('span', { class: 'us-seltext' });
     var menu = el('div', { class: 'us-menu', role: 'menu', 'aria-label': 'What are you looking for', hidden: true });
     var sel = el('div', { class: 'us-sel' }, selBtn, selText, menu);
-    var libBtn = el('button', { type: 'button', 'aria-pressed': 'true', text: 'In our library' });
-    var reqBtn = el('button', { type: 'button', 'aria-pressed': 'false', text: 'Request new' });
-    var modeBox = el('div', { class: 'us-mode', role: 'group', 'aria-label': 'Where to look', hidden: true }, libBtn, reqBtn);
     var goBtn = el('button', { type: 'submit', class: 'us-go', text: 'Search' });
     var form = el('form', { class: 'us us--' + variant, role: 'search' },
-      sel, el('label', { class: 'us-field' }, icon('search', 18), input), modeBox, goBtn);
+      sel, el('label', { class: 'us-field' }, icon('search', 18), input), goBtn);
 
     function list() { var k = kinds(); return k.length ? k : ['video']; }
 
@@ -131,10 +132,7 @@
       selBtn.replaceChildren(icon(k.icon), el('span', { class: 'us-sellabel', text: k.label }), icon('chev', 16));
       selBtn.setAttribute('aria-label', 'Search in: ' + k.label);
       selText.replaceChildren(icon(k.icon), document.createTextNode(k.label));
-      modeBox.hidden = !isBook(state.kind);
-      libBtn.setAttribute('aria-pressed', state.mode === 'library' ? 'true' : 'false');
-      reqBtn.setAttribute('aria-pressed', state.mode === 'request' ? 'true' : 'false');
-      var ph = placeholder(state.kind, state.mode);
+      var ph = placeholder(state.kind);
       input.placeholder = ph;
       input.setAttribute('aria-label', ph);
       form.dataset.kind = state.kind;
@@ -184,17 +182,10 @@
     function pick(key) {
       clearTimeout(liveTimer);
       state.kind = key;
-      if (!isBook(key)) state.mode = 'library';
       remember(key);
       close(true);
       paint();
-      if (input.value.trim()) go(state.kind, state.mode, input.value);
-    }
-    function setMode(m) {
-      clearTimeout(liveTimer);
-      state.mode = m;
-      paint();
-      if (input.value.trim() || m === 'request') go(state.kind, state.mode, input.value);
+      if (input.value.trim()) go(state.kind, input.value);
     }
 
     selBtn.addEventListener('click', function () { if (state.open) close(true); else openMenu(); });
@@ -209,12 +200,10 @@
       else if (e.key === 'Tab') close(false);
     });
     form.addEventListener('keydown', function (e) { if (e.key === 'Escape' && state.open) { e.stopPropagation(); close(true); } });
-    libBtn.addEventListener('click', function () { setMode('library'); });
-    reqBtn.addEventListener('click', function () { setMode('request'); });
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       clearTimeout(liveTimer);
-      go(state.kind, state.mode, input.value);
+      go(state.kind, input.value);
     });
     input.addEventListener('input', function () {
       if (!opts.live || state.kind !== 'video') return;
@@ -231,7 +220,7 @@
       el: form,
       input: input,
       kind: function () { return state.kind; },
-      setKind: function (k) { if (list().indexOf(k) >= 0) { state.kind = k; if (!isBook(k)) state.mode = 'library'; paint(); } },
+      setKind: function (k) { if (list().indexOf(k) >= 0) { state.kind = k; paint(); } },
       setValue: function (q) { input.value = q || ''; },
       // One line on a phone: the kind as a small chip inside the box, no Search button (Enter searches).
       setCompact: function (on) { form.classList.toggle('is-compact', !!on); },

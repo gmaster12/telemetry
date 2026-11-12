@@ -332,10 +332,14 @@ files to add servers. Keep it that way.
 
 One box with a selector everywhere (`web/usearch.js`, `web/usearch.css`; the media site's twin is
 `src/components/UnifiedSearch.tsx`, same kinds, words and routes; keep them in step). Kinds: Movies & shows
-(`requests` section) goes to `#/requests/search?q=`; Comics, Ebooks, Audiobooks (each with "In our library" or
-"Request new") and All books (search only) need `books`, Books & comics on and a Plex sign-in, and open the frame
-at the media site's `/library|/ebooks|/audiobooks|/search?q=` or `/requests?type=comics|ebook|audiobook&q=`
-(that page runs the search). One kind left: the selector is a plain label. The last kind is remembered per
+(`requests` section) goes to `#/requests/search?q=`; Comics, Ebooks, Audiobooks and All books need `books`, Books &
+comics on and a Plex sign-in, and open the frame at the media site's results page `/find?type=<kind>&q=` (no words:
+its `/library|/ebooks|/audiobooks|/search` page). Glenn's pick C (Nov 12 2026): there is no "In our library / Request
+new" switch any more. The results page lists what the library has first (Play or Open), then what the request
+catalog has with Request (which opens the media site's request page with `pick=<provider:id>` so that title comes
+first and, for Shelfmark, its release picker opens). The media site's own box, inside the frame, also drops
+suggestions as you type (library, then catalog, then "See all results"); this box cannot (the media site's data is
+only reachable inside the frame), so Enter goes to the results page. One kind left: the selector is a plain label. The last kind is remembered per
 browser (`gs-usearch-kind`); the Requests page always starts on Movies & shows and searches as you type for it
 (book kinds wait for Search/Enter, so ComicVine and the book catalog are not hit per keystroke; picking a kind
 cancels a pending movie search). Used on the Requests page header (`searchBox` in `requests.js`, its input keeps
