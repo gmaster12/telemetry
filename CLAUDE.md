@@ -283,6 +283,28 @@ files to add servers. Keep it that way.
   ("I understand ... will be removed if it is not watched within 14 days"); Request stays disabled until it is ticked.
 - Tests: `tests/test_cleanup.py` with `tests/mock_arr.py` (a stand-in Radarr/Sonarr).
 
+## Download progress in the green bar, and the fading tab bar (Glenn's pick A, Nov 12 2026)
+
+- `GET /api/requests/downloads` (`downloads` in `requests_api.py`, `requests` section; `?fresh=1` drops this person's
+  caches, at most every 5 s) lists what THIS person asked for that is downloading now or finished in the last 30 minutes
+  (`READY_SECONDS`): their own Seerr requests (approved, media processing/partial) with Radarr/Sonarr progress
+  (`movie_progress`; for shows the average of the requested episodes in the queue), and their own comic, ebook and
+  audiobook requests from the media site's member feed (`work` items labelled Downloading or Adding; `ready` items with
+  the feed's `doneAt`). Never someone else's request (followed ones are left out), never release names. Up to 6, still
+  downloading first. Cached 15 s per person. `tests/test_downloads.py`.
+- `web/downloads.js` (`gsDownloads`) and `web/downloads.css`: while there is something, the lime Live now bar (`#newest`,
+  `renderNewest` in `app.js` calls `gsDownloads.paint`) fills from the left with a darker band (`--dl-pct`), says
+  "2 downloading" / "Four is ready" with the titles, and a dark chip "46% · 4 min left". Stream start/stop messages still
+  take it for their 6 s first. A server that is down keeps its red segment at the end; "all up" steps aside. Tapping it
+  opens "Your downloads" (a dropdown under the bar on desktops, the shared bottom sheet on phones) with each download and
+  Open My requests. Opening a ready one hides it from the bar for this browser tab (sessionStorage `gs-dl-seen`).
+  Checked every 20 s while something downloads, every 60 s otherwise, only while the tab is visible; the Books frame's
+  `requests-changed` message checks at once. On phones the "Live now" words step aside while it shows.
+- Phones: the tab bar fades and slides down while the person scrolls and comes back 450 ms after they stop (`web/tabfade.js`,
+  `html.gs-scrolling`). Any scroller counts (capturing listener) except sheets and dropdowns; the Books frame sends
+  `scrolling` (at most every 150 ms) since its scrolling is invisible here. It stays while a sheet holds the page, while a
+  tab has keyboard focus, and for 0.8 s after a page change.
+
 ## Books & comics (the Greystar media site in a frame)
 
 - Glenn's media site (https://media.greystarnetworks.com, a Node app on his Windows server, repo
@@ -317,7 +339,8 @@ files to add servers. Keep it that way.
   we send `{type: 'audiobook', action: 'toggle' | 'stop' | 'open'}`. Stop from the keyboard puts focus on the
   page (`#content`).
 - The media site in a frame draws its own search and tabs in this dashboard's look under the dashboard's top
-  bar (which stays on `#/books`, phones and desktop).
+  bar (which stays on `#/books`, phones and desktop). It also sends `scrolling` (the phone tab bar fades) and
+  `requests-changed` (the green bar's download progress checks now).
 - `books` is an access section, on for everyone by default (`add_books_section`, once); the nav button and
   phone tab show only when it is on in Settings and the person has the section.
 - Changing the frame's page without reloading it (so an audiobook keeps playing): opening `#/books/<path>` while

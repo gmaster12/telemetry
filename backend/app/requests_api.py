@@ -9,6 +9,7 @@ import asyncio
 import datetime as dt
 import logging
 import os
+import time
 from typing import Any, Callable
 from urllib.parse import quote
 
@@ -148,6 +149,10 @@ def unify_seerr(x: dict, wait: dict | None) -> dict:
 
 
 RECENT_DAYS, RECENT_SHOWN = 7, 80
+READY_SECONDS = 30 * 60      # the top bar says a finished download "is ready" for this long
+DOWNLOADS_SECONDS = 15        # one person's download list is reused this long
+DOWNLOADS_MAX = 6
+ACTIVE_STAGES = ("downloading", "queued", "paused", "importing", "retry", "problem")
 
 
 def public_status(state: str, label: str | None) -> tuple[str, str]:
@@ -924,6 +929,143 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             return {"ok": True, "already": True}
         svc.help.mark_notified(request_id, p.subject, await flag_info(q))
         return {"ok": True}
+
+    downloads_cache: dict[str, tuple[float, dict]] = {}
+
+    def _stamp(v) -> float:
+        try:
+            t = dt.datetime.fromisoformat(str(v or "").replace("Z", "+00:00").replace(" ", "T"))
+        except ValueError:
+            return 0.0
+        return (t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)).timestamp()
+
+    fresh_at: dict[str, float] = {}
+
+    @r.get("/downloads")
+    async def downloads(request: Request, fresh: int = 0):
+        """What this person asked for that is downloading now, or finished in the last 30 minutes, for the green bar at the
+        top of every page (Glenn's pick A, Nov 12 2026). Movies and shows: their own Seerr requests with Radarr/Sonarr
+        progress. Comics, ebooks and audiobooks: their own requests on the media site (Plex sign-ins with Books & comics).
+        Only their own requests, never anyone else's; only plain words, never release names.
+
+        {items: [{key, kind, title, pct, minutes, word, ready, open}], sources}"""
+        p = need(request, "requests")
+        # fresh=1: the person just asked for something (the Books frame said so). At most every 5 s per person.
+        if fresh and time.time() - fresh_at.get(p.subject, 0) >= 5:
+            fresh_at[p.subject] = time.time()
+            downloads_cache.pop(p.subject, None)
+            if media:
+                media.forget_member(p.subject)
+        hit = downloads_cache.get(p.subject)
+        if hit and time.time() - hit[0] < DOWNLOADS_SECONDS:
+            return hit[1]
+        now = time.time()
+        sources: dict[str, str] = {}
+
+        async def seerr_part() -> list[dict]:
+            if not (svc.configured() and arr and arr.configured()):
+                sources["seerr"] = "off"
+                return []
+            try:
+                uid = await svc.seerr_user(p, directory)
+                u = await me_info(uid)
+                res = await svc.get("/request", user=uid, ttl=FAST, params={"filter": "all", "take": 20, "skip": 0, "sort": "modified",
+                                                                        "sortDirection": "desc", "requestedBy": u.get("id")})
+            except (SeerrError, HTTPException) as e:
+                log.info("Downloads: Seerr part failed: %s", getattr(e, "message", None) or getattr(e, "detail", e))
+                sources["seerr"] = "down"
+                return []
+            rows = [q for q in (res or {}).get("results") or [] if isinstance(q, dict)
+                    and (q.get("requestedBy") or {}).get("id") == u.get("id") and REQUEST_STATUS.get(q.get("status")) in ("approved", "completed")]
+            seen: set[str] = set()
+
+            async def one(q: dict) -> dict | None:
+                m = q.get("media") or {}
+                kind = q.get("type") or m.get("mediaType") or "movie"
+                tmdb = m.get("tmdbId")
+                is4k = bool(q.get("is4k"))
+                key = f"{kind}:{tmdb}" + (":4k" if is4k else "")
+                if not tmdb or key in seen:
+                    return None
+                seen.add(key)
+                status = MEDIA_STATUS.get(m.get("status4k" if is4k else "status"))
+                open_at = f"#/requests/{'movie' if kind == 'movie' else 'series'}/{int(tmdb)}"
+                if status == "available":
+                    if now - _stamp(m.get("mediaAddedAt") or m.get("updatedAt")) > READY_SECONDS:
+                        return None
+                    info = await title_info(kind, int(tmdb))
+                    return {"key": key, "kind": kind, "title": info.get("title") or "Your request", "pct": 100, "minutes": None,
+                            "word": "Ready", "ready": True, "open": open_at}
+                if status not in ("processing", "partial", "pending"):
+                    return None
+                try:
+                    if kind == "movie":
+                        prog = await arr.movie_progress(int(tmdb), is4k)
+                        if not prog or prog.get("stage") not in ACTIVE_STAGES:
+                            return None
+                        pct, minutes, word = prog.get("pct"), prog.get("minutes"), prog.get("word")
+                    else:
+                        tvdb = m.get("tvdbId")
+                        if not tvdb:
+                            return None
+                        seasons = sorted(s.get("seasonNumber") for s in (q.get("seasons") or []) if s.get("seasonNumber"))
+                        show = await arr.show_progress(int(tvdb), seasons, is4k)
+                        eps = [e for se in (show or {}).get("seasons") or [] for e in se.get("episodes") or [] if e.get("stage") in ACTIVE_STAGES]
+                        if not eps:
+                            return None
+                        pct = round(sum(int(e.get("pct") or 0) for e in eps) / len(eps))
+                        minutes = (show or {}).get("minutes")
+                        word = f"{len(eps)} episode{'s' if len(eps) != 1 else ''} downloading"
+                except ArrError:
+                    return None
+                info = await title_info(kind, int(tmdb))
+                return {"key": key, "kind": kind, "title": info.get("title") or "Your request", "pct": pct, "minutes": minutes,
+                        "word": word, "ready": False, "open": open_at}
+
+            got = await asyncio.gather(*[one(q) for q in rows], return_exceptions=True)
+            sources["seerr"] = "ok"
+            return [x for x in got if isinstance(x, dict)]
+
+        async def books_part() -> list[dict]:
+            if not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+                sources["books"] = "off"
+                return []
+            try:
+                items = await media.member_requests(p.subject)
+            except Exception as e:  # noqa: BLE001  (MediaError, or anything odd from the other site)
+                log.info("Downloads: media site part failed: %s", e)
+                sources["books"] = "down"
+                return []
+            out = []
+            for x in items:
+                if x.get("watching"):
+                    continue  # someone else's request: the bar is only for what this person asked for
+                label = str(x.get("label") or "")
+                kind = x.get("kind") if x.get("kind") in ("comic", "ebook", "audiobook") else "ebook"
+                op = x.get("open")
+                open_at = ("#/books" + op) if isinstance(op, str) and op.startswith("/") else "#/requests/mine"
+                if x.get("state") == "ready":
+                    if not x.get("doneAt") or now - _stamp(x.get("doneAt")) > READY_SECONDS:
+                        continue
+                    out.append({"key": str(x.get("key")), "kind": kind, "title": str(x.get("title") or ""), "pct": 100, "minutes": None,
+                                "word": "Ready", "ready": True, "open": open_at})
+                elif x.get("state") == "work" and (label.startswith("Downloading") or label.startswith("Adding")):
+                    pr = x.get("progress")
+                    out.append({"key": str(x.get("key")), "kind": kind, "title": str(x.get("title") or ""),
+                                "pct": int(pr) if isinstance(pr, (int, float)) else (100 if label.startswith("Adding") else None),
+                                "minutes": None, "word": label, "ready": False, "open": "#/requests/mine"})
+            sources["books"] = "ok"
+            return out
+
+        a, b = await asyncio.gather(seerr_part(), books_part())
+        items = a + b
+        # Downloading first (furthest along first), then what just finished.
+        items.sort(key=lambda x: (x["ready"], -(x["pct"] or 0)))
+        body = {"items": items[:DOWNLOADS_MAX], "more": max(0, len(items) - DOWNLOADS_MAX), "sources": sources}
+        downloads_cache[p.subject] = (time.time(), body)
+        if len(downloads_cache) > 500:
+            downloads_cache.pop(next(iter(downloads_cache)))
+        return body
 
     @r.get("/recent")
     async def recent(request: Request, days: int = RECENT_DAYS):

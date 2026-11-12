@@ -184,6 +184,12 @@
     } else if (d.type === 'audiobook') {
       np = cleanNp(d.state);
       renderNp();
+    } else if (d.type === 'scrolling') {
+      // The media site is being scrolled: the phone tab bar fades as on our own pages (tabfade.js).
+      if (window.gsTabFade) window.gsTabFade.ping();
+    } else if (d.type === 'requests-changed') {
+      // A request or download just started in the frame: the green bar's download progress checks now (downloads.js).
+      if (window.gsDownloads) window.gsDownloads.refresh(true);
     } else if (d.type === 'signed-out') {
       if (Date.now() - lastReload < 15000) return; // just signed in; do not loop
       signIn('/');

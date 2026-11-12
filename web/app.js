@@ -331,8 +331,12 @@
     const d = dash.data('streams');
     const seg = window.gsServerSeg ? window.gsServerSeg() : null;
     box.classList.toggle('has-seg', !!seg);
-    if (failed(d)) { box.appendChild(el('span', 'sd-pill-lime__label', 'Failed to load')); if (seg) box.appendChild(seg); return; }
-    if (d.status !== 'ok') { if (seg) box.appendChild(seg); return; }
+    // Download progress (downloads.js, Glenn's pick A) takes the bar when this person has something downloading,
+    // after any stream start/stop message has had its few seconds.
+    box.classList.remove('is-dl'); box.style.removeProperty('--dl-pct');
+    const dl = () => !!(window.gsDownloads && window.gsDownloads.paint(box, seg));
+    if (failed(d)) { if (dl()) return; box.appendChild(el('span', 'sd-pill-lime__label', 'Failed to load')); if (seg) box.appendChild(seg); return; }
+    if (d.status !== 'ok') { if (!dl() && seg) box.appendChild(seg); return; }
     trackStreams();
     // Right after a stream starts or stops, the bar says so for a few seconds, then shows the newest streams again.
     const showMsg = liveMsg && Date.now() < liveMsg.until;
@@ -348,6 +352,7 @@
       if (!liveMsg.shown) { liveMsg.shown = true; box.classList.remove('is-flash'); void box.offsetWidth; box.classList.add('is-flash'); }
       return;
     }
+    if (dl()) return;
     const newest = sortedStreams().slice(0, 3);
     if (!newest.length) box.appendChild(el('span', 'sd-pill-lime__label sd-pill-lime__none', 'Nothing playing'));
     newest.forEach((r) => {
