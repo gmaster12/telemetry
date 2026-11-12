@@ -335,9 +335,9 @@ One box with a selector everywhere (`web/usearch.js`, `web/usearch.css`; the med
 (`requests` section) goes to `#/requests/search?q=`; Comics, Ebooks, Audiobooks and All books need `books`, Books &
 comics on and a Plex sign-in, and open the frame at the media site's results page `/find?type=<kind>&q=` (no words:
 its `/library|/ebooks|/audiobooks|/search` page). Glenn's pick C (Nov 12 2026): there is no "In our library / Request
-new" switch any more. The results page lists what the library has first (Play or Open), then what the request
-catalog has with Request (which opens the media site's request page with `pick=<provider:id>` so that title comes
-first and, for Shelfmark, its release picker opens). The media site's own box, inside the frame, also drops
+new" switch any more. The results page lists what the library has first (Play or Open), then, on the same screen,
+the request page's own results for those words with their real buttons (MAM versions and Download, Shelfmark Choose a
+release, comic requests); Glenn did not want a second page to reach them. The media site's own box, inside the frame, also drops
 suggestions as you type (library, then catalog, then "See all results"); this box cannot (the media site's data is
 only reachable inside the frame), so Enter goes to the results page. One kind left: the selector is a plain label. The last kind is remembered per
 browser (`gs-usearch-kind`); the Requests page always starts on Movies & shows and searches as you type for it
