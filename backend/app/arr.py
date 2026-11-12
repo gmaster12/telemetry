@@ -295,6 +295,17 @@ class Arr:
             return {"stage": "release", "word": "Not out yet", "release": rel}
         return {"stage": "searching", "word": "Looking for a copy", "lastSearch": _when(m.get("lastSearchTime"))}
 
+    async def imported_file(self, tmdb_id: int, is4k: bool = False) -> tuple[int | None, str | None, str | None]:
+        """(bytes, file name, title) of the copy Radarr imported, from the record already fetched for
+        progress. For checking Plex has that exact file (`app/onplex.py`); the name is a release name,
+        so it never goes to a browser."""
+        m = await self.movie(tmdb_id, is4k)
+        if not m:
+            return None, None, None
+        f = m.get("movieFile") or {}
+        size = int(f.get("size") or m.get("sizeOnDisk") or 0) or None
+        return size, f.get("relativePath") or None, m.get("title") or None
+
     async def show_progress(self, tvdb_id: int, seasons: list[int] | None, is4k: bool = False) -> dict | None:
         """Per episode of the requested seasons (all monitored seasons if none given), plus counts."""
         if not self.client("sonarr", is4k):

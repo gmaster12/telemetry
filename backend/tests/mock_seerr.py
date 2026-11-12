@@ -132,6 +132,15 @@ def public(request: Request):
             "hideAvailable": False, "enableSpecialEpisodes": False, "discoverRegion": "US", "originalLanguage": ""}
 
 
+@app.get("/api/v1/settings/plex")
+def plex_settings(request: Request):
+    me(request)
+    return state.get("plex_settings") or {"name": "Perseus", "ip": "127.0.0.1", "port": 32400, "machineId": "machine-perseus",
+                                          "libraries": [{"id": "1", "name": "Movies", "enabled": True, "type": "movie"},
+                                                        {"id": "2", "name": "TV Shows", "enabled": True, "type": "show"},
+                                                        {"id": "9", "name": "-", "enabled": False, "type": "movie"}]}
+
+
 @app.get("/api/v1/settings/discover")
 def sliders(request: Request):
     u = me(request)

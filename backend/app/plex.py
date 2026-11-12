@@ -65,6 +65,38 @@ class PlexClient:
         self._meta_cache[rating_key] = (time.time(), items[0])
         return items[0]
 
+    async def details(self, rating_key: str, check_files: bool = False) -> dict:
+        """Source media details, asked for now (not cached). `check_files` makes Plex stat every file,
+        so a Part comes back with `exists` and `accessible`: used to prove a library item is really playable."""
+        params = {"checkFiles": 1} if check_files else None
+        data = await self._get(f"/library/metadata/{rating_key}", params)
+        items = data.get("MediaContainer", {}).get("Metadata", []) or [{}]
+        return items[0]
+
+    # ---------- library (used by "is it on Plex yet?", app/onplex.py) ----------
+    async def sections(self) -> list[dict]:
+        data = await self._get("/library/sections")
+        return data.get("MediaContainer", {}).get("Directory", []) or []
+
+    async def items(self, section_key: str | int, kind: int, *, size: int = 120, sort: str | None = None,
+                    title: str | None = None) -> list[dict]:
+        """One library's items with their ids and files: `kind` is Plex's type number (1 movie, 2 show).
+        `sort` reads from one end (updatedAt:desc is what a new file for an old item changes), `title`
+        searches by name. Both carry Guid, Media and Part, so one call can identify a title and its file."""
+        params: dict[str, Any] = {"type": int(kind), "includeGuids": 1, "X-Plex-Container-Start": 0,
+                                  "X-Plex-Container-Size": int(size)}
+        if sort:
+            params["sort"] = sort
+        if title:
+            params["title"] = title
+        data = await self._get(f"/library/sections/{section_key}/all", params)
+        return data.get("MediaContainer", {}).get("Metadata", []) or []
+
+    async def leaves(self, rating_key: str | int) -> list[dict]:
+        """Every episode of a show, with season and episode numbers and their files."""
+        data = await self._get(f"/library/metadata/{rating_key}/allLeaves")
+        return data.get("MediaContainer", {}).get("Metadata", []) or []
+
     async def image(self, path: str, width: int = 300, height: int = 450) -> tuple[bytes, str]:
         params = {"url": path, "width": width, "height": height, "minSize": 1, "upscale": 1}
         url = self.server.plex_url.rstrip("/") + "/photo/:/transcode"

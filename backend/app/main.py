@@ -25,6 +25,7 @@ from .arr import Arr, ArrError
 from .billing import StripeClient
 from .cleanup import Cleanup
 from .netdata import NetdataClient
+from .onplex import OnPlex
 from .plex import PlexAccount, PlexClient
 from .poller import Poller
 from . import request_log
@@ -44,6 +45,7 @@ poller = Poller(store)
 seerr = Requests(store, poller.http)
 media = Media(store, poller.http)
 arr = Arr(store, poller.http)
+onplex = OnPlex(store, seerr, poller)
 cleanup = Cleanup(store, seerr, arr, poller)
 add_requests_section(store)
 add_mystreams_section(store)
@@ -1470,7 +1472,7 @@ async def cleanup_delete(item_id: int, request: Request):
     return res
 
 
-app.include_router(make_router(seerr, directory, need, media, cleanup, arr))
+app.include_router(make_router(seerr, directory, need, media, cleanup, arr, onplex))
 
 
 # ---------- static dashboard ----------

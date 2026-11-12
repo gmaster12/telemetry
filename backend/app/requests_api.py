@@ -171,8 +171,67 @@ def public_status(state: str, label: str | None) -> tuple[str, str]:
     return "Searching", "square"
 
 
-def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], media=None, cleanup=None, arr=None) -> APIRouter:
+def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], media=None, cleanup=None, arr=None,
+                onplex=None) -> APIRouter:
     r = APIRouter(prefix="/api/requests")
+
+    STALE = ("processing", "pending", "partial")   # Seerr has not caught up with Plex (yet, or at all)
+
+    def iso(when: float) -> str:
+        return dt.datetime.fromtimestamp(when, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    async def plex_movie_at(tmdb: int, is4k: bool, prog: dict | None) -> float | None:
+        """Plex's own answer for a movie Radarr has finished with: is that file in the library?
+
+        Only asked once the download is done (`imported`), so a title still downloading costs nothing.
+        The file's size and name come from Radarr and stay on this side: they identify the copy for
+        Plex, and they are release names, which members never see."""
+        if not (onplex and prog and prog.get("stage") == "imported"):
+            return None
+        size = name = title = None
+        if arr:
+            try:
+                size, name, title = await arr.imported_file(int(tmdb), is4k)
+            except ArrError:
+                pass
+        return await onplex.movie(int(tmdb), is4k=is4k, size=size, file_name=name, title=title)
+
+    async def plex_media_state(mi: dict, kind: str, tmdb_id: int, title: str | None) -> dict:
+        """`media_state`, plus Plex's own answer while Seerr still says a request is being worked on.
+
+        Shows are left to Seerr here (a series is available only when every asked-for season is, which
+        the progress route works out from Sonarr); their episodes still get Plex's answer there."""
+        st = media_state(mi)
+        if not (onplex and mi and tmdb_id and kind == "movie"):
+            return st
+        async def one(is4k: bool) -> None:
+            field = "status4k" if is4k else "status"
+            if st[field] not in STALE:
+                return
+            if await onplex.movie(int(tmdb_id), is4k=is4k, title=title):
+                st[field] = "available"
+                st["plexDirect"] = True
+        await asyncio.gather(one(False), one(True))
+        return st
+
+    async def plex_has_episodes(tvdb: int, tmdb: int | None, show: dict | None, is4k: bool) -> float | None:
+        """Plex's own answer for a show: are all the asked-for episodes Sonarr has finished with there?
+
+        Only asked when Sonarr has a file for every episode of the asked-for seasons, so a season still
+        coming in is left alone and costs nothing."""
+        if not (onplex and show):
+            return None
+        want = {(int(se["number"]), int(e["n"])) for se in show.get("seasons") or [] for e in se.get("episodes") or []
+                if e.get("stage") == "onplex" and e.get("n") and se.get("number")}
+        if not want or len(want) != int(show.get("total") or 0):
+            return None
+        title = None
+        if arr:
+            try:
+                title = ((await arr.series(int(tvdb), is4k)) or {}).get("title")
+            except ArrError:
+                pass
+        return await onplex.episodes(want, tvdb_id=int(tvdb), tmdb_id=tmdb, title=title, is4k=is4k)
 
     async def who(request: Request) -> tuple[Any, int | None]:
         p = need(request, "requests")
@@ -466,7 +525,8 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                                        for x in c.get("release_dates") or [] if x.get("certification")), None),
                 "studios": [{"id": c.get("id"), "name": c.get("name")} for c in (d.get("productionCompanies") or [])[:3]],
                 "collection": {"id": d["collection"]["id"], "name": d["collection"].get("name"), "poster": d["collection"].get("posterPath")} if d.get("collection") else None,
-                "media": media_state(mi), "requests": requests_on(mi, me_id, manage, watching), "watchlisted": bool(d.get("onUserWatchlist")),
+                "media": await plex_media_state(mi, "movie", tmdb_id, d.get("title")),
+                "requests": requests_on(mi, me_id, manage, watching), "watchlisted": bool(d.get("onUserWatchlist")),
                 **detail_extra(d)}
 
     @r.get("/tv/{tmdb_id}")
@@ -848,11 +908,12 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             return {"items": {}}
         return {"items": {f"{k}:{i}": cleanup.clock_for(k, i) for k, i, _ in parse_ids(ids, 60)}}
 
-    def steps_for(q: dict | None, m: dict, prog: dict | None) -> list[dict]:
-        """Requested, Approved, Copy found, Downloading, Importing, On Plex: done, now or next, with times."""
+    def steps_for(q: dict | None, m: dict, prog: dict | None, plex_at: float | None = None) -> list[dict]:
+        """Requested, Approved, Copy found, Downloading, Importing, On Plex: done, now or next, with times.
+        On Plex is done when Seerr says available OR Plex itself showed the file (`plex_at`)."""
         st = REQUEST_STATUS.get((q or {}).get("status"), "approved")
-        on_plex = MEDIA_STATUS.get(m.get("status")) == "available"
         stage = (prog or {}).get("stage")
+        on_plex = MEDIA_STATUS.get(m.get("status")) == "available" or stage == "onplex"
         names = [("requested", "Requested"), ("approved", "Approved"), ("found", "Copy found"), ("downloading", "Downloading"),
                  ("importing", "Importing"), ("onplex", "On Plex")]
         if on_plex:
@@ -866,7 +927,9 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         else:
             cur = 2
         at = {"requested": (q or {}).get("createdAt"), "approved": (q or {}).get("updatedAt") if st != "pending" else None,
-              "found": (prog or {}).get("added"), "onplex": m.get("mediaAddedAt")}
+              "found": (prog or {}).get("added"),
+              # Plex's own time when it got there first: Seerr's mediaAddedAt is the request's, until its scan runs
+              "onplex": iso(plex_at) if plex_at else m.get("mediaAddedAt")}
         return [{"key": k, "label": label, "state": "done" if i < cur else "now" if i == cur else "next", "at": at.get(k) if i <= cur else None}
                 for i, (k, label) in enumerate(names)]
 
@@ -896,8 +959,12 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             try:
                 if kind == "movie":
                     prog = await arr.movie_progress(tmdb, is4k)
-                    item = {"kind": "movie", **(prog or {}), "onPlex": MEDIA_STATUS.get(mm["status"]) == "available",
-                            "steps": steps_for(q, mm, prog), "mine": mine}
+                    on_plex = MEDIA_STATUS.get(mm["status"]) == "available"
+                    plex_at = None if on_plex else await plex_movie_at(tmdb, is4k, prog)
+                    if plex_at:
+                        prog = {**(prog or {}), "stage": "onplex", "word": "On Plex"}
+                    item = {"kind": "movie", **(prog or {}), "onPlex": on_plex or bool(plex_at),
+                            "steps": steps_for(q, mm, prog, plex_at), "mine": mine}
                 else:
                     tvdb = m.get("tvdbId")
                     if not tvdb:
@@ -905,7 +972,10 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                         tvdb = ((d or {}).get("externalIds") or {}).get("tvdbId")
                     seasons = sorted({s.get("seasonNumber") for x in reqs for s in (x.get("seasons") or []) if s.get("seasonNumber")})
                     show = await arr.show_progress(int(tvdb), seasons, is4k) if tvdb else None
-                    item = {"kind": "tv", "show": show, "onPlex": MEDIA_STATUS.get(mm["status"]) == "available", "mine": mine,
+                    on_plex = MEDIA_STATUS.get(mm["status"]) == "available"
+                    if not on_plex and tvdb:
+                        on_plex = bool(await plex_has_episodes(int(tvdb), tmdb, show, is4k))
+                    item = {"kind": "tv", "show": show, "onPlex": on_plex, "mine": mine,
                             "requestedAt": (reqs[0] if reqs else {}).get("createdAt"), "seasonsAsked": seasons}
             except ArrError as e:
                 item = {"kind": kind, "error": e.message}
@@ -1001,6 +1071,14 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 try:
                     if kind == "movie":
                         prog = await arr.movie_progress(int(tmdb), is4k)
+                        if prog and prog.get("stage") == "imported":
+                            # Radarr is done. Plex may already have it while Seerr is still scanning.
+                            at = await plex_movie_at(int(tmdb), is4k, prog)
+                            if not at or now - at > READY_SECONDS:
+                                return None
+                            info = await title_info(kind, int(tmdb))
+                            return {"key": key, "kind": kind, "title": info.get("title") or "Your request", "pct": 100,
+                                    "minutes": None, "word": "Ready", "ready": True, "open": open_at}
                         if not prog or prog.get("stage") not in ACTIVE_STAGES:
                             return None
                         pct, minutes, word = prog.get("pct"), prog.get("minutes"), prog.get("word")
