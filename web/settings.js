@@ -112,7 +112,8 @@
     billing: { title: 'Billing', scope: 'all', lead: 'Shows each person their own Stripe subscription. The key is read-only: nothing is ever charged or changed from here.' },
     reqlog: { title: 'Request log', scope: 'all', lead: 'Every movie and series requested through this site: who asked, when, and where it stands in Seerr now.' },
     requests: { title: 'Requests', scope: 'all', lead: 'Connects your Seerr so people can find movies and series and request them here, without signing in to Seerr. Each person acts as their own Seerr account, so its permissions, limits and approvals still apply.' },
-    books: { title: 'Books & comics', scope: 'all', lead: 'Shows the Greystar media site inside this dashboard, so people read comics and ebooks, listen to audiobooks and request more without signing in again.' }
+    books: { title: 'Books & comics', scope: 'all', lead: 'Shows the Greystar media site inside this dashboard, so people read comics and ebooks, listen to audiobooks and request more without signing in again.' },
+    arr: { title: 'Radarr & Sonarr', scope: 'all', lead: 'Shows people how far their movies and shows have downloaded, and lets Unwatched cleanup remove titles nobody watched (with their files, so they are not downloaded again).' }
   };
   var summary = null;
   var summaryAt = 0;
@@ -151,6 +152,7 @@
     else if (t === 'billing') loadBilling();
     else if (t === 'requests') loadRequests();
     else if (t === 'books') loadBooks();
+    else if (t === 'arr') loadArr();
     else if (t === 'reqlog') openLog(changed);
     else if (t !== 'display') loadState();
     if (window.sdRenderPreviews) window.sdRenderPreviews();
@@ -208,6 +210,8 @@
     if (s.requests && s.requests.connected && s.requests.error) out.push({ view: 'requests', tone: 'danger', text: 'Seerr: ' + s.requests.error });
     if (s.requests && s.requests.pending) out.push({ view: 'requests', tone: 'warning', text: s.requests.pending + (s.requests.pending === 1 ? ' request is' : ' requests are') + ' waiting for approval.', go: '#/requests/manage' });
     if (s.requests && s.requests.needs_you) out.push({ view: 'reqlog', tone: 'danger', text: s.requests.needs_you + (s.requests.needs_you === 1 ? ' failed request needs' : ' failed requests need') + ' you: tried again once, then sent to you.' });
+    if (s.cleanup && s.cleanup.mode !== 'off' && !(s.cleanup.radarr && s.cleanup.sonarr)) out.push({ view: 'arr', tone: 'warning', text: 'Unwatched cleanup needs Radarr and Sonarr connected to remove anything.' });
+    if (s.cleanup && s.cleanup.due) out.push({ view: 'arr', tone: 'warning', text: s.cleanup.due + (s.cleanup.due === 1 ? ' unwatched title runs' : ' unwatched titles run') + ' out within 3 days.', go: '#/cleanup' });
     if (s.billing.connected && s.billing.unmatched) out.push({ view: 'billing', tone: 'warning', text: s.billing.unmatched + ' Stripe ' + (s.billing.unmatched === 1 ? 'customer is' : 'customers are') + ' not matched to a Plex user.' });
     return out;
   }
@@ -294,6 +298,13 @@
     cards.push(homeCard('books', { scope: 'all', what: bk.enabled ? 'People read, listen and request books and comics from the Greystar media site, here.' : 'Optional. Show the Greystar media site here, signed in with Plex.',
       status: bk.enabled ? ['success', 'On'] : bk.has_secret ? ['neutral', 'Off'] : ['neutral', 'Not connected'],
       facts: [] }));
+    var ar = s.arr || {};
+    var arrOn = ['radarr', 'sonarr'].filter(function (k) { return ar[k] && ar[k].url && ar[k].has_key; });
+    var cu = s.cleanup || {};
+    cards.push(homeCard('arr', { scope: 'all', what: 'Download progress for people, and removing unwatched requests.',
+      status: !arrOn.length ? ['neutral', 'Not connected'] : ['radarr', 'sonarr'].some(function (k) { return ar[k] && ar[k].error; }) ? ['danger', 'Last check failed']
+        : arrOn.length < 2 ? ['warning', (arrOn[0] === 'radarr' ? 'Radarr' : 'Sonarr') + ' only'] : ['success', 'Connected'],
+      facts: [[cu.mode === 'auto' ? 'Auto delete' : cu.mode === 'review' ? 'Review only' : 'Off', 'Unwatched cleanup'], [cu.due || 0, 'due in 3 days']] }));
     box.replaceChildren(el('div', { class: 'st-homegrid' }, cards));
     if (window.sdRenderPreviews) window.sdRenderPreviews();
   }
@@ -1159,6 +1170,74 @@
       el('p', { class: 'st-note', text: 'Everyone can request comics, ebooks and audiobooks. Listening to audiobooks needs the Audiobooks add-on, which is turned on per person on the media site.' })));
   }
 
+  // ---------- Radarr & Sonarr (download progress, Unwatched cleanup) ----------
+  var arrs = null;
+  var ARR_NAMES = { radarr: 'Radarr', sonarr: 'Sonarr', radarr4k: 'Radarr 4K', sonarr4k: 'Sonarr 4K' };
+  function loadArr() {
+    if (!isAdmin()) return Promise.resolve();
+    return Promise.all([api('GET', '/api/settings/arr'), state ? null : api('GET', '/api/settings')]).then(function (r) {
+      arrs = r[0];
+      if (r[1]) state = r[1];
+    }).then(render).catch(function (e) { setMsg('load', 'error', e.message); });
+  }
+  function arrSlot(slot) {
+    var a = arrs[slot] || {};
+    var on = a.url && a.has_key;
+    var url = input({ value: a.url || '', placeholder: slot.indexOf('radarr') === 0 ? 'http://10.0.0.5:7878' : 'http://10.0.0.5:8989', class: 'st-input is-mono' }, 'arr-url-' + slot);
+    var key = input({ type: 'password', placeholder: a.has_key ? 'Saved. Leave blank to keep it.' : 'API key (Settings, General)', autocomplete: 'new-password' }, 'arr-key-' + slot);
+    var sec = el('section', { class: 'st-section' }, el('h3', null, ARR_NAMES[slot], ' ', on ? badgeEl(a.error ? 'danger' : 'success', a.error ? 'Last check failed' : 'Connected') : badgeEl('neutral', 'Not set up')));
+    if (a.error) sec.appendChild(el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), a.error));
+    sec.appendChild(el('div', { class: 'st-form' },
+      el('div', { class: 'st-wide' }, field('Address', url, 'The address this server can reach it at, with the port')),
+      el('div', { class: 'st-wide' }, field('API key', key)),
+      el('div', { class: 'st-wide st-row' },
+        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['arr-save-' + slot] ? 'Checking…' : 'Save', disabled: busy['arr-save-' + slot], onclick: function () {
+          var b = { url: url.value.trim() };
+          if (key.value.trim()) b.key = key.value.trim();
+          withBusy('arr-save-' + slot, api('PUT', '/api/settings/arr/' + slot, b).then(function (r) {
+            clearDrafts('arr');
+            msgs['arr-' + slot] = { kind: 'ok', text: r.removed ? 'Removed.' : 'Connected to ' + ARR_NAMES[slot] + ' ' + (r.version || '') + '.' };
+            return loadArr();
+          }).catch(function (e) { setMsg('arr-' + slot, 'error', e.message); }));
+        } }),
+        on ? el('button', { type: 'button', class: 'st-btn', text: busy['arr-test-' + slot] ? 'Testing…' : 'Test', disabled: busy['arr-test-' + slot], onclick: function () {
+          withBusy('arr-test-' + slot, api('POST', '/api/settings/arr/' + slot + '/test').then(function (r) {
+            msgs['arr-' + slot] = { kind: 'ok', text: 'Working: ' + (r.name || ARR_NAMES[slot]) + ' ' + (r.version || '') + '.' };
+            return loadArr();
+          }).catch(function (e) { setMsg('arr-' + slot, 'error', e.message); return loadArr(); }));
+        } }) : null,
+        on ? el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Remove', onclick: function () {
+          api('DELETE', '/api/settings/arr/' + slot).then(function () { msgs['arr-' + slot] = { kind: 'ok', text: 'Removed.' }; return loadArr(); })
+            .catch(function (e) { setMsg('arr-' + slot, 'error', e.message); });
+        } }) : null)));
+    sec.appendChild(message('arr-' + slot));
+    return sec;
+  }
+  function renderArr(pane) {
+    if (!arrs) { pane.appendChild(el('p', { class: 'st-note', text: 'Loading…' })); return; }
+    var top = el('section', { class: 'st-section' }, el('h3', { text: 'Copy from Seerr' }),
+      el('p', { class: 'st-note', text: 'Seerr already knows your Radarr and Sonarr. This copies their addresses and keys from Seerr, then tests each one from this server. If Seerr reaches them at an address this server cannot, change it below.' }),
+      el('div', { class: 'st-row' },
+        el('button', { type: 'button', class: 'st-btn st-btn--accent', text: busy['arr-seerr'] ? 'Copying…' : 'Copy from Seerr', disabled: busy['arr-seerr'], onclick: function () {
+          withBusy('arr-seerr', api('POST', '/api/settings/arr/from-seerr').then(function (r) {
+            msgs.arrtop = { kind: (r.found || []).every(function (x) { return x.ok; }) ? 'ok' : 'error', text: (r.found || []).map(function (x) {
+              return ARR_NAMES[x.slot] + ': ' + (x.ok ? 'working' : x.error) + ' (' + x.url + ')';
+            }).join('. ') + '.' };
+            return loadArr();
+          }).catch(function (e) { setMsg('arrtop', 'error', e.message); }));
+        } }),
+        el('a', { class: 'st-btn', href: '#/cleanup', text: 'Open Unwatched cleanup', onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } })));
+    top.appendChild(message('arrtop'));
+    pane.appendChild(top);
+    pane.appendChild(arrSlot('radarr'));
+    pane.appendChild(arrSlot('sonarr'));
+    var four = el('details', { class: 'st-section st-details' }, el('summary', { text: '4K servers (optional)' }),
+      el('p', { class: 'st-note', text: 'Only if 4K requests go to their own Radarr or Sonarr. Without these, 4K titles use the ones above.' }),
+      arrSlot('radarr4k'), arrSlot('sonarr4k'));
+    if ((arrs.radarr4k || {}).url || (arrs.sonarr4k || {}).url) four.open = true;
+    pane.appendChild(four);
+  }
+
   // ---------- Requests: the Seerr connection ----------
   var rqs = null;
   var rqLinks = null;
@@ -1477,6 +1556,8 @@
       renderRequests(pane);
     } else if (tab === 'books') {
       renderBooks(pane);
+    } else if (tab === 'arr') {
+      renderArr(pane);
     } else if (tab === 'access') {
       renderAccess(pane);
     }

@@ -518,6 +518,8 @@
         : (d.seasons ? plural(d.seasons.filter(function (s) { return s.number > 0; }).length, 'season', 'seasons') : null),
         (d.genres || []).map(function (g) { return g.name; }).join(', ')].filter(Boolean).join(' · ');
       var badges = el('div', { class: 'rq-hero__badges' }, mediaBadge(d.media.status), me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] ? mediaBadge(d.media.status4k, true) : null);
+      var live = el('div', { class: 'rq-hero__live' });         // download progress and the removal countdown (dl.js)
+      var tvSlot = el('div', { class: 'rq-tvslot', hidden: true }); // a show's episodes on the way
       hero.append(
         el('span', { class: 'sd-notch', 'aria-hidden': 'true' }),
         el('button', { type: 'button', class: 'sd-go', 'aria-label': 'Back', onclick: function () { history.length > 1 ? history.back() : go('', null); } }, icon('left', 20)),
@@ -528,6 +530,7 @@
           el('p', { class: 'rq-hero__meta', text: meta }),
           badges,
           actions(kind, d),
+          live,
           d.tagline ? el('p', { class: 'rq-hero__tag', text: d.tagline }) : null,
           d.overview ? el('p', { class: 'rq-hero__overview', text: d.overview }) : null));
       var out = [hero];
@@ -540,8 +543,10 @@
               el('span', { class: 'rq-muted', text: fmtDate(q.created) }));
           }))));
       }
+      out.push(tvSlot);
       if (kind === 'tv') out.push(seasonsPanel(d));
       out.push(side);
+      heroLive(kind, d, badges, live, tvSlot);
       if (d.collection) {
         var c = el('a', { class: 'rq-collection', href: link('collection/' + d.collection.id) },
           el('span', { class: 'rq-eyebrow', text: 'Part of a collection' }), el('b', { text: d.collection.name }), el('span', { class: 'rq-collection__go' }, 'See the collection', icon('right', 16)));
@@ -574,6 +579,64 @@
         if (more) more.click();
       }
     });
+  }
+
+  // Days left before nobody-watched titles are removed (Unwatched cleanup), and where a download is (Radarr/Sonarr):
+  // a movie's percent and steps in the hero, a show's episodes in a panel under it. Checks again every 15 seconds
+  // while the title is on screen.
+  function heroLive(kind, d, badges, live, tvSlot) {
+    var D = window.gsDl;
+    if (!D) return;
+    var key = kind + ':' + d.id;
+    var progBox = el('div'), clockBox = el('div');
+    live.append(progBox, clockBox);
+    if (me.cleanup) {
+      get('/api/requests/clocks?ids=' + key, 30000).then(function (x) {
+        var c = (x.items || {})[key];
+        if (!c) return;
+        var p = D.clockPill(c);
+        if (p) badges.appendChild(p);
+        var n = D.clockNote(c, kind);
+        if (n) clockBox.replaceChildren(n);
+      }).catch(function () {});
+    }
+    if (!me.progress) return;
+    var busy = function (st) { return ['pending', 'processing', 'partial'].indexOf(st) >= 0; };
+    var keys = [];
+    if (busy(d.media.status)) keys.push(key);
+    if (me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] && busy(d.media.status4k)) keys.push(key + ':4k');
+    if (!keys.length) return;
+    var notified = {}, keep = {};
+    function load() {
+      if (!live.isConnected) return;
+      if (document.hidden) { setTimeout(load, 15000); return; }
+      api('GET', '/api/requests/progress?ids=' + keys.join(',')).then(function (x) {
+        if (!live.isConnected) return;
+        var it = x.items || {};
+        var mov = [], tv = [];
+        keys.forEach(function (k) {
+          var p = it[k];
+          if (!p) return;
+          var four = /:4k$/.test(k);
+          var opts = p.mine ? { notified: notified[p.mine], onNotify: function () {
+            return api('POST', '/api/requests/request/' + p.mine + '/notify-import').then(function () { notified[p.mine] = true; });
+          } } : null;
+          var label = keys.length > 1 ? el('span', { class: 'rq-eyebrow' + (kind === 'movie' ? ' rq-eyebrow--light' : ''), text: four ? '4K copy' : 'Standard copy' }) : null;
+          if (kind === 'movie') {
+            var b = D.movieBlock(p, opts);
+            if (b) mov.push(label, b);
+          } else {
+            var sp = D.showPanel(p, keep[k] = keep[k] || {});
+            if (sp) { if (label) sp.insertBefore(label, sp.firstChild); tv.push(sp); }
+          }
+        });
+        progBox.replaceChildren.apply(progBox, mov.filter(Boolean));
+        tvSlot.replaceChildren.apply(tvSlot, tv);
+        tvSlot.hidden = !tv.length;
+        setTimeout(load, 15000);
+      }).catch(function () { setTimeout(load, 60000); });
+    }
+    setTimeout(load, 0);   // the hero is put on the page right after this
   }
 
   function facts(kind, d) {
@@ -640,7 +703,7 @@
     return el('div', { class: 'rq-follow' }, el('span', { class: 'rq-follow__note' }, el('span', { class: 'rq-follow__dot', 'aria-hidden': 'true' }), 'Requested by another member'), b);
   }
 
-  // The buttons under a title: request (standard and 4K), play, trailer, watchlist, report a problem.
+  // The buttons under a title: request (standard and 4K), trailer, watchlist, report a problem.
   function actions(kind, d) {
     var box = el('div', { class: 'rq-actions' });
     var canKind = kind === 'movie' ? me.can.movie : me.can.tv;
@@ -658,7 +721,6 @@
     var follow = followBox(d);
     if (follow) box.appendChild(follow);
     if (may4k) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--ink', onclick: function () { requestDialog(kind, d, true); } }, icon('plus', 18), 'Request in 4K'));
-    if (d.media.plexUrl) box.appendChild(el('a', { class: 'rq-btn', href: d.media.plexUrl, target: '_blank', rel: 'noopener' }, icon('play', 18), 'Play on Plex'));
     if (d.trailer) box.appendChild(el('a', { class: 'rq-btn', href: d.trailer, target: '_blank', rel: 'noopener' }, icon('external', 18), 'Trailer'));
     var watched = d.watchlisted;
     var wbtn = el('button', { type: 'button', class: 'rq-btn', 'aria-pressed': watched ? 'true' : 'false' });
@@ -793,23 +855,32 @@
         };
       }).catch(function (e) { adv.replaceChildren(el('p', { class: 'rq-muted', text: e.message })); });
     }
+    // Unwatched cleanup: the tick box comes before Request (Glenn's ask), for movies and shows.
+    var agree = me.cleanup && me.cleanup.on && window.gsDl ? window.gsDl.agreeBox(me.cleanup.days || 14, kind, d.title, function () { count(); }) : null;
+    if (agree) content.appendChild(agree.el);
     var auto = is4k ? false : (kind === 'movie' ? me.can.autoMovie : me.can.autoTv);
     content.appendChild(el('p', { class: 'rq-note', text: auto ? 'This is approved straight away and starts downloading.' : 'Requests wait for approval, then download. You can follow it under My requests.' }));
     content.appendChild(msg);
     var send = el('button', { type: 'button', class: 'rq-btn rq-btn--accent' }, icon('plus', 18), 'Request');
     var cancel = el('button', { type: 'button', class: 'rq-btn', text: 'Cancel' });
     function count() {
-      if (kind !== 'tv') return;
+      var ok = !agree || agree.checked();
+      if (kind !== 'tv') {
+        send.disabled = !ok || !!(q && q.restricted);
+        send.replaceChildren(icon('plus', 18), ok ? 'Request' : 'Tick the box to request');
+        return;
+      }
       var n = picks.filter(function (c) { return c.checked; }).length;
-      send.disabled = !n;
-      send.replaceChildren(icon('plus', 18), n ? 'Request ' + plural(n, 'season', 'seasons') : 'Pick seasons');
+      send.disabled = !n || !ok || !!(q && q.restricted);
+      send.replaceChildren(icon('plus', 18), !n ? 'Pick seasons' : !ok ? 'Tick the box to request' : 'Request ' + plural(n, 'season', 'seasons'));
     }
     count();
     if (q && q.restricted) { send.disabled = true; msg.textContent = 'You have used all your requests for now. They free up as older ones age out.'; }
     var dlg = dialog((is4k ? 'Request in 4K: ' : 'Request ') + d.title, content, [cancel, send]);
     cancel.addEventListener('click', dlg.close);
     send.addEventListener('click', function () {
-      var bodyData = { mediaType: kind, mediaId: d.id, is4k: is4k };
+      if (agree && !agree.checked()) return;
+      var bodyData = { mediaType: kind, mediaId: d.id, is4k: is4k, agreeRemoval: !!(agree && agree.checked()) };
       if (kind === 'tv') { bodyData.seasons = picks.filter(function (c) { return c.checked; }).map(function (c) { return Number(c.value); }); if (d.tvdbId) bodyData.tvdbId = d.tvdbId; }
       if (adv && adv._value && adv.closest('details').open) Object.assign(bodyData, adv._value());
       send.disabled = true; send.textContent = 'Sending';
@@ -821,7 +892,7 @@
       }).catch(function (e) {
         msg.textContent = e.message;
         msg.classList.add('is-error');
-        send.disabled = false; count(); if (kind !== 'tv') send.replaceChildren(icon('plus', 18), 'Request');
+        send.disabled = false; count();
       });
     });
   }
@@ -1096,14 +1167,20 @@
       else if (x.canCancel) add(actBtn('Cancel', 'close', 'POST', book + 'cancel', x.title + ' was cancelled.', onChange, false, 'Cancel it?'));
     }
     var titleEl = x.open ? el('a', { class: 'rq-rrow__title', href: x.open, text: x.title }) : el('span', { class: 'rq-rrow__title', text: x.title });
+    // Unwatched cleanup's countdown, and a slot that everything() fills with download progress (Radarr/Sonarr).
+    var D = window.gsDl, mk = x.kind === 'show' ? 'tv' : 'movie';
+    var clockN = D && x.clock && ['running', 'due', 'last'].indexOf(x.clock.state) >= 0 ? D.clockNote(x.clock, mk, true) : null;
+    var clockP = D && x.clock && x.clock.state !== 'waiting' ? D.clockPill(x.clock) : null;
+    var prog = D && me.progress && x.source === 'seerr' && x.tmdbId && (x.state === 'work' || x.label === 'Partly available')
+      ? el('div', { class: 'rq-ev-prog', 'data-pkey': mk + ':' + x.tmdbId + (x.is4k ? ':4k' : '') }) : null;
     return el('li', { class: 'rq-rrow rq-ev-row', 'data-state': x.state },
       x.open ? el('a', { class: 'rq-rrow__poster', href: x.open, 'aria-hidden': 'true', tabindex: '-1' }, poster) : el('span', { class: 'rq-rrow__poster', 'aria-hidden': 'true' }, poster),
       el('div', { class: 'rq-rrow__main' }, titleEl,
         el('span', { class: 'rq-rrow__meta' }, el('span', { class: 'rq-ev-kind' }, icon(EV_KIND_ICON[x.kind] || 'book', 14), EV_KIND_WORD[x.kind] || ''),
           x.sub ? el('span', { text: x.sub }) : null),
-        note ? el('span', { class: 'rq-ev-note', text: note }) : null),
+        note ? el('span', { class: 'rq-ev-note', text: note }) : null, prog, clockN),
       el('span', { class: 'rq-ev-time', text: when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) }),
-      el('div', { class: 'rq-rrow__status' }, evBadge(x)),
+      el('div', { class: 'rq-rrow__status' }, evBadge(x), clockP),
       actions);
   }
   function everything(top) {
@@ -1161,7 +1238,43 @@
       if (st.sources.books === 'down') notes.appendChild(el('div', { class: 'rq-ev-down' }, icon('clock', 16), 'Comics, ebooks and audiobooks could not load right now. Showing the rest.'));
       more.hidden = !st.more;
       more.disabled = st.busy;
+      progress(true);
       return shown.length;
+    }
+    // Download progress for rows on their way (Radarr/Sonarr), every 20 seconds while My requests is open.
+    var prog = { last: {}, timer: null, notified: {} };
+    function progress(fromPaint) {
+      if (!me.progress || !window.gsDl) return;
+      var put = function () {
+        list.querySelectorAll('[data-pkey]').forEach(function (slot) {
+          var p = prog.last[slot.getAttribute('data-pkey')];
+          if (!p) return;
+          var opts = p.mine ? { notified: prog.notified[p.mine], onNotify: function () {
+            return api('POST', '/api/requests/request/' + p.mine + '/notify-import').then(function () { prog.notified[p.mine] = true; });
+          } } : null;
+          var line = window.gsDl.rowLine(p, opts);
+          if (line) slot.replaceChildren(line); else slot.replaceChildren();
+          // Radarr/Sonarr know better than Seerr's waiting reason ("Searching"): the line replaces it.
+          var li = slot.closest('.rq-ev-row');
+          if (li) li.classList.toggle('has-progress', !!line);
+        });
+      };
+      put();
+      if (fromPaint && prog.timer) return;   // a redraw reuses the last numbers; the timer keeps them fresh
+      clearTimeout(prog.timer); prog.timer = null;
+      if (!list.isConnected && !fromPaint) return;
+      var keys = {};
+      list.querySelectorAll('[data-pkey]').forEach(function (slot) { keys[slot.getAttribute('data-pkey')] = 1; });
+      keys = Object.keys(keys).slice(0, 30);
+      if (!keys.length) return;
+      var again = function (ms) { prog.timer = setTimeout(function () { if (list.isConnected) progress(); else prog.timer = null; }, ms); };
+      if (document.hidden) { again(20000); return; }
+      prog.timer = -1;
+      api('GET', '/api/requests/progress?ids=' + keys.join(',')).then(function (x) {
+        Object.assign(prog.last, x.items || {});
+        put();
+        again(20000);
+      }).catch(function () { again(60000); });
     }
     // A filter that shows little pulls in more pages on its own (a few at a time).
     function fill() {

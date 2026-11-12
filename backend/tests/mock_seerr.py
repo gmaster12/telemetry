@@ -109,7 +109,7 @@ def full_req(r):
     by = next(u for u in state["users"] if u["id"] == r["by"])
     return {"id": r["id"], "status": r["status"], "type": r["type"], "is4k": r["is4k"], "createdAt": r["created"], "updatedAt": r["created"],
             "media": {"tmdbId": r["media"]["tmdbId"], "mediaType": r["type"], "status": r.get("media_status", 2), "status4k": 1,
-                      "downloadStatus": r.get("downloading", [])},
+                      "downloadStatus": r.get("downloading", []), **r.get("media_extra", {})},
             "seasons": [{"seasonNumber": n, "status": r["status"]} for n in r.get("seasons", [])],
             "requestedBy": dict(by), "modifiedBy": None}
 
@@ -469,3 +469,18 @@ def img(size: str, name: str):
 def _reset():
     reset()
     return {"ok": True}
+
+
+@app.delete("/api/v1/media/{media_id}")
+def delete_media(request: Request, media_id: int):
+    me(request)
+    state.setdefault("deleted_media", []).append(media_id)
+    return None
+
+
+@app.get("/api/v1/settings/{kind}")
+def arr_settings(request: Request, kind: str):
+    me(request)
+    if kind not in ("radarr", "sonarr"):
+        raise HTTPException(404, "Not found")
+    return state.get("arr_settings", {}).get(kind, [])

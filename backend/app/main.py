@@ -21,7 +21,9 @@ from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, add_books_
                    end_session, hash_password, new_session, password_problem, plex_principal, principal_for, record_failure,
                    set_cookie, throttled, user_sections)
 from .config import DB_PATH, WEB_DIR, ServerCfg, env
+from .arr import Arr, ArrError
 from .billing import StripeClient
+from .cleanup import Cleanup
 from .netdata import NetdataClient
 from .plex import PlexAccount, PlexClient
 from .poller import Poller
@@ -41,6 +43,8 @@ directory = Directory(store)
 poller = Poller(store)
 seerr = Requests(store, poller.http)
 media = Media(store, poller.http)
+arr = Arr(store, poller.http)
+cleanup = Cleanup(store, seerr, arr, poller)
 add_requests_section(store)
 add_mystreams_section(store)
 add_books_section(store)
@@ -58,8 +62,10 @@ def client_id() -> str:
 async def lifespan(app: FastAPI):
     poller.client_id = client_id()
     task = asyncio.create_task(poller.run())
+    sweep = asyncio.create_task(cleanup.loop())
     yield
     task.cancel()
+    sweep.cancel()
 
 
 app = FastAPI(title="Greystar Telemetry", lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -432,6 +438,8 @@ async def settings_summary():
                     "customers": counts.get("customers", 0), "unmatched": counts.get("unmatched", 0)},
         "requests": await requests_summary(),
         "books": media.settings(),
+        "arr": {k: {"url": v["url"], "has_key": v["has_key"], "error": v["error"]} for k, v in arr.settings().items()},
+        "cleanup": {**cleanup.settings(), "due": cleanup.due_count()},
     }
 
 
@@ -1311,7 +1319,158 @@ def delete_books_settings():
     return media.settings()
 
 
-app.include_router(make_router(seerr, directory, need, media))
+# ---------- Radarr & Sonarr (download progress, Unwatched cleanup) ----------
+class ArrIn(BaseModel):
+    url: str = Field(default="", max_length=300)
+    key: str | None = Field(default=None, max_length=200)
+
+
+ARR_SLOTS = ("radarr", "sonarr", "radarr4k", "sonarr4k")
+
+
+@app.get("/api/settings/arr")
+def get_arr_settings():
+    return arr.settings()
+
+
+@app.put("/api/settings/arr/{slot}")
+async def put_arr_settings(slot: str, body: ArrIn):
+    if slot not in ARR_SLOTS:
+        raise HTTPException(404, "No such connection.")
+    old_url, old_key = store.get_setting(slot + "_url"), store.get_setting(slot + "_key")
+    try:
+        arr.save(slot, body.url, body.key)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    if not body.url.strip():
+        return {"ok": True, "removed": True}
+    if not store.get_setting(slot + "_key"):
+        raise HTTPException(422, "Add the API key too (Settings, General in Radarr or Sonarr).")
+    try:
+        return {"ok": True, **(await arr.test(slot))}
+    except ArrError as e:
+        store.set_setting(slot + "_url", old_url)  # keep the working connection
+        store.set_setting(slot + "_key", old_key)
+        raise HTTPException(422, "That did not work: " + e.message)
+
+
+@app.post("/api/settings/arr/{slot}/test")
+async def test_arr_settings(slot: str):
+    if slot not in ARR_SLOTS:
+        raise HTTPException(404, "No such connection.")
+    try:
+        return {"ok": True, **(await arr.test(slot))}
+    except ArrError as e:
+        arr.last_error[slot] = e.message
+        raise HTTPException(e.status if 400 <= e.status < 600 else 502, e.message)
+
+
+@app.delete("/api/settings/arr/{slot}")
+def delete_arr_settings(slot: str):
+    if slot not in ARR_SLOTS:
+        raise HTTPException(404, "No such connection.")
+    arr.save(slot, "", None)
+    return {"ok": True}
+
+
+@app.post("/api/settings/arr/from-seerr")
+async def arr_from_seerr():
+    """Fill in Radarr and Sonarr from Seerr's own settings (its default servers), then test each."""
+    try:
+        done = await arr.from_seerr(seerr)
+    except SeerrError as e:
+        raise HTTPException(e.status if 400 <= e.status < 600 else 502, "Seerr: " + e.message)
+    if not done:
+        raise HTTPException(409, "Seerr has no Radarr or Sonarr servers set up.")
+    return {"ok": True, "found": done}
+
+
+# ---------- Unwatched cleanup (admins; the board is Glenn's pick B) ----------
+class CleanupIn(BaseModel):
+    mode: str | None = Field(default=None, pattern="^(off|review|auto)$")
+    days: int | None = Field(default=None, ge=1, le=90)
+    hour: int | None = Field(default=None, ge=0, le=23)
+
+
+class KeepIn(BaseModel):
+    note: str | None = Field(default=None, max_length=200)
+
+
+class ExtendIn(BaseModel):
+    days: int = Field(default=7, ge=1, le=60)
+
+
+@app.get("/api/settings/cleanup")
+async def get_cleanup(fresh: bool = True):
+    if fresh and cleanup.enabled():
+        try:
+            async with cleanup._busy:
+                await asyncio.wait_for(cleanup.refresh(), timeout=20)
+        except asyncio.TimeoutError:
+            pass
+    return cleanup.board()
+
+
+@app.get("/api/settings/cleanup/count")
+def cleanup_count():
+    return {"due": cleanup.due_count() if cleanup.enabled() else 0, "mode": cleanup.mode()}
+
+
+@app.put("/api/settings/cleanup")
+def put_cleanup(body: CleanupIn):
+    if body.mode:
+        cleanup.set_mode(body.mode)
+    if body.days:
+        store.set_setting("cleanup_days", str(body.days))
+    if body.hour is not None:
+        store.set_setting("cleanup_hour", str(body.hour))
+    return cleanup.settings()
+
+
+def _cleanup_item(item_id: int):
+    try:
+        return cleanup._get(item_id)
+    except KeyError:
+        raise HTTPException(404, "That title is not being tracked.") from None
+
+
+@app.post("/api/settings/cleanup/{item_id}/keep")
+def cleanup_keep(item_id: int, body: KeepIn, request: Request):
+    _cleanup_item(item_id)
+    cleanup.keep(item_id, me(request).name, body.note)
+    return {"ok": True}
+
+
+@app.post("/api/settings/cleanup/{item_id}/extend")
+def cleanup_extend(item_id: int, body: ExtendIn):
+    _cleanup_item(item_id)
+    try:
+        cleanup.extend(item_id, body.days)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/settings/cleanup/{item_id}/track")
+def cleanup_track(item_id: int):
+    _cleanup_item(item_id)
+    try:
+        cleanup.track_again(item_id)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/settings/cleanup/{item_id}/delete")
+async def cleanup_delete(item_id: int, request: Request):
+    _cleanup_item(item_id)
+    res = await cleanup.delete(item_id, me(request).name)
+    if not res.get("ok"):
+        raise HTTPException(502, res.get("error") or "It could not be removed.")
+    return res
+
+
+app.include_router(make_router(seerr, directory, need, media, cleanup, arr))
 
 
 # ---------- static dashboard ----------

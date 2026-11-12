@@ -19,6 +19,8 @@
 <link rel="stylesheet" href="light.css">
 <link rel="stylesheet" href="people.css">
 <link rel="stylesheet" href="recent.css">
+<link rel="stylesheet" href="dl.css">
+<link rel="stylesheet" href="cleanup.css">
 <link rel="stylesheet" href="home.css">
 <link rel="stylesheet" href="ui.css">
 <script src="vendor/d3-7.9.0.min.js"></script>
@@ -664,6 +666,7 @@
         <div class="st-pane" id="st-pane-billing" hidden></div>
         <div class="st-pane" id="st-pane-requests" hidden></div>
         <div class="st-pane" id="st-pane-books" hidden></div>
+        <div class="st-pane" id="st-pane-arr" hidden></div>
         <div class="st-pane" id="st-pane-reqlog" hidden></div>
       </section>
     </div>
@@ -841,6 +844,7 @@
 
     <section class="rq" id="requests-page" aria-label="Requests" hidden></section>
     <section class="bk" id="books-page" aria-label="Books and comics" hidden></section>
+    <section class="cu" id="cleanup-page" aria-label="Unwatched cleanup" hidden></section>
     <nav class="sd-tabbar" id="tabbar" aria-label="Sections"></nav>
     <div class="sd-more" id="more-sheet" hidden><div class="sd-more__panel" role="dialog" aria-modal="true" aria-label="More"></div></div>
   </div>
@@ -855,8 +859,10 @@
 <script src="people.js"></script>
 <script src="settings.js"></script>
 <script src="usearch.js"></script>
+<script src="dl.js"></script>
 <script src="recent.js"></script>
 <script src="requests.js"></script>
+<script src="cleanup.js"></script>
 <script src="books.js"></script>
 <script src="home.js"></script>
 </body>

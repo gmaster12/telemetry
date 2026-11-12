@@ -114,7 +114,8 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 );
 """
 
-SECRET_SETTINGS = {"netdata_token", "plex_account_token", "stripe_key", "seerr_key", "media_secret"}
+SECRET_SETTINGS = {"netdata_token", "plex_account_token", "stripe_key", "seerr_key", "media_secret",
+                   "radarr_key", "sonarr_key", "radarr4k_key", "sonarr4k_key"}
 SERVER_FIELDS = ("name", "plex_url", "max_streams", "capacity_mbps", "netdata_node", "netdata_agent_url", "machine_id", "enabled", "owner_plex_id")
 
 
@@ -137,7 +138,12 @@ class Store:
         if "server_id" not in cols:  # plays follow the server, not its name (servers get renamed or re-added)
             self.db.execute("ALTER TABLE plays ADD COLUMN server_id INTEGER")
             self.db.commit()
+        for col, typ in (("parent_key", "TEXT"), ("season", "INTEGER"), ("tmdb_id", "INTEGER")):
+            if col not in cols:  # Unwatched cleanup matches plays to requested titles by these (cleanup.py)
+                self.db.execute(f"ALTER TABLE plays ADD COLUMN {col} {typ}")
+                self.db.commit()
         self.db.execute("CREATE INDEX IF NOT EXISTS plays_server_item ON plays (server_id, rating_key)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS plays_started ON plays (started_at)")
         self.db.commit()
         self.box = box
         self.lock = threading.Lock()
@@ -523,11 +529,12 @@ class Directory:
         with self.lock:
             cur = self.db.execute(
                 """INSERT INTO plays (server, server_id, session_key, user_id, username, rating_key, art, title, subtitle, kind, device, player,
-                   platform, location, method, resolution, started_at, last_seen, progress_pct, duration_min)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   platform, location, method, resolution, started_at, last_seen, progress_pct, duration_min, parent_key, season, tmdb_id)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (row["server"], row.get("server_id"), row["session_key"], row.get("user_id"), row.get("user"), row.get("rating_key"), art, row.get("title"),
                  row.get("subtitle"), row.get("kind"), row.get("device"), row.get("player"), row.get("platform"), row.get("location"),
-                 row.get("method"), row.get("resolution"), now, now, row.get("progress_pct"), row.get("duration_min")),
+                 row.get("method"), row.get("resolution"), now, now, row.get("progress_pct"), row.get("duration_min"),
+                 row.get("parent_key") or None, row.get("season"), row.get("tmdb_id")),
             )
             self.db.commit()
             return int(cur.lastrowid)

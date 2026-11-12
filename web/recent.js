@@ -81,6 +81,8 @@
     if (opts.sub !== false && x.sub) meta.push(x.sub);
     if (opts.time === 'inline') meta.push(timeOf(d));
     if (x.times > 1) meta.push('asked for ' + x.times + ' times');
+    // Unwatched cleanup: on Plex and nobody has started it yet ("9 days left to watch").
+    if (x.clock && ['running', 'due', 'last'].indexOf(x.clock.state) >= 0) meta.push(x.clock.word.toLowerCase());
     var title = x.open
       ? el('a', { class: 'rr-title', href: x.open, text: x.title })
       : el('span', { class: 'rr-title', text: x.title });

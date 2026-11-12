@@ -194,14 +194,14 @@
   const CARD_OF = { servers: 'servers-card', streams: 'streams-card', alerts: 'servers-card', people: 'people-card', bandwidth: 'bandwidth-card', subscription: 'sub-card' };
   function hashFor(r) {
     if (r === 'people') return isAdmin() ? '#/users' : '#/history';
-    if (r === 'requests' || r === 'books') return '#/' + r;
+    if (r === 'requests' || r === 'books' || r === 'cleanup') return '#/' + r;
     return '#/' + (ROUTE_OF[r] ? r : 'home');
   }
-  /** The dashboard place in the address bar, or null when Requests or Books & comics own it. */
+  /** The dashboard place in the address bar, or null when Requests, Books & comics or Unwatched cleanup own it. */
   function dashRoute() {
     const h = location.hash.replace(/^#\/?/, '').split('?')[0];
     if (!h) return 'home';
-    if (/^(requests|books)(\/|$)/.test(h)) return null;
+    if (/^(requests|books|cleanup)(\/|$)/.test(h)) return null;
     return LEGACY[h] || ROUTE_OF[h] || 'home';
   }
   // Scroll to a part of the dashboard (desktop), or open its tab (phone).
@@ -228,11 +228,13 @@
     { route: 'people', nav: () => (isAdmin() ? 'Users' : 'History'), tab: () => (isAdmin() ? 'Users' : 'History'), icon: () => (isAdmin() ? 'users' : 'history'),
       more: () => isAdmin(), navOk: () => isAdmin() || (!!window.dash.me && !!window.dash.me() && can('history')), tabOk: () => isAdmin() || (!!window.dash.me && !!window.dash.me() && can('history')) },
     { route: 'requests', nav: 'Requests', tab: 'Requests', icon: 'film', navOk: () => can('requests'), tabOk: () => can('requests') },
-    { route: 'books', nav: 'Books', tab: 'Books', icon: 'book', navOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()), tabOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) }
+    { route: 'books', nav: 'Books', tab: 'Books', icon: 'book', navOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()), tabOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) },
+    // Unwatched cleanup (cleanup.js): admins only; on a phone it sits under More.
+    { route: 'cleanup', nav: 'Cleanup', tab: 'Cleanup', icon: 'trash', more: true, navOk: () => isAdmin(), tabOk: () => isAdmin() }
   ];
   let navActive = 'home';
-  // Requests and Books & comics are their own pages, shown by their own scripts when the address is theirs.
-  const PAGES = { requests: 1, books: 1 };
+  // Requests, Books & comics and Unwatched cleanup are their own pages, shown by their own scripts when the address is theirs.
+  const PAGES = { requests: 1, books: 1, cleanup: 1 };
   function renderNav() {
     const nav = document.getElementById('nav');
     nav.replaceChildren();

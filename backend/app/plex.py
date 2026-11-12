@@ -51,7 +51,8 @@ class PlexClient:
         return data.get("MediaContainer", {})
 
     async def sessions(self) -> list[dict]:
-        data = await self._get("/status/sessions")
+        # includeGuids: movies then carry tmdb:// ids, which Unwatched cleanup matches plays by (ignored if unsupported).
+        data = await self._get("/status/sessions", {"includeGuids": 1})
         return data.get("MediaContainer", {}).get("Metadata", []) or []
 
     async def metadata(self, rating_key: str) -> dict:
@@ -244,6 +245,22 @@ def _infer_reason(vd: str, ad: str, sub_decision: str, src_res: str, out_res: st
     return "None"
 
 
+def _int_or_none(v) -> int | None:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _tmdb_of(item: dict) -> int | None:
+    """A movie's TMDB id from Plex's Guid list (tmdb://603), when Plex sends one."""
+    for g in item.get("Guid") or []:
+        gid = str((g or {}).get("id") or "")
+        if gid.startswith("tmdb://"):
+            return _int_or_none(gid[7:])
+    return None
+
+
 def normalize_session(server: ServerCfg, item: dict, source: dict | None = None) -> dict:
     """Map one /status/sessions entry to the row shape the dashboard expects."""
     source = source or item
@@ -317,6 +334,11 @@ def normalize_session(server: ServerCfg, item: dict, source: dict | None = None)
         "id": f"{server.name}-{item.get('sessionKey', session.get('id', '?'))}",
         "session_id": session.get("id"),
         "rating_key": str(item.get("ratingKey", "")),
+        # For Unwatched cleanup (cleanup.py): the show an episode belongs to, its season, and a movie's TMDB id when
+        # Plex sends its Guid list. Matching a play to a requested title uses these before the title.
+        "parent_key": str(item.get("grandparentRatingKey") or "") if item_type == "episode" else "",
+        "season": _int_or_none(item.get("parentIndex")) if item_type == "episode" else None,
+        "tmdb_id": _tmdb_of(item) if item_type == "movie" else None,
         "user": (item.get("User") or {}).get("title", "Unknown"),
         "user_id": str((item.get("User") or {}).get("id") or ""),
         "user_thumb": (item.get("User") or {}).get("thumb"),

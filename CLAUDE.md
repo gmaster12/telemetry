@@ -151,7 +151,7 @@ files to add servers. Keep it that way.
   ("Searching"). Seerr only lets owners delete pending requests and only managers retry, so for a
   person's OWN FAILED request the dashboard retries (`POST /request/{id}/retry`) or removes
   (`DELETE /request/{id}?failed=true`) with its own key after `own_failed` checks owner and status.
-  Glenn chose not to connect Radarr and Sonarr, so there is no "last searched" time.
+  Radarr and Sonarr are now connected for download progress (see Unwatched cleanup and download progress below).
 - Request log (Settings, Request log, admins only; `app/request_log.py`, `openLog`, `loadLog`, `paintLog` in `settings.js`): every
   request made through the site is saved in `request_log` when it is made (`make_request` calls `log_request`: who
   (Plex id, name, email, or an admin login), title, year, poster, seasons, 4K, time); canceling or removing a failed one
@@ -243,6 +243,45 @@ files to add servers. Keep it that way.
   decline for people Seerr lets manage requests. Posters come from TMDB
   (`SEERR_IMAGE_BASE` overrides for tests). `tests/mock_seerr.py` is a stand-in
   Seerr for tests and local browser checks.
+
+## Unwatched cleanup and download progress (Glenn's pick B, Nov 2026)
+
+- Radarr & Sonarr (`app/arr.py`, Settings, Radarr & Sonarr, `renderArr` in `settings.js`): slots `radarr`, `sonarr`,
+  `radarr4k`, `sonarr4k` (address plus API key, keys saved encrypted, write-only; 4K falls back to the standard one).
+  "Copy from Seerr" reads Seerr's own `/settings/radarr|sonarr` (`Arr.from_seerr`). Routes under `/api/settings/arr`.
+  v3 API with `X-Api-Key`. Members never see release names, indexers or the download client: `progress_word` turns a
+  queue record into a stage (queued, downloading, paused, importing, problem, retry) and plain words (`PROBLEMS`).
+- Download progress for members: `GET /api/requests/progress?ids=movie:603,tv:1396,movie:603:4k` (`requests` router).
+  Movies: percent, size, speed (from earlier samples), time left, quality ("1080p · WEB"), six steps (`steps_for`:
+  Requested, Approved, Copy found, Downloading, Importing, On Plex) and a problem text with Notify admin
+  (`POST /api/requests/request/{id}/notify-import`, puts it on the admins' Needs you list). Shows: every episode of the
+  requested seasons with counts. `/api/requests/me` says `progress` (Radarr or Sonarr connected). `web/dl.js` (`gsDl`)
+  and `web/dl.css` draw it: the title hero (`heroLive` in `requests.js`, checks every 15 s while on screen; a show's
+  episodes in a panel under the hero, the picked season kept) and My requests rows (`progress` in `everything`, every
+  20 s; the line replaces Seerr's waiting reason, `.has-progress`).
+- Play on Plex is gone from Requests (Glenn's ask): `media_state` no longer sends Plex links. Do not add Play buttons back.
+- Unwatched cleanup (`app/cleanup.py`, table `cleanup_items`): only movie and show requests made with the tick box are
+  tracked (`agreeRemoval` in `RequestIn`; `make_request` answers 422 without it while cleanup is on, then
+  `cleanup.track`). Books, comics and audiobooks are never tracked. The clock starts when the title arrives on Plex (Seerr
+  `mediaAddedAt`, or now; for shows, when the requested seasons arrive), `days` (setting `cleanup_days`, 14) plus extra
+  days. One real play by anyone (120 s or more, or an imported Plex play) of the title or the requested seasons keeps it
+  for good (`plays_of`: TMDB id from Plex Guids (`includeGuids=1`), rating keys, or title and year; errs toward keeping).
+  `plays` gained `parent_key`, `season`, `tmdb_id`.
+- Nightly run (`Cleanup.loop`, every 10 min: `refresh`, then `nightly` once a day at `cleanup_hour` (3) in `cleanup_tz`
+  (America/Chicago; `tzdata` is in requirements)). Modes (`cleanup_mode`): `review` (default: nothing removed, the board
+  marks "Would be removed"), `auto`, `off` (no tick box, nothing tracked). Never removes a title someone is streaming.
+  Removal goes through Radarr (movie with files, no import exclusion) or Sonarr (only the requested seasons: unmonitor and
+  delete their files; the whole series only when nothing else is kept), then Seerr `DELETE /media/{id}` so it can be
+  requested again. A failure saves `error` on the card and keeps it.
+- Admin board: `#/cleanup` (`web/cleanup.js`, `web/cleanup.css`; `PLACES` entry `cleanup`, admins only, under More on
+  phones). Columns Clock running (includes not on Plex yet), Due in 3 days, Kept (watched, or kept by an admin), Deleted
+  (30 days). Mode switch, days and hour, Keep (with a note), +7 days, Delete now (confirm), Track again. Routes under
+  `/api/settings/cleanup` (admin-only like all settings). The Settings home's "needs a look" counts due titles.
+- What members see (`clock_for`, never who asked): `clock` on My requests and Recently requested rows,
+  `GET /api/requests/clocks?ids=` for title pages: a pill ("9 days left to watch", "Last day to watch", "Watched, it
+  stays", "Kept", "Removed, not watched") and a countdown note with segments. The request dialog shows the tick box
+  ("I understand ... will be removed if it is not watched within 14 days"); Request stays disabled until it is ticked.
+- Tests: `tests/test_cleanup.py` with `tests/mock_arr.py` (a stand-in Radarr/Sonarr).
 
 ## Books & comics (the Greystar media site in a frame)
 
@@ -367,7 +406,7 @@ Before loading datasets the shim calls `GET /api/me` (401 sends the browser to
 | Sign in | `POST /api/auth/plex/start`, `GET /api/auth/plex/check/{pin}`, `POST /api/auth/local`, `POST /api/auth/logout` | anyone |
 | Me | `GET /api/me`, `GET /api/me/history?before=` (`history` section), `GET /api/me/subscription` (always, own only) | signed in |
 | Users | `GET /api/users?q=&server=` (username, name or email; returns each person's `servers` and the monitored server names), `GET /api/users/{id}`, `GET /api/users/{id}/history` | admin |
-| Settings | everything under `/api/settings`, including `summary` (the Settings home), `requests/log` (+ `.csv`, `/import`), `billing` (key, `sync`, `unmatched`, `links`), `plex/link`, `plex/accounts/{id}` (unlink), `plex/discover?account=`, `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
+| Settings | everything under `/api/settings`, including `summary` (the Settings home), `arr` (Radarr & Sonarr), `cleanup` (the board), `requests/log` (+ `.csv`, `/import`), `billing` (key, `sync`, `unmatched`, `links`), `plex/link`, `plex/accounts/{id}` (unlink), `plex/discover?account=`, `access`, `users/{id}`, `admins`, `users/sync`, `history/import` | admin |
 
 Sessions are random tokens in an `HttpOnly`, `SameSite=Lax` cookie
 (`gst_session`, 30 days); only their SHA-256 is stored. A Plex sign-in PIN can

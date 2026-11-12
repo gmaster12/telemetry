@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from .arr import ArrError
 from .seerr import MEDIA_STATUS, REQUEST_STATUS, Requests, SeerrError, has
 
 log = logging.getLogger("telemetry.requests")
@@ -58,6 +59,7 @@ class RequestIn(BaseModel):
     profileId: int | None = None
     rootFolder: str | None = None
     languageProfileId: int | None = None
+    agreeRemoval: bool = False  # the "removed if not watched within 14 days" box (Unwatched cleanup)
 
 
 class IssueIn(BaseModel):
@@ -86,7 +88,7 @@ def year(r: dict) -> str:
 def media_state(mi: dict | None) -> dict:
     mi = mi or {}
     return {"status": MEDIA_STATUS.get(mi.get("status"), "unknown"), "status4k": MEDIA_STATUS.get(mi.get("status4k"), "unknown"),
-            "mediaId": mi.get("id"), "plexUrl": mi.get("mediaUrl"), "plexUrl4k": mi.get("mediaUrl4k")}
+            "mediaId": mi.get("id")}  # no Plex links: Glenn removed Play on Plex
 
 
 def card(r: dict) -> dict | None:
@@ -125,7 +127,7 @@ def unify_seerr(x: dict, wait: dict | None) -> dict:
            "title": x.get("title") or "Unknown title", "sub": sub, "poster": x.get("poster"), "created": x.get("created"),
            "sortAt": x.get("created"), "progress": None, "wait": None, "note": None, "seasons": seasons,
            "open": f"#/requests/{'series' if tv else 'movie'}/{x.get('tmdbId')}",
-           "canRetry": bool(x.get("canRetry")), "canRemove": bool(x.get("canRemove"))}
+           "canRetry": bool(x.get("canRetry")), "canRemove": bool(x.get("canRemove")), "is4k": bool(x.get("is4k"))}
     status, media = x.get("status"), (x.get("media") or {}).get("status")
     if status == "declined":
         return {**out, "state": "hidden", "label": "Declined"}
@@ -164,7 +166,7 @@ def public_status(state: str, label: str | None) -> tuple[str, str]:
     return "Searching", "square"
 
 
-def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], media=None) -> APIRouter:
+def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], media=None, cleanup=None, arr=None) -> APIRouter:
     r = APIRouter(prefix="/api/requests")
 
     async def who(request: Request) -> tuple[Any, int | None]:
@@ -294,6 +296,9 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                     "manageIssues": has(perms, "MANAGE_ISSUES"), "recent": has(perms, "RECENT_VIEW"),
                     "viewRequests": has(perms, "REQUEST_VIEW", "MANAGE_REQUESTS")},
             "quota": quota,
+            # Unwatched cleanup: when on, every movie or show request needs the tick box, and titles show days left.
+            "cleanup": {"on": bool(cleanup and cleanup.enabled()), "days": cleanup.days() if cleanup else 14},
+            "progress": bool(arr and arr.configured()),
             "settings": {"title": pub.get("applicationTitle") or "Seerr", "movie4k": bool(pub.get("movie4kEnabled")),
                          "series4k": bool(pub.get("series4kEnabled")), "partial": bool(pub.get("partialRequestsEnabled")),
                          "hideAvailable": bool(pub.get("hideAvailable")), "specials": bool(pub.get("enableSpecialEpisodes")),
@@ -535,6 +540,10 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         p, uid = await who(request)
         u = await run(me_info(uid))
         b = body.model_dump(exclude_none=True)
+        agreed = bool(b.pop("agreeRemoval", False))
+        if cleanup and cleanup.enabled() and not agreed:
+            raise HTTPException(422, f"Tick the box first: a title nobody starts watching within {cleanup.days()} days of "
+                                     "arriving on Plex is removed.")
         # Never on someone else's behalf, never around quotas; advanced choices only if Seerr allows them.
         b.pop("userId", None)
         b.pop("ignoreQuota", None)
@@ -560,6 +569,16 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                             seasons or (b.get("seasons") if isinstance(b.get("seasons"), list) else None), bool(b.get("is4k")), status)
         except Exception:  # noqa: BLE001
             log.exception("Could not add a request to the request log")
+        if cleanup and agreed:
+            try:  # Unwatched cleanup: its clock starts when it arrives on Plex
+                info = await title_info(b["mediaType"], b["mediaId"])
+                seasons = sorted(s.get("seasonNumber") for s in ((res or {}).get("seasons") or []) if s.get("seasonNumber") is not None)
+                cleanup.track(request_id=int(res["id"]), kind=b["mediaType"], tmdb_id=int(b["mediaId"]), is4k=bool(b.get("is4k")),
+                              seasons=seasons or (b.get("seasons") if isinstance(b.get("seasons"), list) else None),
+                              info={"title": info.get("title"), "year": info.get("year"), "poster": info.get("poster")},
+                              plex_id=p.subject if p.kind == "plex" else None, name=p.name)
+            except Exception:  # noqa: BLE001
+                log.exception("Could not start tracking a request for Unwatched cleanup")
         return {"ok": True, "status": status, "id": (res or {}).get("id")}
 
     @r.delete("/request/{request_id}")
@@ -581,6 +600,8 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             return await retry_request(request, request_id)
         if decision == "notify":
             return await notify_admin(request, request_id)
+        if decision == "notify-import":  # defined further down; this route is matched first
+            return await notify_import(request, request_id)
         _, uid = await who(request)
         if decision not in ("approve", "decline"):
             raise HTTPException(404, "No such action.")
@@ -798,8 +819,111 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         used_b = sum(1 for x in taken if x["source"] == "books")
         used_w = sum(1 for x in taken if x["source"] == "seerr" and x.get("watching"))
         more = seerr_more or book_more or watch_more or used_s < len(seerr_items) or used_b < len(book_items) or used_w < len(watch_items)
+        if cleanup:
+            for x in taken:
+                if x.get("source") == "seerr" and x.get("tmdbId"):
+                    x["clock"] = cleanup.clock_for("tv" if x["kind"] == "show" else "movie", int(x["tmdbId"]))
         return {"items": [x for x in taken if x["state"] != "hidden"], "cursor": f"{s_skip + used_s}.{b_skip + used_b}.{w_skip + used_w}",
                 "more": more, "sources": sources}
+
+    # ---------- Unwatched cleanup and download progress (Radarr/Sonarr) ----------
+    def parse_ids(ids: str, cap: int = 30) -> list[tuple[str, int, bool]]:
+        out = []
+        for part in (ids or "").split(",")[:cap]:
+            bits = part.strip().split(":")
+            if len(bits) >= 2 and bits[0] in ("movie", "tv") and bits[1].isdigit():
+                out.append((bits[0], int(bits[1]), len(bits) > 2 and bits[2] == "4k"))
+        return out
+
+    @r.get("/clocks")
+    async def clocks(request: Request, ids: str = ""):
+        """Days left before an unwatched title is removed, for titles on screen (movie:603,tv:1396). Never who asked."""
+        need(request, "requests")
+        if not cleanup:
+            return {"items": {}}
+        return {"items": {f"{k}:{i}": cleanup.clock_for(k, i) for k, i, _ in parse_ids(ids, 60)}}
+
+    def steps_for(q: dict | None, m: dict, prog: dict | None) -> list[dict]:
+        """Requested, Approved, Copy found, Downloading, Importing, On Plex: done, now or next, with times."""
+        st = REQUEST_STATUS.get((q or {}).get("status"), "approved")
+        on_plex = MEDIA_STATUS.get(m.get("status")) == "available"
+        stage = (prog or {}).get("stage")
+        names = [("requested", "Requested"), ("approved", "Approved"), ("found", "Copy found"), ("downloading", "Downloading"),
+                 ("importing", "Importing"), ("onplex", "On Plex")]
+        if on_plex:
+            cur = 6
+        elif st == "pending":
+            cur = 1
+        elif stage in ("importing", "problem", "imported"):
+            cur = 4
+        elif stage in ("downloading", "queued", "paused", "retry"):
+            cur = 3
+        else:
+            cur = 2
+        at = {"requested": (q or {}).get("createdAt"), "approved": (q or {}).get("updatedAt") if st != "pending" else None,
+              "found": (prog or {}).get("added"), "onplex": m.get("mediaAddedAt")}
+        return [{"key": k, "label": label, "state": "done" if i < cur else "now" if i == cur else "next", "at": at.get(k) if i <= cur else None}
+                for i, (k, label) in enumerate(names)]
+
+    @r.get("/progress")
+    async def progress(request: Request, ids: str = ""):
+        """Where requested titles are: Radarr/Sonarr queue and import state in plain words (movie:603, tv:1396, movie:603:4k).
+        Movies get steps and download numbers; shows get every episode of the requested seasons."""
+        _, uid = await who(request)
+        if not (arr and arr.configured()):
+            return {"arr": False, "items": {}}
+        u = await run(me_info(uid))
+        try:
+            every = await svc.all_requests()
+        except SeerrError:
+            every = {}
+        out: dict[str, Any] = {}
+
+        async def one(kind: str, tmdb: int, is4k: bool) -> None:
+            reqs = [q for q in every.values() if (q.get("media") or {}).get("tmdbId") == tmdb
+                    and (q.get("type") or (q.get("media") or {}).get("mediaType")) == kind and bool(q.get("is4k")) == is4k
+                    and REQUEST_STATUS.get(q.get("status")) != "declined"]
+            reqs.sort(key=lambda q: q.get("createdAt") or "")
+            q = reqs[-1] if reqs else None
+            m = (q or {}).get("media") or {}
+            mm = {"status": m.get("status4k" if is4k else "status"), "mediaAddedAt": m.get("mediaAddedAt")}
+            mine = next((x["id"] for x in reversed(reqs) if (x.get("requestedBy") or {}).get("id") == u.get("id")), None)
+            try:
+                if kind == "movie":
+                    prog = await arr.movie_progress(tmdb, is4k)
+                    item = {"kind": "movie", **(prog or {}), "onPlex": MEDIA_STATUS.get(mm["status"]) == "available",
+                            "steps": steps_for(q, mm, prog), "mine": mine}
+                else:
+                    tvdb = m.get("tvdbId")
+                    if not tvdb:
+                        d = await run(svc.get(f"/tv/{tmdb}", ttl=SLOW))
+                        tvdb = ((d or {}).get("externalIds") or {}).get("tvdbId")
+                    seasons = sorted({s.get("seasonNumber") for x in reqs for s in (x.get("seasons") or []) if s.get("seasonNumber")})
+                    show = await arr.show_progress(int(tvdb), seasons, is4k) if tvdb else None
+                    item = {"kind": "tv", "show": show, "onPlex": MEDIA_STATUS.get(mm["status"]) == "available", "mine": mine,
+                            "requestedAt": (reqs[0] if reqs else {}).get("createdAt"), "seasonsAsked": seasons}
+            except ArrError as e:
+                item = {"kind": kind, "error": e.message}
+            out[f"{kind}:{tmdb}" + (":4k" if is4k else "")] = item
+
+        await asyncio.gather(*[one(k, i, f) for k, i, f in parse_ids(ids)])
+        return {"arr": True, "items": out}
+
+    @r.post("/request/{request_id}/notify-import")
+    async def notify_import(request: Request, request_id: int):
+        """A download that could not be added to Plex on its own: put it on the admins' Needs you list."""
+        p, uid = await who(request)
+        u = await run(me_info(uid))
+        q = await run(svc.get(f"/request/{request_id}"))
+        if not isinstance(q, dict) or not q.get("id"):
+            raise HTTPException(404, "No such request.")
+        if (q.get("requestedBy") or {}).get("id") != u.get("id") and not has(u.get("permissions"), "MANAGE_REQUESTS"):
+            raise HTTPException(403, "That is not your request.")
+        f = svc.help.flag(request_id) or {}
+        if f.get("notified_at") and not f.get("handled_at"):
+            return {"ok": True, "already": True}
+        svc.help.mark_notified(request_id, p.subject, await flag_info(q))
+        return {"ok": True}
 
     @r.get("/recent")
     async def recent(request: Request, days: int = RECENT_DAYS):
@@ -841,7 +965,8 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 u = unify_seerr(req_row(q, info, None, False), None)
                 if u["state"] != "hidden":
                     out.append({"kind": u["kind"], "title": u["title"], "sub": u.get("sub"), "poster": u.get("poster"),
-                                "created": u.get("created"), "state": u["state"], "label": u.get("label"), "open": u.get("open")})
+                                "created": u.get("created"), "state": u["state"], "label": u.get("label"), "open": u.get("open"),
+                                "clock": cleanup.clock_for(u["kind"], int(u["tmdbId"])) if cleanup and u.get("tmdbId") else None})
             return out
 
         async def books_part() -> list[dict]:
@@ -874,7 +999,8 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 continue
             word, shape = public_status(x["state"], x.get("label"))
             row = {"kind": x["kind"], "title": x["title"], "sub": x.get("sub"), "poster": x.get("poster"),
-                   "created": x.get("created"), "status": word, "shape": shape, "times": 1, "open": x.get("open")}
+                   "created": x.get("created"), "status": word, "shape": shape, "times": 1, "open": x.get("open"),
+                   "clock": x.get("clock")}
             seen[k] = row
             items.append(row)
         counts = {k: 0 for k in ("movie", "show", "ebook", "audiobook", "comic")}
