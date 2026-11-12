@@ -592,6 +592,14 @@ design system). The dashboard adds its own patterns:
   Hover (pointer devices): the card grows a little (`--vh-grow`) and brightens while a lime border sweeps once around
   it (`::before`, `vh-sweep`) and stays; leaving only fades it (Glenn: no animation on the cards you leave, no line on
   the entrance). A tap presses it in. Reduced motion: none of it. Changing the My month period does not replay it (`render(true)`).
+- Page changes "Cascade in" (Glenn's pick 6 of 8, Nov 12 2026; `web/cascade.js`, `gsCascade.run`): when the page on
+  screen changes (`key()`: `data-page`, the phone tab `data-mtab`, the viewer home's `data-vview`, a Requests section and
+  address), the title and then each visible card float up from 26 px lower at 96% size, 520 ms each, 60 ms apart
+  (`cubic-bezier(.16,1,.3,1)`). It picks blocks on its own (visible children of `#content`, stepping into a block taller
+  than 60% of the screen that holds several parts), skips the top bar, tab bar, sheets and anything already animating
+  (the viewer home's Sweep in, the page-load build), and keeps going for 700 ms for cards that arrive after a fetch. Web
+  Animations on transform and opacity only, `fill: backwards`; nothing for Reduce Motion. Desktop dashboard jumps to a
+  card on the same page do not count. The media site does the same inside its own pages (`src/lib/cascade.ts`).
 - Status is always a word plus a shape, never color alone. No emoji.
 - Light theme (`web/light.css`, Glenn's reference picture): deeper shadows on
   cards, pills, the top bar and stream cards, and light Servers and Server
