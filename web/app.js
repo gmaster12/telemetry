@@ -116,6 +116,8 @@
     headphones: ['M4 15v-3a8 8 0 0 1 16 0v3', 'M4 15h3v6H5a1 1 0 0 1-1-1z', 'M20 15h-3v6h2a1 1 0 0 0 1-1z'],
     pause: ['M8.5 5v14', 'M15.5 5v14'],
     stop: ['M7 7h10v10H7z'],
+    wifi: ['M5 12.5a10 10 0 0 1 14 0', 'M8.5 16a5 5 0 0 1 7 0', 'M12 19.5h.01'],
+    zap: ['M13 2 4 14h7l-1 8 9-12h-7z'],
     dots: ['M4 12a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0Z', 'M10.4 12a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0Z', 'M16.8 12a1.6 1.6 0 1 0 3.2 0 1.6 1.6 0 1 0-3.2 0Z']
   };
   function icon(name, size) {
@@ -699,7 +701,7 @@
     requestAnimationFrame(() => clipPlay(v));
   }
   // Stream card style (Settings, Display): classic (the original) or one of four poster layouts.
-  const CARD_STYLES = ['classic', 'side', 'top', 'banner', 'tiles'];
+  const CARD_STYLES = ['classic', 'side', 'top', 'banner', 'tiles', 'sheet', 'tray', 'glance'];
   let cardStyle = 'classic';
   const progressEl = (r, withText) => {
     const prog = el('div', 'sd-progress');
@@ -732,11 +734,82 @@
     row.append(stateBadge(r), el('span', null, r.method));
     return row;
   }
+  // Info sheet, Full bleed and Night glance (Glenn's picks 3, 4 and 9 of the card redesigns, Nov 13 2026).
+  // A fact with its icon: "1080p", "Direct play", "8.4 Mbps".
+  function factEl(name, text) { const f = el('span', 'sd-fact'); f.title = text; f.append(icon(name, 16), el('span', 'sd-fact__t', text)); return f; }
+  function factsEl(items) {
+    const row = el('div', 'sd-facts');
+    items.forEach((it, i) => { if (i) row.appendChild(el('span', 'sd-facts__div')); row.appendChild(factEl(it[0], it[1])); });
+    return row;
+  }
+  const methodIcon = (r) => (r.method === 'Transcode' ? 'zap' : 'play');
+  const mbpsText = (r) => n1(r.bitrate_mbps);
+  function nameNode(r) { return (window.gsPeople && window.gsPeople.nameButton(r)) || document.createTextNode(r.user); }
+  // A look-only "details" pill: the card itself flips on click, and keyboards use the card's Show playback details button.
+  function ctaEl(text, cls) { const c = el('span', 'sd-cta ' + (cls || '')); c.setAttribute('aria-hidden', 'true'); c.append(document.createTextNode(text), icon('right', 16)); return c; }
+  function rateEl(r, cls) {
+    const b = el('div', 'sd-rate ' + (cls || ''));
+    const v = el('span', 'sd-rate__v', mbpsText(r));
+    v.appendChild(el('small', null, r.bitrate_estimated ? 'Mbps est.' : 'Mbps'));
+    b.append(el('span', 'sd-rate__k', 'Bitrate'), v);
+    return b;
+  }
+  function sheetFront(r, card, art) {
+    const poster = el('div', 'sd-scard__poster'); poster.style.setProperty('--art', art);
+    poster.append(avatar(r.user), stateBadge(r));
+    const body = el('div', 'sd-is__body');
+    const who = el('p', 'sd-is__who');
+    who.append(nameNode(r), el('span', 'sd-is__bar'), el('span', 'sd-is__muted', n0(r.progress_pct) + ' %, ' + n0(r.elapsed_min) + ' min in'));
+    body.append(el('span', 'sd-eyebrow', r.server), withTip(el('h3', 'sd-is__title', r.title), r.title), who);
+    const foot = el('div', 'sd-is__foot');
+    foot.append(rateEl(r), ctaEl('Details'));
+    card.append(poster, body, el('div', 'sd-rule'), factsEl([['auto', r.device], ['film', r.resolution], [methodIcon(r), r.method]]), el('div', 'sd-rule'), foot);
+    attachClip(poster, r);
+  }
+  function trayFront(r, card, art) {
+    card.style.setProperty('--art', art);
+    const top = el('div', 'sd-tr__top');
+    const eb = el('div', 'sd-tr__eyebrow');
+    eb.append(stateBadge(r), el('span', 'sd-eyebrow', r.server));
+    const who = el('p', 'sd-tr__who');
+    who.append(nameNode(r), document.createTextNode(', watching on ' + r.device));
+    const clock = el('p', 'sd-tr__clock');
+    clock.append(icon('clock', 16), document.createTextNode(n0(r.elapsed_min) + ' min in'), el('span', 'sd-is__bar'), document.createTextNode(n0(r.progress_pct) + ' %'));
+    top.append(eb, withTip(el('h3', 'sd-tr__title', r.title), r.title), who, el('span', 'sd-tr__rule'), clock, rateEl(r, 'sd-rate--big'));
+    const tray = el('div', 'sd-tr__tray');
+    tray.append(factsEl([['film', r.resolution], [methodIcon(r), r.method], ['wifi', r.location]]), progressEl(r, false), ctaEl('Playback details', 'sd-cta--wide'));
+    card.append(top, tray);
+    attachClip(card, r);
+  }
+  function glanceFront(r, card, art) {
+    const poster = el('div', 'sd-scard__poster'); poster.style.setProperty('--art', art);
+    poster.appendChild(withTip(el('h3', 'sd-gl__title', r.title), r.title));
+    const panel = el('div', 'sd-gl__panel');
+    const head = el('div', 'sd-gl__head');
+    const who = el('div', 'sd-gl__who');
+    const verb = el('span', 'sd-gl__verb');
+    const tone = STATE_TONE[r.state] || 'neutral';
+    const shape = shapeSvg(tone);
+    if (shape) verb.appendChild(shape);
+    verb.appendChild(document.createTextNode(r.state === 'Playing' ? 'Watching,' : r.state + ','));
+    verb.classList.add('sd-gl__verb--' + tone);
+    const name = el('span', 'sd-gl__name'); name.appendChild(nameNode(r));
+    who.append(verb, name);
+    head.append(who, el('span', 'sd-gl__time', n0(r.elapsed_min) + ' min'));
+    const on = el('p', 'sd-gl__on');
+    on.append(document.createTextNode('On '), el('b', null, r.server), document.createTextNode(', ' + r.device + ', ' + r.resolution));
+    panel.append(head, progressEl(r, false), on, factsEl([[methodIcon(r), r.method], ['activity', mbpsText(r) + ' Mbps'], ['wifi', r.location]]));
+    card.append(poster, panel);
+    attachClip(poster, r);
+  }
   function styledFront(r, style) {
     const go = (e) => { e.stopPropagation(); pickServer(r.server); };
     const card = notchCard('sd-scard sd-scard--' + (style === 'tiles' ? 'tile' : style) + ' sd-face', 'Show all streams on ' + r.server, go);
     const art = 'url(' + artFor(r) + ')';
-    if (style === 'side') {
+    if (style === 'sheet') sheetFront(r, card, art);
+    else if (style === 'tray') trayFront(r, card, art);
+    else if (style === 'glance') glanceFront(r, card, art);
+    else if (style === 'side') {
       const poster = el('div', 'sd-scard__poster'); poster.setAttribute('aria-hidden', 'true'); poster.style.setProperty('--art', art);
       const body = el('div', 'sd-scard__body');
       body.append(whoEl(r), tagsEl(r), statusEl(r), progressEl(r, true));
@@ -1561,7 +1634,7 @@
   const styleOf = () => (CARD_STYLES.includes(dash.params().cardstyle) ? dash.params().cardstyle : 'classic');
   const clipSwitch = document.getElementById('clip-switch');
   let clipShown = null;
-  const STYLE_NAMES = { classic: 'Classic', side: 'Poster beside', top: 'Poster on top', banner: 'Banner', tiles: 'Tiles' };
+  const STYLE_NAMES = { classic: 'Classic', side: 'Poster beside', top: 'Poster on top', banner: 'Banner', tiles: 'Tiles', sheet: 'Info sheet', tray: 'Full bleed', glance: 'Night glance' };
   function syncReset() {
     resetBtn.disabled = Number(sizeInput.value) === 100 && Number(lightInput.value) === ART_DEFAULT && cardStyle === 'classic' && clipMode() === 'on' && clipCount() === 6;
   }
@@ -1615,7 +1688,7 @@
   }
 
   // ---- live preview ----
-  const PV_W = { classic: 330, side: 430, top: 300, banner: 430, tiles: 190 };   // about the width each style gets in the grid
+  const PV_W = { classic: 330, side: 430, top: 300, banner: 430, tiles: 190, sheet: 320, tray: 310, glance: 310 };   // about the width each style gets in the grid
   const PV_SAMPLE = { id: 'preview-sample', user: 'mara_k', title: 'Night Harbor', kind: 'Episode', device: 'Living room TV', platform: 'tvOS',
     resolution: '1080p', method: 'Direct play', bitrate_mbps: 8.4, server: 'Atlas', state: 'Playing', progress_pct: 42, elapsed_min: 18,
     location: 'WAN', player: 'Plex for Apple TV', source_video: 'H.264 1080p', stream_video: 'H.264 1080p', video_decision: 'Direct play',

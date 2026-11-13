@@ -479,6 +479,87 @@
   .sd-scard--tile .sd-scard__title { font-size: 12px; line-height: 16px; color: #e4e4e4; }
   .sd-scard--tile .sd-prog { display: block; width: 100%; height: 4px; margin: 0; background: rgba(255, 255, 255, 0.25); }
   .sd-scard--tile .sd-scard__name, .sd-scard--tile .sd-scard__title, .sd-scard--tile .sd-scard__meta { text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6); }
+  /* E. Info sheet, F. Full bleed with a tray, G. Night glance (Glenn's picks 3, 4 and 9 of the card redesigns, Nov 13 2026) */
+  .sd-eyebrow { font-size: 11px; line-height: 14px; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; }
+  .sd-facts { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; font-size: 13px; line-height: 18px; }
+  .sd-fact { display: inline-flex; align-items: center; gap: 6px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sd-fact svg { flex: none; }
+  .sd-fact__t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .sd-facts__div { flex: none; width: 1px; height: 16px; background: var(--hairline); }
+  .sd-rule { height: 1px; margin: 0 8px; background: var(--hairline); }
+  .sd-rate { display: flex; flex-direction: column; min-width: 0; }
+  .sd-rate__k { font-size: 13px; line-height: 18px; color: var(--ink-muted); }
+  .sd-rate__v { font-size: 30px; line-height: 34px; font-weight: 300; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .sd-rate__v small { margin-left: 4px; font-size: 13px; letter-spacing: 0; color: var(--ink-muted); }
+  .sd-cta { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: none; height: 44px; padding: 0 18px; border-radius: var(--radius-pill); background: var(--ink); color: var(--surface-raised); font-size: 14px; font-weight: 500; text-shadow: none; }
+  .sd-flip__inner:hover .sd-cta { transform: translateX(2px); }
+  .sd-cta svg { transition: transform 0.2s ease; }
+  .sd-flip__inner:hover .sd-cta svg { transform: translateX(3px); }
+  .sd-is__bar { flex: none; display: inline-block; width: 1px; height: 14px; background: currentColor; opacity: 0.3; vertical-align: -2px; }
+  /* E. Info sheet: a raised card with the poster set in, the details split by thin rules */
+  .sd-scard--sheet { min-height: 0; padding: 12px; gap: 12px; border-radius: 30px; background: var(--surface-raised); color: var(--ink); --notch-w: 72px; --notch-h: 72px; }
+  .sd-scard--sheet .sd-scard__poster { position: relative; flex: none; height: 188px; padding: 12px; box-sizing: border-box; border-radius: 22px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start;
+    background: var(--art) center 30% / cover no-repeat, #1a1a1e; }
+  .sd-scard--sheet .sd-avatar { width: 40px; height: 40px; font-size: 16px; box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.4); }
+  .sd-scard--sheet .gs-badge--neutral { background: rgba(20, 20, 22, 0.72); color: #f6f6f4; }
+  .sd-is__body { display: flex; flex-direction: column; gap: 6px; padding: 2px 8px 0; min-width: 0; }
+  .sd-is__body .sd-eyebrow { color: var(--ink-muted); }
+  .sd-is__title { font-size: 26px; line-height: 32px; font-weight: 400; letter-spacing: -0.01em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .sd-is__who { display: flex; align-items: center; gap: 10px; min-width: 0; font-size: 14px; line-height: 20px; }
+  .sd-is__who > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .sd-is__muted { color: var(--ink-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .sd-scard--sheet .sd-facts { padding: 0 8px; }
+  .sd-is__foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding: 0 8px 6px; }
+  /* F. Full bleed: the poster fills the card, a tray at the bottom holds the facts */
+  .sd-scard--tray { min-height: 0; padding: 0; gap: 0; justify-content: space-between; border-radius: 32px; color: #f6f6f4; --notch-w: 80px; --notch-h: 80px;
+    background: linear-gradient(180deg, rgba(8, 8, 10, 0.78) 0%, rgba(8, 8, 10, 0.34) 52%, rgba(8, 8, 10, 0.45) 100%), var(--art) center 30% / cover no-repeat, #1a1a1e;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45); }
+  .sd-tr__top { display: flex; flex-direction: column; gap: 6px; padding: 22px 22px 18px; min-width: 0; }
+  .sd-tr__eyebrow { display: flex; align-items: center; gap: 10px; padding-right: 52px; }
+  .sd-tr__eyebrow .gs-badge { text-shadow: none; }
+  .sd-tr__eyebrow .gs-badge--neutral { background: rgba(255, 255, 255, 0.18); color: #f6f6f4; }
+  .sd-tr__eyebrow .sd-eyebrow { color: rgba(246, 246, 244, 0.85); }
+  .sd-tr__title { margin-top: 4px; font-size: 36px; line-height: 40px; font-weight: 400; letter-spacing: -0.03em; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .sd-tr__who { font-size: 14px; line-height: 20px; color: rgba(246, 246, 244, 0.88); overflow-wrap: anywhere; }
+  .sd-tr__rule { display: block; width: 44px; height: 1px; margin: 10px 0 6px; background: rgba(246, 246, 244, 0.4); }
+  .sd-tr__clock { display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; font-variant-numeric: tabular-nums; }
+  .sd-rate--big { margin-top: 8px; }
+  .sd-rate--big .sd-rate__k { color: rgba(246, 246, 244, 0.8); }
+  .sd-rate--big .sd-rate__v { font-size: 42px; line-height: 46px; letter-spacing: -0.03em; }
+  .sd-rate--big .sd-rate__v small { color: rgba(246, 246, 244, 0.8); font-size: 15px; }
+  .sd-tr__tray { display: flex; flex-direction: column; gap: 12px; margin: 10px; padding: 14px; border-radius: 22px; background: var(--surface-raised); color: var(--ink); text-shadow: none; }
+  .sd-tr__tray .sd-facts { justify-content: space-around; }
+  .sd-tr__tray .sd-progress { gap: 0; }
+  .sd-tr__tray .sd-prog { height: 4px; background: var(--surface-sunken); }
+  .sd-tr__tray .sd-prog i { background: var(--ink); }
+  .sd-cta--wide { width: 100%; height: 48px; border-radius: 16px; box-sizing: border-box; }
+  /* G. Night glance: always dark, a lifted poster over a black panel, orange progress */
+  .sd-scard--glance { min-height: 0; padding: 10px; gap: 14px; border-radius: 36px; background: #232325; color: #f6f6f4; --notch-w: 72px; --notch-h: 72px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+  .sd-scard--glance .sd-scard__poster { position: relative; flex: none; height: 214px; padding: 18px 20px; box-sizing: border-box; border-radius: 28px; display: flex; align-items: flex-end;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0) 45%, rgba(0, 0, 0, 0.65) 100%), var(--art) center 30% / cover no-repeat, #1a1a1e; box-shadow: 0 14px 26px rgba(0, 0, 0, 0.5); }
+  .sd-gl__title { font-size: 28px; line-height: 32px; font-weight: 300; letter-spacing: -0.02em; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+  .sd-gl__panel { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px 14px; border-radius: 26px; background: #111113; }
+  .sd-gl__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .sd-gl__who { display: flex; flex-direction: column; min-width: 0; }
+  .sd-gl__verb { display: inline-flex; align-items: center; gap: 6px; font-size: 16px; line-height: 20px; font-weight: 600; }
+  .sd-gl__verb--success .gs-badge__shape { color: var(--lime); }
+  .sd-gl__verb--warning .gs-badge__shape { color: var(--amber); }
+  .sd-gl__verb--neutral .gs-badge__shape { color: #aaa9b4; }
+  .sd-gl__name { font-size: 22px; line-height: 28px; font-weight: 300; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sd-gl__time { flex: none; font-family: var(--font-mono); font-size: 12px; line-height: 20px; color: #aaa9b4; font-variant-numeric: tabular-nums; }
+  .sd-gl__panel .sd-progress { width: 72px; }
+  .sd-gl__panel .sd-prog { height: 5px; background: #55545e; }
+  .sd-gl__panel .sd-prog i { background: var(--ember); }
+  .sd-gl__on { font-size: 13px; line-height: 18px; color: #aaa9b4; overflow-wrap: anywhere; }
+  .sd-gl__on b { font-weight: 500; color: #f6f6f4; }
+  .sd-gl__panel .sd-facts { padding-top: 10px; border-top: 1px solid rgba(255, 255, 255, 0.08); font-size: 12px; color: #c9c8d0; }
+  .sd-gl__panel .sd-facts__div { background: rgba(255, 255, 255, 0.12); }
+  .sd-scard--sheet .sd-go, .sd-scard--glance .sd-go, .sd-back--sheet .sd-go, .sd-back--glance .sd-go { top: 6px; right: 6px; width: 40px; height: 40px; }
+  .sd-scard--tray .sd-go, .sd-back--tray .sd-go { top: 6px; right: 6px; width: 44px; height: 44px; }
+  .sd-back--sheet, .sd-back--glance { --notch-w: 72px; --notch-h: 72px; border-radius: 30px; }
+  .sd-back--glance { border-radius: 36px; }
+  .sd-back--tray { --notch-w: 80px; --notch-h: 80px; border-radius: 32px; }
+  .sd-carousel .sd-scard.sd-scard--sheet, .sd-carousel .sd-scard.sd-scard--tray, .sd-carousel .sd-scard.sd-scard--glance { min-height: 0; }
   /* Moving clips (Settings, Display): a looping silent clip under the card's shade and text */
   .has-clip { position: relative; isolation: isolate; }
   .sd-clip { position: absolute; inset: 0; z-index: -1; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; opacity: 0; transition: opacity 0.6s ease; pointer-events: none; }
@@ -487,6 +568,8 @@
   .sd-scard--art > .sd-clip__shade { background: linear-gradient(180deg, rgba(8, 8, 10, calc(0.5 * var(--s))) 0%, rgba(8, 8, 10, calc(0.66 * var(--s))) 45%, rgba(8, 8, 10, max(0.6, calc(0.9 * var(--s)))) 100%); }
   .sd-scard--top .sd-scard__poster > .sd-clip__shade { background: linear-gradient(180deg, rgba(8, 8, 10, 0.28) 0%, rgba(8, 8, 10, 0) 38%, rgba(8, 8, 10, 0) 70%, rgba(20, 20, 22, 0.85) 100%); }
   .sd-scard--tile > .sd-clip__shade { background: linear-gradient(180deg, rgba(8, 8, 10, 0) 45%, rgba(8, 8, 10, 0.86) 100%); }
+  .sd-scard--tray > .sd-clip__shade { background: linear-gradient(180deg, rgba(8, 8, 10, 0.78) 0%, rgba(8, 8, 10, 0.34) 52%, rgba(8, 8, 10, 0.45) 100%); }
+  .sd-scard--glance .sd-scard__poster > .sd-clip__shade { background: linear-gradient(180deg, rgba(0, 0, 0, 0) 45%, rgba(0, 0, 0, 0.65) 100%); }
   .sd-scard--banner > .sd-clip { left: auto; width: 64%; border-radius: 0 30px 30px 0; -webkit-mask-image: linear-gradient(90deg, transparent, #000 45%); mask-image: linear-gradient(90deg, transparent, #000 45%); }
   .sd-flip__inner.is-flipped .sd-clip { visibility: hidden; }
   @media (prefers-reduced-motion: reduce) { .sd-clip { display: none; } }
@@ -623,6 +706,9 @@
                 <label class="st-thumb"><input type="radio" name="cstyle" value="top"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="22" y="4" width="52" height="64" rx="8" fill="#e4e4e4"/><rect x="22" y="4" width="52" height="38" rx="8" fill="#3f6d8c"/><rect x="28" y="48" width="34" height="5" rx="2" fill="#0b0b0d"/><rect x="28" y="57" width="22" height="4" rx="2" fill="#8a8a8f"/></svg><span>Poster on top</span></label>
                 <label class="st-thumb"><input type="radio" name="cstyle" value="banner"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="4" y="18" width="88" height="36" rx="8" fill="#e4e4e4"/><rect x="56" y="18" width="36" height="36" rx="8" fill="#3f6d8c"/><rect x="10" y="27" width="36" height="5" rx="2" fill="#0b0b0d"/><rect x="10" y="36" width="24" height="4" rx="2" fill="#8a8a8f"/></svg><span>Banner</span></label>
                 <label class="st-thumb"><input type="radio" name="cstyle" value="tiles"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="10" y="8" width="22" height="33" rx="4" fill="#3f6d8c"/><rect x="37" y="8" width="22" height="33" rx="4" fill="#6b4f7a"/><rect x="64" y="8" width="22" height="33" rx="4" fill="#4f7a5a"/><rect x="10" y="44" width="22" height="20" rx="4" fill="#7a6a4f"/><rect x="37" y="44" width="22" height="20" rx="4" fill="#3f6d8c"/></svg><span>Tiles</span></label>
+                <label class="st-thumb"><input type="radio" name="cstyle" value="sheet"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="24" y="2" width="48" height="68" rx="8" fill="#ffffff"/><rect x="28" y="6" width="40" height="26" rx="5" fill="#3f6d8c"/><rect x="30" y="37" width="26" height="4" rx="2" fill="#0b0b0d"/><rect x="30" y="44" width="18" height="3" rx="1.5" fill="#8a8a8f"/><rect x="30" y="51" width="36" height="1" fill="#cfcfc6"/><rect x="30" y="58" width="12" height="6" rx="2" fill="#8a8a8f"/><rect x="52" y="57" width="14" height="8" rx="4" fill="#0b0b0d"/></svg><span>Info sheet</span></label>
+                <label class="st-thumb"><input type="radio" name="cstyle" value="tray"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="24" y="2" width="48" height="68" rx="9" fill="#3f6d8c"/><rect x="29" y="9" width="24" height="5" rx="2" fill="#fff"/><rect x="29" y="17" width="16" height="3" rx="1.5" fill="#d4d4d6"/><rect x="29" y="26" width="18" height="6" rx="2" fill="#fff"/><rect x="27" y="46" width="42" height="21" rx="6" fill="#ffffff"/><rect x="31" y="50" width="34" height="2" rx="1" fill="#8a8a8f"/><rect x="31" y="57" width="34" height="7" rx="3" fill="#0b0b0d"/></svg><span>Full bleed</span></label>
+                <label class="st-thumb"><input type="radio" name="cstyle" value="glance"><svg viewBox="0 0 96 72" aria-hidden="true"><rect x="24" y="2" width="48" height="68" rx="10" fill="#232325"/><rect x="27" y="5" width="42" height="30" rx="8" fill="#6b4f7a"/><rect x="27" y="39" width="42" height="28" rx="7" fill="#111113"/><rect x="31" y="43" width="16" height="3" rx="1.5" fill="#fff"/><rect x="31" y="49" width="20" height="4" rx="2" fill="#d4d4d6"/><rect x="31" y="56" width="10" height="2" rx="1" fill="#ff7a1f"/><rect x="31" y="61" width="34" height="2" rx="1" fill="#55545e"/></svg><span>Night glance</span></label>
               </div>
             </fieldset>
             <div class="sd-field">

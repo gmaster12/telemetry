@@ -538,7 +538,17 @@ design system). The dashboard adds its own patterns:
 - Stream card style (`cardstyle`, saved per browser): `classic` (default, the
   original dimmed-poster card), `side` (light card, poster beside the details),
   `top` (full poster on top, details below), `banner` (wide, poster bright at
-  the right), `tiles` (compact 2:3 poster tiles). `streamFront` builds Classic,
+  the right), `tiles` (compact 2:3 poster tiles), and Glenn's picks 3, 4 and 9 of the Nov 13 2026
+  card redesigns: `sheet` "Info sheet" (raised card, poster set in with the avatar and state, server
+  eyebrow, title, name and progress, a row of device/quality/method facts between thin rules, bitrate
+  and a Details pill), `tray` "Full bleed" (poster fills the card under a shade, title, name, time and a
+  big bitrate on it, a raised tray at the bottom with quality/method/LAN-WAN, progress and a Playback
+  details pill), `glance` "Night glance" (always dark: lifted poster with the title, a black panel with
+  "Watching," and the name (state word plus shape), minutes, an orange progress line, "On server, device,
+  quality" and method/Mbps/location facts). The Details pills are look-only (`ctaEl`, `aria-hidden`): the
+  card flips on click and keyboards use `.sd-flipbtn`. `sheetFront`, `trayFront`, `glanceFront` in
+  `app.js`, styles after Tiles in `index.html` (`.sd-is__*`, `.sd-tr__*`, `.sd-gl__*`, shared `.sd-facts`,
+  `.sd-rate`, `.sd-cta`). `streamFront` builds Classic,
   `styledFront` the others; `.gs-app[data-cstyle]` sets the grid. In the new
   styles the flip side (`.sd-back--fit`) keeps the front's size and scrolls.
   Rows and the table are the same in every style. Viewers only get Display (everyone gets the gear: Appearance and Home
@@ -607,7 +617,8 @@ design system). The dashboard adds its own patterns:
   Cards and carousel only (not rows or the table). Off for reduced motion and for
   browsers asking to save data. Placement per style: Classic over the poster with
   the same shade, Poster beside and Poster on top in the poster area, Banner on
-  the right with a fade, Tiles full tile with the bottom shade.
+  the right with a fade, Tiles full tile with the bottom shade, Info sheet and Night glance in the poster, Full bleed
+  over the whole card under the same shade.
 - The Requests search pill pulses a slow lime ring (`rq-pulse-pill`, 2.8 s, end of `requests.css`; Glenn's ask):
   not while typing, not for reduced motion. The Requests nav button and phone tab show a small lime dot instead
   (`ui.css`; the ring read as a second selected item).

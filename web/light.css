@@ -24,6 +24,8 @@
 .gs-app[data-look="light"] .sd-flip .sd-scard--side, .gs-app[data-look="light"] .sd-flip .sd-scard--banner, .gs-app[data-look="light"] .sd-flip .sd-back--side, .gs-app[data-look="light"] .sd-flip .sd-back--banner { --go-c: 26px; --go-r: 20px; }
 .gs-app[data-look="light"] .sd-flip .sd-scard--top, .gs-app[data-look="light"] .sd-flip .sd-back--top { --go-c: 30px; --go-r: 22px; }
 .gs-app[data-look="light"] .sd-flip .sd-scard--tile, .gs-app[data-look="light"] .sd-flip .sd-back--tile { --go-c: 20px; --go-r: 16px; }
+.gs-app[data-look="light"] .sd-flip .sd-scard--sheet, .gs-app[data-look="light"] .sd-flip .sd-scard--glance, .gs-app[data-look="light"] .sd-flip .sd-back--sheet, .gs-app[data-look="light"] .sd-flip .sd-back--glance { --go-c: 26px; --go-r: 20px; }
+.gs-app[data-look="light"] .sd-flip .sd-scard--tray, .gs-app[data-look="light"] .sd-flip .sd-back--tray { --go-c: 28px; --go-r: 22px; }
 
 /* Everything round or pill-shaped gets a soft lift. */
 .gs-app[data-look="light"] .sd-pill, .gs-app[data-look="light"] .sd-look, .gs-app[data-look="light"] .sd-gear, .gs-app[data-look="light"] .sd-user, .gs-app[data-look="light"] .sd-navbtn, .gs-app[data-look="light"] .sd-chips .gs-chip, .gs-app[data-look="light"] .rq-tab, .gs-app[data-look="light"] .rq-search {
@@ -85,6 +87,8 @@
 .gs-app:not([data-look="dark"]) .sd-flip .sd-scard--side, .gs-app:not([data-look="dark"]) .sd-flip .sd-scard--banner, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--side, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--banner { --go-c: 26px; --go-r: 20px; }
 .gs-app:not([data-look="dark"]) .sd-flip .sd-scard--top, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--top { --go-c: 30px; --go-r: 22px; }
 .gs-app:not([data-look="dark"]) .sd-flip .sd-scard--tile, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--tile { --go-c: 20px; --go-r: 16px; }
+.gs-app:not([data-look="dark"]) .sd-flip .sd-scard--sheet, .gs-app:not([data-look="dark"]) .sd-flip .sd-scard--glance, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--sheet, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--glance { --go-c: 26px; --go-r: 20px; }
+.gs-app:not([data-look="dark"]) .sd-flip .sd-scard--tray, .gs-app:not([data-look="dark"]) .sd-flip .sd-back--tray { --go-c: 28px; --go-r: 22px; }
 
 /* Everything round or pill-shaped gets a soft lift. */
 .gs-app:not([data-look="dark"]) .sd-pill, .gs-app:not([data-look="dark"]) .sd-look, .gs-app:not([data-look="dark"]) .sd-gear, .gs-app:not([data-look="dark"]) .sd-user, .gs-app:not([data-look="dark"]) .sd-navbtn, .gs-app:not([data-look="dark"]) .sd-chips .gs-chip, .gs-app:not([data-look="dark"]) .rq-tab, .gs-app:not([data-look="dark"]) .rq-search {

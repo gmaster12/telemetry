@@ -321,8 +321,11 @@
 
   function fillLookChips(box, look) {
     var chip = function (label, value) { return el('span', { class: 'st-chip' }, label ? label + ' ' : '', el('b', { text: value })); };
-    box.replaceChildren(chip('', look.styleName), chip('Size', look.size + '%'), look.style === 'classic' ? chip('Art', look.light + '%') : null,
-      chip('Clips', look.clips === 'on' ? 'on' : 'off'));
+    // Art brightness only applies to Classic; leave its chip out otherwise (a null here printed "null").
+    var chips = [chip('', look.styleName), chip('Size', look.size + '%')];
+    if (look.style === 'classic') chips.push(chip('Art', look.light + '%'));
+    chips.push(chip('Clips', look.clips === 'on' ? 'on' : 'off'));
+    box.replaceChildren.apply(box, chips);
   }
   window.addEventListener('gs:look', function (e) {
     var chips = document.getElementById('st-look-chips');

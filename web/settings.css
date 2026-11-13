@@ -109,6 +109,7 @@
 .st-styles legend { float: left; width: 100%; padding: 0; font-size: 15px; font-weight: 600; }
 .st-styles .sd-field__hint { clear: both; margin-top: 4px !important; }
 .st-thumbs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+#card-style .st-thumbs { grid-template-columns: repeat(4, minmax(0, 1fr)); }  /* eight styles: two rows of four */
 .st-thumb { position: relative; display: flex; flex-direction: column; align-items: center; gap: 7px; font-size: 12px; line-height: 15px; text-align: center; cursor: pointer; }
 .st-thumb input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .st-thumb svg { display: block; width: 100%; height: auto; border-radius: 12px; background: var(--surface-raised); box-shadow: inset 0 0 0 1.5px var(--hairline); }
@@ -151,7 +152,7 @@
 }
 @media (max-width: 560px) {
   .st-homegrid { grid-template-columns: minmax(0, 1fr); grid-auto-rows: auto; }
-  .st-thumbs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .st-thumbs, #card-style .st-thumbs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .sd-settings.has-back .st-lead { padding-left: 0; }
   .sd-settings__head { flex-wrap: wrap; }
   #card-size-reset { order: 10; height: 34px; margin-left: 52px; }
