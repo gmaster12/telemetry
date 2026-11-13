@@ -57,6 +57,7 @@ class Poller:
         self.billing_synced_at: float = self._saved_time("billing_synced_at")
         self.billing_error: str | None = None
         self.billing_counts: dict = {}
+        self.globe = None  # app/globe.py: stream starts by city for the admin globe card (set by main)
         self._load_owners()
         self.directory.close_stale_plays()
 
@@ -190,6 +191,7 @@ class Poller:
             log.exception("history tracking failed")
         for r in rows:
             r.pop("_art_path", None)
+            r.pop("_ip", None)  # used for the globe's city lookup only; never kept or sent
         self.streams = rows
         self.last_poll = time.time()
 
@@ -209,12 +211,18 @@ class Poller:
                 self.directory.saw_user(r["user_id"], r.get("user"), r.get("user_thumb"))
                 self.directory.add_user_server(r["user_id"], r["server"])
             act = self.active_plays.get(key)
+            fresh = act is None  # a session we have not seen (the next episode in the same session is not a new stream)
             if act and act["rating_key"] != r.get("rating_key"):
                 self.directory.stop_play(act["id"])
                 act = None
             if act is None:
                 existing = self.directory.open_play(r["server"], r["session_key"], r.get("rating_key", ""))
                 pid = existing["id"] if existing else self.directory.start_play(r, r.get("_art_path"), now)
+                if fresh and existing is None and self.globe is not None:
+                    try:
+                        self.globe.started(r, now)
+                    except Exception:
+                        log.exception("globe lookup failed")
                 act = {"id": pid, "rating_key": r.get("rating_key"), "last": now}
                 self.active_plays[key] = act
                 add = 0

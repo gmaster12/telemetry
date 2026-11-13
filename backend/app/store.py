@@ -518,6 +518,11 @@ class Directory:
         return [dict(r) for r in cur]
 
     # ---------- playback tracking ----------
+    def starts_since(self, ts: int) -> int:
+        """Live streams that started at or after ts (the globe card's "started in the last hour")."""
+        r = self.db.execute("SELECT COUNT(*) FROM plays WHERE source = 'live' AND started_at >= ?", (int(ts),)).fetchone()
+        return int(r[0]) if r else 0
+
     def open_play(self, server: str, session_key: str, rating_key: str) -> dict | None:
         r = self.db.execute(
             "SELECT * FROM plays WHERE server = ? AND session_key = ? AND rating_key = ? AND stopped_at IS NULL ORDER BY started_at DESC LIMIT 1",

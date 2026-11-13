@@ -24,6 +24,7 @@
 <link rel="stylesheet" href="home.css">
 <link rel="stylesheet" href="ui.css">
 <link rel="stylesheet" href="downloads.css">
+<link rel="stylesheet" href="globe.css">
 <script src="vendor/d3-7.9.0.min.js"></script>
 <script src="dash-shim.js"></script>
 <script src="ui.js"></script>
@@ -669,6 +670,7 @@
         <div class="st-pane" id="st-pane-books" hidden></div>
         <div class="st-pane" id="st-pane-arr" hidden></div>
         <div class="st-pane" id="st-pane-reqlog" hidden></div>
+        <div class="st-pane" id="st-pane-cards" hidden></div>
       </section>
     </div>
     <div class="sd-top">
@@ -791,6 +793,17 @@
           <div class="sd-heat__legend" aria-hidden="true">Fewer <i style="opacity:0.12"></i><i style="opacity:0.4"></i><i style="opacity:0.7"></i><i></i> More</div>
         </div>
       </section>
+      <section class="sd-card sd-globe" id="globe-card" aria-labelledby="gl-title">
+        <span class="sd-notch" aria-hidden="true"></span><button type="button" class="sd-go" data-go="streams" aria-label="Go to live streams"></button>
+        <div class="sd-card__head">
+          <h2 class="sd-card-title" id="gl-title">Live streams globe</h2>
+          <p class="sd-card-note">New streams by city, approximate</p>
+        </div>
+        <p class="sd-globe__note" id="globe-note" hidden></p>
+        <div class="sd-globe__stage"><canvas role="img" aria-label="A globe that turns slowly and swings round to each city where a new stream starts"></canvas></div>
+        <p class="sd-globe__cap"><i aria-hidden="true"></i><span><b id="globe-n">&mdash;</b> streams started in the last hour</span><a class="sd-globe__attr" href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a></p>
+        <p class="sd-sr" id="globe-latest"></p>
+      </section>
       <section class="sd-card sd-srvcard" id="capacity-card" aria-labelledby="cap-title">
         <div class="sd-srvtitle">
           <h2 class="sd-card-title" id="cap-title">Server capacity</h2>
@@ -869,5 +882,9 @@
 <script src="books.js"></script>
 <script src="home.js"></script>
 <script src="cascade.js"></script>
+<script src="globe-data.js"></script>
+<script src="globe.js"></script>
+<script src="cards.js"></script>
+<script src="globe-card.js"></script>
 </body>
 </html>

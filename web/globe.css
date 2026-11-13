@@ -1,0 +1,59 @@
+/* Live streams globe card (web/globe-card.js, web/globe.js), the thin Server capacity block under it, and hidden cards
+   (Settings, Dashboard Cards; web/cards.js). */
+
+/* ---------- the row: When people watch | Live streams globe, then Server capacity across the whole width ---------- */
+@media (min-width: 1000px) {
+  .gs-app .sd-insights { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .gs-app.gs-insights-single .sd-insights { grid-template-columns: minmax(0, 1fr); }
+}
+.gs-app .sd-insights > #capacity-card { grid-column: 1 / -1; }
+
+/* ---------- the globe card: same size, padding, corner cut and header as When people watch ---------- */
+.sd-globe { display: flex; flex-direction: column; min-height: 340px; overflow: hidden; container-type: inline-size; }
+.sd-globe > .sd-card__head, .sd-globe > .sd-globe__cap, .sd-globe > .sd-globe__note { position: relative; z-index: 2; }
+.sd-globe__stage { position: absolute; z-index: 1; top: 12px; right: 12px; bottom: 44px; left: 12px; }
+.sd-globe__stage canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; --gl-cx: 0.6; }
+@container (max-width: 640px) { .sd-globe__stage canvas { --gl-cx: 0.64; } }
+.gs-app .sd-globe__cap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: auto; font-size: 13px; line-height: 18px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
+.sd-globe__cap b { font-weight: 600; color: var(--ink); }
+.sd-globe__cap > i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--volt); box-shadow: 0 0 0 1.5px var(--ink); }
+.sd-globe__attr { margin-left: auto; font-size: 11px; color: var(--ink-muted); text-decoration: none; }
+.sd-globe__attr:hover { text-decoration: underline; }
+.sd-globe__attr:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: 4px; }
+.gs-app .sd-globe__note { max-width: 46%; margin: 8px 0 0; font-size: 12px; line-height: 16px; color: var(--ink-muted); }
+.gs-viewer #globe-card { display: none !important; }
+
+/* ---------- Server capacity as a thin block (desktops and tablets) ---------- */
+@media (min-width: 761px) and (min-height: 501px), (min-width: 761px) and (pointer: fine), (min-width: 761px) and (pointer: none) {
+  .gs-app #capacity-card { display: grid; grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto; align-items: center; gap: 12px 28px; padding: 18px 28px; }
+  .gs-app #capacity-card > .sd-srvtitle { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .gs-app #capacity-card .sd-srvtitle .sd-card-title { font-size: 28px; line-height: 34px; }
+  .gs-app #capacity-card .sd-rings { grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); margin-top: 0; gap: 6px; }
+  .gs-app #capacity-card .sd-ring svg { width: 52px; height: 52px; }
+  .gs-app #capacity-card .sd-capfoot { flex-wrap: nowrap; margin-top: 0; }
+  .gs-app #capacity-card .sd-capwarn { flex: 0 1 auto; white-space: nowrap; }
+  .gs-app #capacity-card .sd-moves { grid-column: 1 / -1; margin-top: 0; }
+}
+@media (min-width: 761px) and (max-width: 1180px) {
+  .gs-app #capacity-card { grid-template-columns: minmax(0, 1fr) auto; }
+  .gs-app #capacity-card .sd-rings { grid-column: 1 / -1; grid-row: 2; }
+}
+
+/* ---------- phones: the globe sits under When people watch on Home, below its own header ---------- */
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+  .gs-app:not([data-mtab="home"]) #globe-card { display: none; }
+  .sd-globe { min-height: 0; }
+  .sd-globe__stage { position: relative; top: auto; right: auto; bottom: auto; left: auto; height: 250px; margin: 8px -12px 4px; }
+  .sd-globe__stage canvas { --gl-cx: 0.5; }
+  .gs-app .sd-globe__cap { margin-top: 8px; }
+  .gs-app .sd-globe__note { max-width: none; }
+}
+
+/* ---------- Settings, Dashboard Cards: hidden cards (admins only; saved per admin account) ---------- */
+.gs-admin.gs-hide-summary #summary, .gs-admin.gs-hide-bandwidth #bandwidth-card, .gs-admin.gs-hide-servers #servers-card,
+.gs-admin.gs-hide-viewing #viewing-card, .gs-admin.gs-hide-globe #globe-card, .gs-admin.gs-hide-capacity #capacity-card,
+.gs-admin.gs-hide-streams #streams-card, .gs-admin.gs-hide-users #people-card, .gs-admin.gs-hide-alerts #alerts,
+.gs-admin.gs-hide-alerts #alertbar { display: none !important; }
+.gs-admin.gs-hide-bandwidth .sd-main, .gs-admin.gs-hide-servers .sd-main { grid-template-columns: minmax(0, 1fr) !important; }
+.gs-admin.gs-hide-bandwidth.gs-hide-servers .sd-main,
+.gs-admin.gs-hide-viewing.gs-hide-globe.gs-hide-capacity .sd-insights { display: none !important; }

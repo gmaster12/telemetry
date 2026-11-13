@@ -88,7 +88,7 @@
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); window.gsHome.show('subscription'); } }, icon('bookmark', 18), 'My subscription'));
     }
     if (me.role === 'admin') {
-      items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); focusUsers(); } }, icon('users', 18), 'Users'));
+      if (!(window.gsCards && window.gsCards.off('users'))) items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); focusUsers(); } }, icon('users', 18), 'Users'));
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); openSettingsTab('access'); } }, icon('sliders', 18), 'Access and logins'));
     }
     items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: signOut }, icon('logout', 18), 'Sign out'));

@@ -24,6 +24,7 @@ from .config import DB_PATH, WEB_DIR, ServerCfg, env
 from .arr import Arr, ArrError
 from .billing import StripeClient
 from .cleanup import Cleanup
+from .globe import GeoDB, Globe, SampleGlobe
 from .netdata import NetdataClient
 from .onplex import OnPlex
 from .plex import PlexAccount, PlexClient
@@ -47,6 +48,11 @@ media = Media(store, poller.http)
 arr = Arr(store, poller.http)
 onplex = OnPlex(store, seerr, poller)
 cleanup = Cleanup(store, seerr, arr, poller)
+# Live streams globe (admin card): stream starts by city. The location database sits next to the SQLite file.
+geo = GeoDB(Path(DB_PATH).parent / "geo", poller.http)
+globe = Globe(geo, directory.starts_since)
+sample_globe = SampleGlobe()
+poller.globe = globe
 add_requests_section(store)
 add_mystreams_section(store)
 add_books_section(store)
@@ -65,9 +71,11 @@ async def lifespan(app: FastAPI):
     poller.client_id = client_id()
     task = asyncio.create_task(poller.run())
     sweep = asyncio.create_task(cleanup.loop())
+    geo_task = asyncio.create_task(globe.loop())
     yield
     task.cancel()
     sweep.cancel()
+    geo_task.cancel()
 
 
 app = FastAPI(title="Greystar Telemetry", lifespan=lifespan, docs_url=None, redoc_url=None)
@@ -237,6 +245,17 @@ def api_viewing(request: Request, tz: int = 0):
     return wrap(store.viewing_week(max(-840, min(840, tz))), False)
 
 
+@app.get("/api/globe")
+def api_globe(request: Request, after: int | None = None):
+    """Live streams globe (admin card): stream starts since `after` (none on the first call, so streams already
+    playing do not ping), each only {id, at, label, lat, lon}: a random id, a city label and the city's centre.
+    Never a name, a Plex id or an IP. Plus how many streams started in the last hour."""
+    admin(request)
+    g = sample_globe if poller.cfg.use_sample else globe
+    out = g.since(after)
+    return {**out, "last_hour": g.last_hour(), "sample": poller.cfg.use_sample, "geo": geo.status()}
+
+
 @app.get("/api/status")
 def api_status(request: Request):
     admin(request)
@@ -402,6 +421,54 @@ def get_settings():
         "auth_configured": True,
         "users_sync": {"synced_at": poller.users_synced_at or None, "error": poller.users_sync_error},
     }
+
+
+# ---------- Settings, Dashboard Cards: which admin cards show, saved per admin account ----------
+DASH_CARDS = [
+    ("summary", "Transcoding, Buffering and Paused"),
+    ("bandwidth", "Bandwidth"),
+    ("servers", "Servers"),
+    ("viewing", "When people watch"),
+    ("globe", "Live streams globe"),
+    ("capacity", "Server capacity"),
+    ("streams", "Live streams"),
+    ("users", "Users"),
+    ("alerts", "Alerts"),
+]
+CARD_KEYS = [k for k, _ in DASH_CARDS]
+
+
+def _cards_key(p: Principal) -> str:
+    return f"cards_hidden:{p.kind}:{p.subject}"
+
+
+def hidden_cards(p: Principal) -> list[str]:
+    """Cards this admin turned off. Nothing saved (new or existing accounts): every card shows."""
+    if not p.is_admin:
+        return []
+    try:
+        saved = json.loads(store.get_setting(_cards_key(p)) or "[]")
+    except ValueError:
+        saved = []
+    return [k for k in CARD_KEYS if k in saved]
+
+
+class CardsIn(BaseModel):
+    hidden: list[str] = Field(default_factory=list, max_length=len(CARD_KEYS))
+
+
+@app.get("/api/settings/cards")
+def get_cards(request: Request):
+    p = admin(request)
+    return {"cards": [{"key": k, "label": label} for k, label in DASH_CARDS], "hidden": hidden_cards(p)}
+
+
+@app.put("/api/settings/cards")
+def put_cards(body: CardsIn, request: Request):
+    p = admin(request)
+    hidden = [k for k in CARD_KEYS if k in set(body.hidden)]
+    store.set_setting(_cards_key(p), json.dumps(hidden) if hidden else None)
+    return {"cards": [{"key": k, "label": label} for k, label in DASH_CARDS], "hidden": hidden}
 
 
 @app.get("/api/settings/summary")
@@ -737,7 +804,7 @@ def auth_logout(request: Request):
 @app.get("/api/me")
 def api_me(request: Request):
     p = me(request)
-    return {**p.public(), "actions": p.is_admin and actions_enabled()}
+    return {**p.public(), "actions": p.is_admin and actions_enabled(), "cards_hidden": hidden_cards(p)}
 
 
 # ---------- stopping a stream (admins; Plex Pass) ----------

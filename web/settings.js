@@ -104,6 +104,7 @@
   // Viewers only have Display, so they go straight there.
   var VIEWS = {
     home: { title: 'Settings', lead: 'Everything at a glance. Open a card to change it.' },
+    cards: { title: 'Dashboard Cards', scope: 'account', lead: 'Which cards show on your dashboard. Saved to your admin account, so the same cards show in every browser and on every device you sign in on. Other admins keep their own choice.' },
     display: { title: 'Display', scope: 'you', lead: 'Light or dark, and how the dashboard looks on this screen. Nobody else sees these changes, and your other devices keep their own.' },
     plex: { title: 'Plex servers', scope: 'all', lead: 'Where live streams come from. The dashboard asks each server what is playing every few seconds. Each server can belong to its own Plex account.' },
     netdata: { title: 'Netdata', scope: 'all', lead: 'CPU and upload speed for each server, read from Netdata. They drive the capacity rings, server status and the bandwidth chart.' },
@@ -115,6 +116,7 @@
     books: { title: 'Books & comics', scope: 'all', lead: 'Shows the Greystar media site inside this dashboard, so people read comics and ebooks, listen to audiobooks and request more without signing in again.' },
     arr: { title: 'Radarr & Sonarr', scope: 'all', lead: 'Shows people how far their movies and shows have downloaded, and lets Unwatched cleanup remove titles nobody watched (with their files, so they are not downloaded again).' }
   };
+  var SCOPE_WORDS = { you: 'This browser only', account: 'Your account', all: 'Everyone' };
   var summary = null;
   var summaryAt = 0;
   var summaryTimer = null;
@@ -134,7 +136,7 @@
     document.getElementById('set-title').textContent = v.title;
     var scope = document.getElementById('set-scope');
     scope.hidden = !v.scope;
-    scope.textContent = v.scope === 'you' ? 'This browser only' : 'Everyone';
+    scope.textContent = SCOPE_WORDS[v.scope] || 'Everyone';
     scope.className = 'st-scope st-scope--' + (v.scope || 'none');
     var lead = document.getElementById('set-lead');
     lead.textContent = v.lead;
@@ -154,6 +156,7 @@
     else if (t === 'books') loadBooks();
     else if (t === 'arr') loadArr();
     else if (t === 'reqlog') openLog(changed);
+    else if (t === 'cards') loadCards();
     else if (t !== 'display') loadState();
     if (window.sdRenderPreviews) window.sdRenderPreviews();
   }
@@ -222,7 +225,7 @@
     var goBtn = el('button', { type: 'button', class: 'sd-go', 'aria-label': opts.goLabel || ('Open ' + VIEWS[view].title), onclick: function () { go(view); } });
     if (window.sdIcon) goBtn.appendChild(window.sdIcon('arrow'));
     card.appendChild(goBtn);
-    if (opts.scope) card.appendChild(el('span', { class: 'st-scope st-scope--' + opts.scope, text: opts.scope === 'you' ? 'This browser only' : 'Everyone' }));
+    if (opts.scope) card.appendChild(el('span', { class: 'st-scope st-scope--' + opts.scope, text: SCOPE_WORDS[opts.scope] || 'Everyone' }));
     card.appendChild(el('h3', { class: 'st-hcard__title' }, el('button', { type: 'button', class: 'st-hcard__link', onclick: function () { go(view); } }, opts.title || VIEWS[view].title)));
     if (opts.what) card.appendChild(el('p', { class: 'st-hcard__what', text: opts.what }));
     (opts.body || []).forEach(function (n) { if (n) card.appendChild(n); });
@@ -246,6 +249,13 @@
       body: [el('div', { class: 'st-preview__stage st-preview__stage--mini', 'data-sd-preview': 'mini' }), chips,
         el('button', { type: 'button', class: 'st-btn st-btn--accent st-hcard__cta', text: 'Change the look', onclick: function () { go('display'); } })] });
     var cards = [display];
+    var gc = window.gsCards;
+    if (gc) {
+      var off = gc.hidden().length, all = gc.keys.length;
+      cards.push(homeCard('cards', { scope: 'account', what: 'Which cards show on your dashboard, on every device you sign in on.',
+        status: off ? ['neutral', off + (off === 1 ? ' card hidden' : ' cards hidden')] : ['success', 'All cards showing'],
+        facts: [[(all - off) + ' of ' + all, 'cards showing']] }));
+    }
     if (!s) {
       box.replaceChildren(el('div', { class: 'st-homegrid' }, display, el('p', { class: 'st-note st-home__loading', text: msgs.home ? 'Could not load the overview: ' + msgs.home.text : 'Loading…' })));
       if (window.sdRenderPreviews) window.sdRenderPreviews();
@@ -1524,9 +1534,62 @@
     ui.more.textContent = lg.busy ? 'Loading…' : 'Show more (' + (d.matched - lg.rows.length) + ' left)';
   }
 
+  // ---------- Dashboard Cards: which admin cards show (cards.js; saved per admin account) ----------
+  var cardsList = null;
+  var CARD_HINTS = {
+    summary: 'The Transcoding, Buffering and Paused pills under the title.',
+    bandwidth: 'Last hour of upload speed, and the peak for each of the last 7 days.',
+    servers: 'Every server with its streams, throughput and status.',
+    viewing: 'Busiest hours of the week, and the best time for maintenance.',
+    globe: 'Where new streams start, by city.',
+    capacity: 'CPU on each server now, and Rebalance.',
+    streams: 'Everything playing now, as cards, rows or a table.',
+    users: 'Find a person and open their playback history.',
+    alerts: 'The Alerts list and the strip under the title about hot servers and buffering.'
+  };
+  function loadCards() {
+    if (!window.gsCards) return;
+    window.gsCards.load().then(function (j) { cardsList = j.cards; renderCards(); })
+      .catch(function (e) { msgs.cards = { kind: 'error', text: e.message }; renderCards(); });
+    renderCards();
+  }
+  var cardsPending = null;  // the list being saved, so the switches do not jump back while it saves
+  function saveCards(list, okText) {
+    cardsPending = list;
+    renderCards();
+    return window.gsCards.save(list).then(function () { msgs.cards = { kind: 'ok', text: okText(list) }; })
+      .catch(function (err) { msgs.cards = { kind: 'error', text: err.message }; })
+      .then(function () { cardsPending = null; renderCards(); });
+  }
+  function renderCards() {
+    var pane = document.getElementById('st-pane-cards');
+    if (!pane) return;
+    if (!cardsList) { pane.replaceChildren(msgs.cards ? message('cards') : el('p', { class: 'st-note', text: 'Loading…' })); return; }
+    var hidden = cardsPending || window.gsCards.hidden();
+    var saving = !!cardsPending;
+    var shownText = function (list) { var n = cardsList.length - list.length; return 'Saved. ' + (list.length ? n + ' of ' + cardsList.length + ' cards showing.' : 'Every card shows.'); };
+    var rows = cardsList.map(function (c) {
+      var id = 'cards-' + c.key;
+      var box = el('input', { type: 'checkbox', class: 'st-switch', id: id, checked: hidden.indexOf(c.key) < 0, disabled: saving, onchange: function () {
+        var off = cardsList.map(function (x) { return x.key; }).filter(function (k) { var b = document.getElementById('cards-' + k); return b && !b.checked; });
+        saveCards(off, shownText).then(function () { var b = document.getElementById(id); if (b) b.focus(); });
+      } });
+      return el('label', { class: 'st-switchrow st-cardrow', for: id },
+        el('div', null, el('span', { class: 'st-switchrow__label', text: c.label }), el('p', { class: 'sd-field__hint', text: CARD_HINTS[c.key] || '' })), box);
+    });
+    pane.replaceChildren(el('section', { class: 'st-section' },
+      el('h3', { text: 'Cards on the dashboard' }),
+      el('p', { class: 'st-note', text: 'Turn a card off to hide it; the rest keep their usual order. When every card on a page is off, that page leaves the menu and the phone tabs too. Saves as you change it.' }),
+      el('div', { class: 'st-cardrows', role: 'group', 'aria-label': 'Cards on the dashboard' }, rows),
+      el('div', { class: 'st-row' }, el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Show every card', disabled: !hidden.length || saving, onclick: function () {
+        saveCards([], shownText);
+      } })),
+      message('cards')));
+  }
+
   // ---------- render ----------
   function render() {
-    if (tab === 'display' || tab === 'home' || tab === 'reqlog') return;
+    if (tab === 'display' || tab === 'home' || tab === 'reqlog' || tab === 'cards') return;
     var pane = document.getElementById('st-pane-' + tab);
     if (!pane) return;
     var active = document.activeElement && pane.contains(document.activeElement) ? document.activeElement.id : null;

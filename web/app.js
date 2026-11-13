@@ -212,6 +212,8 @@
     if (target) { target.scrollIntoView({ behavior: 'smooth', block: 'start' }); window.gsUI.replace(hashFor(r)); }
   };
   const can = (s) => !window.dash.me || !window.dash.me() || window.dash.can(s);
+  // Settings, Dashboard Cards (cards.js): a card an admin turned off takes its menu place and phone tab with it.
+  const off = (k) => !!(window.gsCards && window.gsCards.off(k));
   const isAdmin = () => !!(window.dash.isAdmin && window.dash.isAdmin());
   const vh = () => !!(window.gsHome && window.gsHome.active());
   const VH_OF_ROUTE = { home: 'home', streams: 'streams', people: 'history', subscription: 'subscription' };
@@ -221,12 +223,13 @@
   const PLACES = [
     { route: 'home', nav: 'Home', tab: 'Home', icon: 'grid',
       navOk: () => vh() || can('streams'), tabOk: () => vh() || can('streams') || can('bandwidth') || can('viewing') },
-    { route: 'bandwidth', nav: 'Bandwidth', icon: 'activity', navOk: () => can('bandwidth'), tabOk: () => false },
-    { route: 'servers', nav: 'Servers', tab: 'Servers', icon: 'server', more: true, navOk: () => can('servers'), tabOk: () => can('servers') },
-    { route: 'streams', nav: 'Streams', tab: 'Streams', icon: 'play', navOk: () => can('streams'), tabOk: () => can('streams') },
-    { route: 'alerts', tab: 'Alerts', icon: 'bell', more: true, navOk: () => false, tabOk: () => can('streams') && can('servers') },
+    { route: 'bandwidth', nav: 'Bandwidth', icon: 'activity', navOk: () => can('bandwidth') && !off('bandwidth'), tabOk: () => false },
+    { route: 'servers', nav: 'Servers', tab: 'Servers', icon: 'server', more: true, navOk: () => can('servers') && !(off('servers') && off('capacity')), tabOk: () => can('servers') && !(off('servers') && off('capacity')) },
+    { route: 'streams', nav: 'Streams', tab: 'Streams', icon: 'play', navOk: () => can('streams') && !off('streams'), tabOk: () => can('streams') && !off('streams') },
+    { route: 'alerts', tab: 'Alerts', icon: 'bell', more: true, navOk: () => false, tabOk: () => can('streams') && can('servers') && !off('alerts') },
     { route: 'people', nav: () => (isAdmin() ? 'Users' : 'History'), tab: () => (isAdmin() ? 'Users' : 'History'), icon: () => (isAdmin() ? 'users' : 'history'),
-      more: () => isAdmin(), navOk: () => isAdmin() || (!!window.dash.me && !!window.dash.me() && can('history')), tabOk: () => isAdmin() || (!!window.dash.me && !!window.dash.me() && can('history')) },
+      more: () => isAdmin(), navOk: () => (isAdmin() && !off('users')) || (!isAdmin() && !!window.dash.me && !!window.dash.me() && can('history')),
+      tabOk: () => (isAdmin() && !off('users')) || (!isAdmin() && !!window.dash.me && !!window.dash.me() && can('history')) },
     { route: 'requests', nav: 'Requests', tab: 'Requests', icon: 'film', navOk: () => can('requests'), tabOk: () => can('requests') },
     { route: 'books', nav: 'Books', tab: 'Books', icon: 'book', navOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()), tabOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) },
     // Unwatched cleanup (cleanup.js): admins only; on a phone it sits under More.
@@ -1793,6 +1796,8 @@
     renderStreams();
     renderTabbar(renderAlerts());
     renderPhead();
+    if (window.gsCards) window.gsCards.apply();
+    if (window.gsGlobeCard) window.gsGlobeCard.refresh();
     if (!dock.hidden) renderPreviews();
   }
   mq.addEventListener('change', renderAll);
