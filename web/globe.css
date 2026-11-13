@@ -13,6 +13,8 @@
 .sd-globe > .sd-card__head, .sd-globe > .sd-globe__cap, .sd-globe > .sd-globe__note { position: relative; z-index: 2; }
 .sd-globe__stage { position: absolute; z-index: 1; top: 12px; right: 12px; bottom: 44px; left: 12px; }
 .sd-globe__stage canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; --gl-cx: 0.6; }
+/* Zoomed in, the land reaches the stage's edges: let it fade out there instead of stopping in a hard line. */
+.sd-globe__stage canvas { -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent); mask-image: linear-gradient(to bottom, #000 82%, transparent); }
 @container (max-width: 640px) { .sd-globe__stage canvas { --gl-cx: 0.64; } }
 .gs-app .sd-globe__cap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: auto; font-size: 13px; line-height: 18px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 .sd-globe__cap b { font-weight: 600; color: var(--ink); }
@@ -67,7 +69,7 @@
   .gs-app:not([data-mtab="home"]) #globe-card { display: none; }
   .sd-globe { min-height: 0; }
   .sd-globe__stage { position: relative; top: auto; right: auto; bottom: auto; left: auto; height: 250px; margin: 8px -12px 4px; }
-  .sd-globe__stage canvas { --gl-cx: 0.5; }
+  .sd-globe__stage canvas { --gl-cx: 0.5; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 10%, #000 88%, transparent); mask-image: linear-gradient(to bottom, transparent, #000 10%, #000 88%, transparent); }
   .gs-app .sd-globe__cap { margin-top: 8px; }
   .gs-app .sd-globe__note { max-width: none; }
   .gs-app .sd-globe__live { width: auto; max-width: none; margin-top: 10px; }
