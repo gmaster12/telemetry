@@ -13,7 +13,6 @@
    Reduced motion: no turning and no swings; it rests over the Americas and the pings and lines still show. */
 (function () {
   'use strict';
-  var D = window.GLOBE_DATA || { dots: [] };
   var RAD = Math.PI / 180;
   var PERIOD = 75;            // seconds per turn
   var TILT = 22 * RAD;        // resting tilt: North America and Europe in view
@@ -21,7 +20,13 @@
   var MERGE_DEG = 3.5, MERGE_S = 2.6, STAGGER_S = 0.32, HOLD_S = 1.6, STALE_S = 12, CLUSTER_DEG = 22;
   var LIFE = 4.2;
   var SERVER = { label: 'Dallas DC', lat: 32.8 * RAD, lon: -96.8 * RAD };
-  var DOTS = (function () { var a = new Float32Array(D.dots.length); for (var i = 0; i < a.length; i++) a[i] = D.dots[i] / 10 * RAD; return a; })();
+  // Land dots, read when the first globe is made (the data file may arrive after this script).
+  var DOTS = null;
+  function loadDots() {
+    var src = (window.GLOBE_DATA && window.GLOBE_DATA.dots) || [];
+    DOTS = new Float32Array(src.length);
+    for (var i = 0; i < src.length; i++) DOTS[i] = src[i] / 10 * RAD;
+  }
 
   var reduce = false;
   try {
@@ -164,6 +169,7 @@
 
   function create(canvas, opts) {
     opts = opts || {};
+    if (!DOTS || !DOTS.length) loadDots();
     var ctx = canvas.getContext('2d');
     var w = 1, h = 1, dpr = 1, onScreen = true, dirty = true, cxf = 0.5, avoid = [], clear = [], th = null;
     var lam = reduce ? RM_LON : (opts.startLon != null ? opts.startLon : -70) * RAD, tilt = TILT;
