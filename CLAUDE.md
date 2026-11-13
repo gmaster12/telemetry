@@ -341,6 +341,14 @@ files to add servers. Keep it that way.
   card), fading with the ping. Found in the browser from the city's rounded centre (`web/globe-countries.js`, Natural
   Earth 110m outer rings, delta-encoded tenths of a degree, about 19 KB gzipped; a coastal city just outside takes the
   nearest country within 1 degree). Nothing new comes from the server.
+- Zoom to the country (Glenn, Nov 13 2026; `opts.zoom` in `web/globe.js`, on in `globe-card.js`): the swing to a new
+  stream also zooms in until the city's own piece of its country (the ring it is in, `countryReach`) fills about 80% of
+  the globe's room, up to 5 times (the UK a lot, the US about 2 times, Canada and Australia a little); a group zooms only
+  as far as keeps them all in view. It NEVER stops turning (Glenn: no pause): zoomed in it keeps the normal 75 s turn,
+  the swing lands half a hold ahead so the city drifts across the middle, then after the ping (0.9 s line plus 2.6 s)
+  it zooms out over 1.1 s. Finer land dots (`detailDots`, a grid from the country outlines at about the coarse dots'
+  screen spacing) fade in while zoomed; the globe fades out behind the title and legend (`v.clear`). Other new streams
+  wait their turn (the 12 s stale rule still pings in place). Reduced motion never zooms.
 - GeoIP: DB-IP "IP to City Lite" (CC BY 4.0; the card links "IP Geolocation by DB-IP", keep it), downloaded to
   `data/geo/dbip-city-lite.mmdb` from `download.db-ip.com/free/dbip-city-lite-YYYY-MM.mmdb.gz` (this month, else last
   month), checked every 6 hours, refreshed after 32 days (`Globe.loop`, `GeoDB.refresh`). Read with `maxminddb`. If it

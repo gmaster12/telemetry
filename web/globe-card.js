@@ -100,6 +100,7 @@
   function mount() {
     if (globe) return;
     globe = window.gsGlobe.create(canvas, {
+      zoom: true,   // swing and zoom in to a new stream's country, keep turning, zoom back out (Glenn, Nov 13 2026)
       colorOf: look,
       avoid: [card.querySelector('.sd-card__head'), card.querySelector('.sd-globe__cap'), card.querySelector('.sd-notch'), document.getElementById('globe-live')].filter(Boolean),
       clear: [card.querySelector('.sd-card-title'), card.querySelector('.sd-card-note'), card.querySelector('.sd-globe__note'), document.getElementById('globe-live')].filter(Boolean)
