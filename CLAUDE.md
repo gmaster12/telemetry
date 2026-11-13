@@ -305,6 +305,40 @@ files to add servers. Keep it that way.
   `scrolling` (at most every 150 ms) since its scrolling is invisible here. It stays while a sheet holds the page, while a
   tab has keyboard focus, and for 0.8 s after a page change.
 
+## Live streams globe and Dashboard Cards (Glenn's pick 7 "Swing to the city", Nov 13 2026)
+
+- Admin card `#globe-card` beside When people watch (same size, corner cut and header; `.sd-insights` is two equal columns
+  from 1,000 px). Server capacity moved under the pair as a thin full-width block (`#capacity-card` spans the row; title,
+  one line of rings, warning and Rebalance; rings wrap to a second line under 1,180 px). Phones: the globe is on the Home
+  tab under When people watch; capacity stays on Servers. Styles: `web/globe.css`. Viewers never get the globe.
+- Look: the dotted globe in the dashboard ink (`web/globe-data.js`, land dots from Natural Earth 110m), turning once every
+  75 s. On a stream start it swings the short way round to face the city (0.35 to 1.3 s, ease in and out, then a 1.6 s
+  hold), a line flies out from the Dallas servers (`SERVER` in `web/globe.js`, the square marked "Dallas DC") and a lime
+  dot lands with the city's name. Glenn's worry was it getting jerky: a swing is never cut short; three or more waiting
+  get one swing to the busiest area (the city with most others within 22 degrees) and all ping (far side dimmed); a city
+  waiting over 12 s pings in place; pings within 3.5 degrees share one dot with "x3"; at most 8 pings a batch
+  (`web/globe-card.js`); nothing pings on page load or for what started while the tab was hidden. Reduced motion: no
+  turning or swings, it rests over the Americas, pings and lines still show. Labels keep off each other, the title,
+  the caption and the corner cut, and are left out when there is no room; the globe shrinks to keep clear of the title.
+- Data: `GET /api/globe?after=<cursor>` (admin; `app/globe.py`). The poller calls `Globe.started` only for a session it
+  had not seen (not after a restart, not for the next episode in the same session). The viewer's address (`_ip` from
+  `Player.remotePublicAddress` or `address`, set in `normalize_session`) is looked up and dropped: `poll_plex` pops it
+  before rows are kept or sent. Events are only `{id (random), at, label ("Dallas, TX", "Toronto, CA"), lat, lon}`, lat
+  and lon being the city's centre rounded to one decimal; never a name, Plex id or IP (`tests/test_globe.py`). LAN and
+  unknown addresses count but do not ping. `last_hour` counts live plays started in the last hour (`starts_since`).
+- GeoIP: DB-IP "IP to City Lite" (CC BY 4.0; the card links "IP Geolocation by DB-IP", keep it), downloaded to
+  `data/geo/dbip-city-lite.mmdb` from `download.db-ip.com/free/dbip-city-lite-YYYY-MM.mmdb.gz` (this month, else last
+  month), checked every 6 hours, refreshed after 32 days (`Globe.loop`, `GeoDB.refresh`). Read with `maxminddb`. If it
+  cannot download, the card says city lookups are not ready and only counts. Sample mode makes up starts (`SampleGlobe`).
+- Settings, Dashboard Cards (`cards` view in `settings.js`, `renderCards`; scope tag "Your account"): a switch per admin
+  card (`DASH_CARDS` in `main.py`: summary pills, Bandwidth, Servers, When people watch, Live streams globe, Server
+  capacity, Live streams, Users, Alerts). Saved per admin account in settings `cards_hidden:<kind>:<subject>` (a Plex
+  admin and each local admin login have their own); `GET/PUT /api/settings/cards`, and `/api/me` carries
+  `cards_hidden` so the page is right on first paint. Nothing saved = every card shows. `web/cards.js` (`gsCards`) sets
+  `gs-hide-<key>` on `#streams-app`; a hidden card's menu place and phone tab go when nothing is left on that page
+  (`off()` in `PLACES`), Users also leaves the account menu, and When people watch or the globe alone takes the whole row
+  (`gs-insights-single`). Alerts hides the Alerts list and the alert strip under the title.
+
 ## Books & comics (the Greystar media site in a frame)
 
 - Glenn's media site (https://media.greystarnetworks.com, a Node app on his Windows server, repo

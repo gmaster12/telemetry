@@ -66,6 +66,7 @@
 .st-scope { display: inline-flex; align-items: center; align-self: center; height: 24px; padding: 0 10px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 600; white-space: nowrap; }
 .st-scope--you { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--border-strong); color: var(--ink); }
 .st-scope--all { background: var(--surface-ink); color: var(--on-ink); }
+.st-scope--account { background: var(--volt); color: #0b0b0d; }
 .st-hcard .st-scope { align-self: flex-start; height: 22px; padding: 0 9px; font-size: 11px; }
 .st-lead { margin: 0 0 var(--space-4); max-width: 72ch; font-size: 13px; line-height: 18px; color: var(--ink-muted); }
 .sd-settings.has-back .st-lead { padding-left: 52px; }
@@ -220,3 +221,8 @@
 .st-misses__term { overflow-wrap: anywhere; }
 .st-misses b { font-variant-numeric: tabular-nums; }
 @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) { .st-misses li { grid-template-columns: minmax(0, 1fr) auto; } .st-misses li > .st-log__meta { grid-column: 1 / -1; } }
+
+/* Settings, Dashboard Cards (settings.js renderCards): one switch per admin card, saved per admin account. */
+.st-cardrows { display: flex; flex-direction: column; }
+.st-cardrow { padding: 12px 2px; border-top: 1px solid var(--hairline); cursor: pointer; }
+.st-cardrow:first-child { border-top: 0; }

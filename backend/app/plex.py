@@ -407,5 +407,8 @@ def normalize_session(server: ServerCfg, item: dict, source: dict | None = None)
         "quality": f"{round(bitrate_mbps)} Mbps {out_res}".strip() if method == "Transcode" else "Original",
         "poster": None,
         "_art": art,
+        # The viewer's address, only for the globe's city lookup (app/globe.py). The poller drops it before the row
+        # is kept or sent anywhere.
+        "_ip": player.get("remotePublicAddress") or player.get("address") or None,
     }
     return row
