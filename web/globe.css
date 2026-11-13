@@ -23,6 +23,29 @@
 .gs-app .sd-globe__note { max-width: 46%; margin: 8px 0 0; font-size: 12px; line-height: 16px; color: var(--ink-muted); }
 .gs-viewer #globe-card { display: none !important; }
 
+/* ---------- streams playing now: legend with counts, Type / Server switch, dot tooltip ---------- */
+.gs-app .sd-globe__live { position: relative; z-index: 2; width: max-content; max-width: 40%; margin: 14px 0 0; }
+.sd-globe__livehead { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+@container (max-width: 560px) { .sd-globe__livehead { flex-direction: column; align-items: flex-start; gap: 6px; } }
+.gs-app .sd-globe__livet { margin: 0; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--ink-muted); white-space: nowrap; }
+.sd-globe__livet b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.sd-globe__by { display: inline-flex; padding: 2px; border-radius: 999px; background: var(--hairline); }
+.sd-globe__by button { height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-muted); font: 600 11px var(--font-sans); cursor: pointer; }
+.sd-globe__by button[aria-pressed="true"] { background: var(--surface-card); color: var(--ink); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.sd-globe__by button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.sd-globe__legend { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.sd-globe__legend--grid { display: grid; grid-template-columns: auto auto; gap: 4px 16px; }
+.sd-globe__legend li { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 18px; color: var(--ink); white-space: nowrap; }
+.sd-globe__legend li b { margin-left: auto; padding-left: 10px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.sd-globe__legend li.is-zero { color: var(--ink-muted); }
+.sd-globe__key { width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--c); box-shadow: 0 0 0 2px var(--surface-card); }
+.sd-globe__key--square { border-radius: 2px; }
+.sd-globe__key--diamond { width: 9px; height: 9px; margin: 0 0.5px; border-radius: 1px; transform: rotate(45deg); }
+.sd-globe__tip { position: absolute; z-index: 4; pointer-events: none; padding: 8px 12px; border-radius: 14px; background: var(--ink); color: var(--surface-card); font-size: 12px; line-height: 16px; white-space: nowrap; transform: translate(-50%, calc(-100% - 12px)); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18); }
+.sd-globe__tip b { display: block; font-weight: 600; }
+.sd-globe__tip span { opacity: 0.8; }
+.sd-globe__tip[hidden] { display: none; }
+
 /* ---------- Server capacity as a thin block (desktops and tablets) ---------- */
 @media (min-width: 761px) and (min-height: 501px), (min-width: 761px) and (pointer: fine), (min-width: 761px) and (pointer: none) {
   .gs-app #capacity-card { display: grid; grid-template-columns: minmax(180px, auto) minmax(0, 1fr) auto; align-items: center; gap: 12px 28px; padding: 18px 28px; }
@@ -47,6 +70,10 @@
   .sd-globe__stage canvas { --gl-cx: 0.5; }
   .gs-app .sd-globe__cap { margin-top: 8px; }
   .gs-app .sd-globe__note { max-width: none; }
+  .gs-app .sd-globe__live { width: auto; max-width: none; margin-top: 10px; }
+  .sd-globe__legend, .sd-globe__legend--grid { display: flex; flex-direction: row; flex-wrap: wrap; gap: 4px 14px; }
+  .sd-globe__legend li b { margin-left: 0; padding-left: 4px; }
+  .sd-globe__by button { height: 32px; padding: 0 12px; }
 }
 
 /* ---------- Settings, Dashboard Cards: hidden cards (admins only; saved per admin account) ---------- */

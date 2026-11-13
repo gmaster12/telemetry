@@ -68,6 +68,29 @@ def test_events_carry_no_identity(tmp_path):
     assert g.last_hour() == 7
 
 
+def test_playing_now_dots(tmp_path):
+    g = Globe(fake_geo(tmp_path), lambda ts: 0)
+    a = {"server": "Atlas", "session_key": "a", "_ip": "8.8.8.8", "method": "Transcode", "user": "alice", "user_id": "123", "title": "Dune"}
+    b = {"server": "Beta", "session_key": "b", "_ip": "24.114.1.1", "method": "Direct play", "user": "bob"}
+    lan = {"server": "Atlas", "session_key": "c", "_ip": "192.168.1.4", "method": "Direct play"}
+    g.playing([b])                                   # already playing when we started: a dot, no ping
+    ev = g.started(a)                                # a new stream: its dot shares the ping's id
+    g.playing([a, b, lan])
+    dots = {d["label"]: d for d in g.active()}
+    assert set(dots) == {"Dallas, TX", "Toronto, CA"}  # LAN gets no dot
+    assert dots["Dallas, TX"]["id"] == ev["id"] and dots["Dallas, TX"]["type"] == "transcode"
+    assert dots["Toronto, CA"]["type"] == "direct" and dots["Toronto, CA"]["server"] == "Beta"
+    assert set(dots["Dallas, TX"]) == {"id", "label", "lat", "lon", "type", "server"}
+    for secret in ("alice", "bob", "123", "8.8.8.8", "24.114", "Dune", "32.78"):
+        assert secret not in repr(g.active())
+    g.playing([a], online={"Beta"})                  # b stopped on Beta (answered); Atlas kept
+    assert [d["label"] for d in g.active()] == ["Dallas, TX"]
+    g.playing([], online={"Beta"})                   # Atlas did not answer: its dot stays
+    assert len(g.active()) == 1
+    g.playing([], online={"Atlas"})
+    assert g.active() == []
+
+
 @pytest.fixture()
 def app(tmp_path, monkeypatch):
     monkeypatch.setenv("SECRET_KEY", Fernet.generate_key().decode())
@@ -140,6 +163,9 @@ def test_new_sessions_ping_once_and_the_ip_never_leaves(app):
             assert secret not in body
         rounds.pop(0)
     assert labels == ["Dallas, TX", "Toronto, CA"]
+    now = a.get("/api/globe").json()
+    assert sorted(d["label"] for d in now["active"]) == ["Dallas, TX", "Toronto, CA"]
+    assert now["servers"] == ["Atlas"]
     assert a.get("/api/globe").json()["last_hour"] >= 3
     assert "_ip" not in repr(a.get("/api/streams").json())
 

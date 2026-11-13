@@ -189,6 +189,11 @@ class Poller:
             self.track_plays(rows, online)
         except Exception:
             log.exception("history tracking failed")
+        if self.globe is not None:
+            try:
+                self.globe.playing(rows, online)
+            except Exception:
+                log.exception("globe update failed")
         for r in rows:
             r.pop("_art_path", None)
             r.pop("_ip", None)  # used for the globe's city lookup only; never kept or sent

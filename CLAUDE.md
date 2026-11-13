@@ -326,6 +326,21 @@ files to add servers. Keep it that way.
   before rows are kept or sent. Events are only `{id (random), at, label ("Dallas, TX", "Toronto, CA"), lat, lon}`, lat
   and lon being the city's centre rounded to one decimal; never a name, Plex id or IP (`tests/test_globe.py`). LAN and
   unknown addresses count but do not ping. `last_hour` counts live plays started in the last hour (`starts_since`).
+- Streams playing now (Glenn's round three, Nov 13 2026): every stream playing is a small dot at its city with a soft
+  ring pulsing on its own beat (none for reduced motion). `Globe.playing(rows, online)` runs every poll before the IPs
+  are dropped and keeps one dot per session (a server that did not answer keeps its dots); a new stream's dot reuses
+  its start event's id, so the card shows it only once the lime ping lands. `/api/globe` adds `active` ({id, label,
+  lat, lon, type: direct|stream|transcode, server}) and `servers` (enabled names in Settings order). Colours: the
+  validated three-colour chart palette (blue Direct play, orange Direct stream, green Transcode; light and dark steps in
+  `HUES`, `globe-card.js`); the card's Type / Server switch (saved per browser, `gs-globe-by`) colours by server instead,
+  the three colours times circle, square and diamond in Settings order. Lime stays for new streams only. Same city and
+  colour share a bigger dot; places within about 130 km are one ("Dallas, TX area") and different colours there sit side
+  by side. Legend with counts under the header ("Playing now 17"); hover or tap a dot: "Toronto, CA · 2 streams ·
+  Transcode". Never a name, Plex id or IP in `active` either (`tests/test_globe.py`).
+- Country outline: when a ping lands, the country it is in gets a white outline with a glow (a dark edge on the light
+  card), fading with the ping. Found in the browser from the city's rounded centre (`web/globe-countries.js`, Natural
+  Earth 110m outer rings, delta-encoded tenths of a degree, about 19 KB gzipped; a coastal city just outside takes the
+  nearest country within 1 degree). Nothing new comes from the server.
 - GeoIP: DB-IP "IP to City Lite" (CC BY 4.0; the card links "IP Geolocation by DB-IP", keep it), downloaded to
   `data/geo/dbip-city-lite.mmdb` from `download.db-ip.com/free/dbip-city-lite-YYYY-MM.mmdb.gz` (this month, else last
   month), checked every 6 hours, refreshed after 32 days (`Globe.loop`, `GeoDB.refresh`). Read with `maxminddb`. If it
