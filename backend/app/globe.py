@@ -9,6 +9,10 @@ the card can place its ping. Never a username, a Plex id, an IP or the viewer's 
 GeoIP: DB-IP's free "IP to City Lite" database (CC BY 4.0, attribution "IP Geolocation by DB-IP" on the card),
 downloaded into the data folder and refreshed once a month. No key or account needed. Streams on the local network,
 and IPs the database does not know, count toward the last-hour number but get no ping.
+
+Streams playing now (`Globe.playing`, every poll): one entry per session with the same kind of random id (a new
+stream's entry reuses its start event's id, so the card can turn the lime ping into the steady dot), the city label
+and centre, the playback type (direct, stream, transcode) and the server's name. Still never a name, a Plex id or an IP.
 """
 from __future__ import annotations
 
@@ -32,6 +36,7 @@ log = logging.getLogger("telemetry.globe")
 DBIP_URL = "https://download.db-ip.com/free/dbip-city-lite-{ym}.mmdb.gz"
 REFRESH_DAYS = 32
 KEEP_EVENTS = 300
+TYPES = {"Direct play": "direct", "Direct stream": "stream", "Transcode": "transcode"}
 
 US_STATES = {
     "Alabama": "AL", "Alaska": "AK", "Arizona": "AZ", "Arkansas": "AR", "California": "CA", "Colorado": "CO",
@@ -183,6 +188,11 @@ class Globe:
         self.events: deque[dict] = deque(maxlen=KEEP_EVENTS)
         self.seq = 0
         self._count = started_count  # streams started since a time (from the plays table); survives restarts
+        self.live: dict[tuple[str, str], dict] = {}  # (server, session key) -> the dot for a stream playing now
+
+    @staticmethod
+    def _dot(row: dict, place: dict, dot_id: str) -> dict:
+        return {"id": dot_id, **place, "type": TYPES.get(row.get("method"), "direct"), "server": str(row.get("server") or "")[:40]}
 
     def started(self, row: dict, now: float | None = None) -> dict | None:
         """A stream started. Returns the event the browser will get, or None when it has no location."""
@@ -192,7 +202,32 @@ class Globe:
         self.seq += 1
         ev = {"seq": self.seq, "id": "s_" + secrets.token_urlsafe(6), "at": int(now or time.time()), **place}
         self.events.append(ev)
+        if row.get("session_key"):
+            self.live[(str(row.get("server") or ""), str(row["session_key"]))] = self._dot(row, place, ev["id"])
         return ev
+
+    def playing(self, rows: list[dict], online: set[str] | None = None) -> None:
+        """The streams playing now (every poll, before the IPs are dropped). A server that did not answer this round
+        keeps its dots, like its history rows."""
+        seen = set()
+        for r in rows:
+            if not r.get("session_key"):
+                continue
+            key = (str(r.get("server") or ""), str(r["session_key"]))
+            seen.add(key)
+            dot = self.live.get(key)
+            if dot is None:
+                place = self.geo.lookup(r.get("_ip"))
+                if not place:
+                    continue  # LAN or unknown: counted, no dot
+                dot = self.live[key] = self._dot(r, place, "s_" + secrets.token_urlsafe(6))
+            dot["type"] = TYPES.get(r.get("method"), "direct")
+        for key in list(self.live):
+            if key not in seen and (online is None or key[0] in online):
+                del self.live[key]
+
+    def active(self) -> list[dict]:
+        return [{k: d[k] for k in ("id", "label", "lat", "lon", "type", "server")} for d in self.live.values()][:500]
 
     def since(self, after: int | None) -> dict:
         """Events after the cursor. With no cursor (the page just loaded): none, so streams that were already
@@ -230,6 +265,9 @@ SAMPLE_CITIES = [
 ]
 
 
+SAMPLE_SERVERS = ["Atlas", "Basestar", "Beta", "Orion", "Red", "Olympus"]  # the sample dashboard's servers
+
+
 class SampleGlobe(Globe):
     """Made-up starts every few seconds, only while the dashboard shows sample data."""
 
@@ -237,6 +275,14 @@ class SampleGlobe(Globe):
         super().__init__(GeoDB(Path("/nonexistent")))
         self._next = 0.0
         self._hour: deque[float] = deque(time.time() - random.random() * 3600 for _ in range(38))
+        self._live: list[dict] = [self._sample_dot(c, "s_" + secrets.token_urlsafe(6))
+                                  for c in random.choices(SAMPLE_CITIES, weights=[c[3] for c in SAMPLE_CITIES], k=16)]
+
+    @staticmethod
+    def _sample_dot(c, dot_id: str) -> dict:
+        return {"id": dot_id, "label": c[0], "lat": c[1], "lon": c[2],
+                "type": random.choices(["direct", "stream", "transcode"], weights=[5, 2, 3])[0],
+                "server": random.choice(SAMPLE_SERVERS)}
 
     def _tick(self) -> None:
         now = time.time()
@@ -245,9 +291,12 @@ class SampleGlobe(Globe):
             weights = [c[3] for c in SAMPLE_CITIES]
             for c in random.choices(SAMPLE_CITIES, weights=weights, k=n):
                 self.seq += 1
-                self.events.append({"seq": self.seq, "id": "s_" + secrets.token_urlsafe(6), "at": int(now),
-                                    "label": c[0], "lat": c[1], "lon": c[2]})
+                ev_id = "s_" + secrets.token_urlsafe(6)
+                self.events.append({"seq": self.seq, "id": ev_id, "at": int(now), "label": c[0], "lat": c[1], "lon": c[2]})
+                self._live.append(self._sample_dot(c, ev_id))
                 self._hour.append(now)
+            while len(self._live) > 12 and random.random() < 0.6:
+                self._live.pop(random.randrange(len(self._live)))
             self._next = (self._next or now) + 3 + random.random() * 5
             if self._next < now - 30:
                 self._next = now + 2
@@ -255,6 +304,9 @@ class SampleGlobe(Globe):
     def since(self, after: int | None) -> dict:
         self._tick()
         return super().since(after)
+
+    def active(self) -> list[dict]:
+        return [dict(d) for d in self._live]
 
     def last_hour(self, now: float | None = None) -> int:
         cut = (now or time.time()) - 3600

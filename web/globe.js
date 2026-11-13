@@ -10,7 +10,18 @@
      those around it), and every waiting city pings; ones on the far side ping dimmed;
    - a city that has waited over 12 s pings where it is, without a swing;
    - two pings within about 400 km of each other share one dot with a count ("Dallas, TX ×3").
-   Reduced motion: no turning and no swings; it rests over the Americas and the pings and lines still show. */
+   Reduced motion: no turning and no swings; it rests over the Americas and the pings and lines still show.
+
+   Streams playing now (setActive): a small dot at each city, coloured and shaped by the card's colorOf(cat) (stream type
+   or server; shapes circle, square, diamond), with a slow pulsing ring (each its own beat; still for reduced motion). Several in one city and category
+   share a slightly bigger dot; cities within about 130 km count as one place ("Dallas, TX area"), and different colours
+   at one place sit side by side around it. A new stream's dot appears once its lime ping has landed; an ended one fades out.
+   hit(x, y) names the dot under the pointer for the card's tooltip.
+
+   Country highlight: when a new stream's ping lands, the country it is in gets a white outline with a soft glow (on the
+   light card the white line has a thin dark edge so it shows), fading out with the ping. The country is found here in
+   the browser from the city's rounded centre (web/globe-countries.js, Natural Earth 110m); nothing new comes from the
+   server. A coastal city that falls just outside the coarse outline takes the nearest country within about 1 degree. */
 (function () {
   'use strict';
   var RAD = Math.PI / 180;
@@ -26,6 +37,53 @@
     var src = (window.GLOBE_DATA && window.GLOBE_DATA.dots) || [];
     DOTS = new Float32Array(src.length);
     for (var i = 0; i < src.length; i++) DOTS[i] = src[i] / 10 * RAD;
+  }
+
+  // Country outlines (optional file): [[ring, ...], ...], each ring delta-encoded tenths of a degree [dlon, dlat, ...].
+  var COUNTRIES = null, countryCache = {};
+  function loadCountries() {
+    COUNTRIES = [];
+    ((window.GLOBE_DATA && window.GLOBE_DATA.countries) || []).forEach(function (rings) {
+      var c = { rings: [], deg: [], b: [180, 90, -180, -90] };
+      rings.forEach(function (d) {
+        var x = 0, y = 0, rad = new Float32Array(d.length), deg = new Float32Array(d.length);
+        for (var i = 0; i < d.length; i += 2) {
+          x += d[i]; y += d[i + 1];
+          deg[i] = x / 10; deg[i + 1] = y / 10; rad[i] = deg[i] * RAD; rad[i + 1] = deg[i + 1] * RAD;
+          c.b[0] = Math.min(c.b[0], deg[i]); c.b[1] = Math.min(c.b[1], deg[i + 1]); c.b[2] = Math.max(c.b[2], deg[i]); c.b[3] = Math.max(c.b[3], deg[i + 1]);
+        }
+        c.rings.push(rad); c.deg.push(deg);
+      });
+      COUNTRIES.push(c);
+    });
+  }
+  function inRing(r, lon, lat) {
+    var inside = false;
+    for (var i = 0, j = r.length - 2; i < r.length; j = i, i += 2) {
+      var xi = r[i], yi = r[i + 1], xj = r[j], yj = r[j + 1];
+      if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  function countryHit(lon, lat) {
+    for (var k = 0; k < COUNTRIES.length; k++) {
+      var c = COUNTRIES[k], b = c.b;
+      if (lon < b[0] || lon > b[2] || lat < b[1] || lat > b[3]) continue;
+      for (var i = 0; i < c.deg.length; i++) if (inRing(c.deg[i], lon, lat)) return k;
+    }
+    return -1;
+  }
+  /** The country a city (degrees) is in, as an index into COUNTRIES, or -1. */
+  function countryAt(lat, lon) {
+    if (!COUNTRIES) loadCountries();
+    var key = lat.toFixed(1) + ',' + lon.toFixed(1);
+    if (key in countryCache) return countryCache[key];
+    var k = countryHit(lon, lat);
+    for (var step = 0.5; k < 0 && step <= 1.01; step += 0.5) {
+      for (var a = 0; a < 8 && k < 0; a++) k = countryHit(lon + Math.cos(a * Math.PI / 4) * step, lat + Math.sin(a * Math.PI / 4) * step);
+    }
+    countryCache[key] = k;
+    return k;
   }
 
   var reduce = false;
@@ -93,6 +151,65 @@
   }
   function labelText(p) { return p.n > 1 ? p.label + '  ×' + p.n : p.label; }
 
+  // ---------- the country of a new stream ----------
+  function drawCountries(g, ctx, v, t, th) {
+    var on = {};
+    g.eachPing(t, function (p, age) {
+      if (p.country == null || p.country < 0) return;
+      var la = age - (p.arc ? 0.9 : 0);
+      if (la < 0) return;
+      var a = clamp(la / 0.35) * (age > LIFE - 1.2 ? clamp((LIFE - age) / 1.2) : 1);
+      on[p.country] = Math.max(on[p.country] || 0, a);
+    });
+    Object.keys(on).forEach(function (k) {
+      var c = COUNTRIES[k], a = on[k], path = new Path2D(), any = false;
+      c.rings.forEach(function (r) {
+        var pen = false, first = null;
+        for (var i = 0; i <= r.length; i += 2) {
+          var j = i % r.length;                       // close the ring
+          proj(v, r[j], r[j + 1]);
+          if (pz > 0) { if (pen) path.lineTo(px, py); else path.moveTo(px, py); pen = true; any = true; }
+          else pen = false;
+        }
+      });
+      if (!any) return;
+      ctx.save();
+      ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      // An under-stroke keeps the white line off the land dots: a dark edge on the light card, the card colour on dark.
+      ctx.lineWidth = 4.2; ctx.strokeStyle = th.light ? rgba(th.ink, 0.6 * a) : rgba(th.card, 0.85 * a); ctx.stroke(path);
+      ctx.shadowColor = 'rgba(255,255,255,' + ((th.light ? 0.5 : 0.9) * a).toFixed(3) + ')'; ctx.shadowBlur = th.light ? 4 : 10;
+      ctx.lineWidth = 2; ctx.strokeStyle = rgba('255,255,255', a); ctx.stroke(path);
+      ctx.shadowBlur = 0;
+      ctx.restore();
+    });
+  }
+
+  // ---------- streams playing now ----------
+  function drawActive(g, ctx, v, t, th, still) {
+    var groups = g.activeGroups(t), hits = [];
+    groups.forEach(function (gr) {
+      proj(v, gr.lon, gr.lat);
+      if (pz <= -0.05) return;
+      var front = pz > 0.02, f = (front ? 1 : 0.25) * gr.a, look = g.colorOf(gr.cat, th.light);
+      var r = 2 + Math.min(1.5, (gr.n - 1) * 0.35);
+      if (gr.fan) { var ang = -Math.PI / 2 + gr.fan.i * Math.PI * 2 / gr.fan.k, off = 4; px += Math.cos(ang) * off; py += Math.sin(ang) * off; }
+      if (front && !still) {
+        var k = ((t / 2.4) + gr.phase) % 1;
+        circle(ctx, px, py, r + 0.5 + k * 5); ctx.lineWidth = 1.4; ctx.strokeStyle = rgba(look.rgb, (1 - k) * 0.55 * f); ctx.stroke();
+      } else if (front) {
+        circle(ctx, px, py, r + 2); ctx.fillStyle = rgba(look.rgb, 0.18 * f); ctx.fill();
+      }
+      ctx.beginPath();
+      if (look.shape === 'square') ctx.rect(px - r * 0.9, py - r * 0.9, r * 1.8, r * 1.8);
+      else if (look.shape === 'diamond') { var q = r * 1.25; ctx.moveTo(px, py - q); ctx.lineTo(px + q, py); ctx.lineTo(px, py + q); ctx.lineTo(px - q, py); ctx.closePath(); }
+      else ctx.arc(px, py, r, 0, Math.PI * 2);
+      ctx.lineWidth = 1.2; ctx.strokeStyle = rgba(th.card, 0.95 * f); ctx.stroke();   // a ring of the card colour keeps dots apart
+      ctx.fillStyle = rgba(look.rgb, f); ctx.fill();
+      if (front) hits.push({ x: px, y: py, r: r + 7, label: gr.label, n: gr.n, cat: gr.cat });
+    });
+    g.setHits(hits);
+  }
+
   // ---------- drawing ----------
   function draw(g, ctx, v, t, th) {
     var INK = th.ink, VOLT = th.volt, light = th.light;
@@ -105,6 +222,8 @@
       buckets[b].moveTo(px + r, py); buckets[b].arc(px, py, r, 0, Math.PI * 2);
     }
     [0.22, 0.4, 0.6, 0.82].forEach(function (a, k) { ctx.fillStyle = rgba(INK, a); ctx.fill(buckets[k]); });
+    drawCountries(g, ctx, v, t, th);
+    drawActive(g, ctx, v, t, th, reduce);
 
     proj(v, SERVER.lon, SERVER.lat);
     var srv = pz > 0 ? { x: px, y: py } : null;
@@ -174,6 +293,14 @@
     var w = 1, h = 1, dpr = 1, onScreen = true, dirty = true, cxf = 0.5, avoid = [], clear = [], th = null;
     var lam = reduce ? RM_LON : (opts.startLon != null ? opts.startLon : -70) * RAD, tilt = TILT;
     var pings = [], queue = [], spin = null, holdUntil = 0, lastStart = 0;
+    var active = {}, hitList = [];
+    function hash(s) { var h = 0; s = String(s); for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return ((h >>> 0) % 1000) / 1000; }
+    // A new stream's dot shows once its ping has landed (or after 15 s if its ping was dropped while waiting).
+    function landsAt(a, t) {
+      if (!a.ping) return a.from;
+      if (a.ping.startAt === Infinity) return t - a.from > 15 ? a.from : Infinity;
+      return a.ping.startAt + (a.ping.arc ? 0.9 : 0) + 0.5;
+    }
 
     function readTheme() {
       var cs = getComputedStyle(canvas);
@@ -265,9 +392,12 @@
       tick: function (t, dt) {
         var alive = false;
         for (var i = pings.length - 1; i >= 0; i--) { if (t - pings[i].startAt >= LIFE) pings.splice(i, 1); else alive = true; }
+        for (var id in active) { if (active[id].gone && t - active[id].gone > 0.9) delete active[id]; }
         if (!reduce) focusStep(t, dt);
         if (!onScreen) return !reduce || alive;
-        if (reduce && !alive && !dirty) return false;
+        // Reduced motion keeps no loop running: only while a ping plays or a dot fades in or out.
+        var fading = Object.keys(active).some(function (id) { var a = active[id], s = landsAt(a, t); return a.gone || s === Infinity || t - s < 0.7; });
+        if (reduce && !alive && !dirty && !fading) return false;
         dirty = false;
         var cx = w * cxf;
         var v = { w: w, h: h, cx: cx, cy: h / 2, R: radiusFor(cx, h / 2, Math.max(10, Math.min(h / 2, cx, w - cx) - 26)), lam: lam,
@@ -275,7 +405,7 @@
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
         draw(g, ctx, v, t, th);
-        return !reduce || alive;
+        return !reduce || alive || fading;
       },
       reducedChanged: function () {
         if (reduce) {
@@ -289,12 +419,13 @@
       /** A stream started at {label, lat, lon} (degrees). */
       ping: function (e) {
         var now = performance.now() / 1000;
-        var p = { lat: e.lat * RAD, lon: e.lon * RAD, label: String(e.label || ''), n: 1, born: now };
+        var p = { lat: e.lat * RAD, lon: e.lon * RAD, label: String(e.label || ''), n: 1, born: now, ids: e.id ? [e.id] : [] };
         for (var i = 0; i < pings.length; i++) {
           var q = pings[i];
-          if (now - q.born < MERGE_S && angDeg(q, p) < MERGE_DEG) { q.n += 1; q.startAt = Math.max(now, q.startAt); wake(); return; }
+          if (now - q.born < MERGE_S && angDeg(q, p) < MERGE_DEG) { q.n += 1; q.startAt = Math.max(now, q.startAt); if (e.id) q.ids.push(e.id); wake(); return; }
         }
         p.arc = angDeg(SERVER, p) > 1.5 ? arcPoints(SERVER, p, 40) : null;
+        p.country = countryAt(e.lat, e.lon);
         if (reduce) { p.startAt = Math.max(now, lastStart + STAGGER_S); lastStart = p.startAt; }
         else { p.startAt = Infinity; queue.push(p); }
         pings.push(p);
@@ -302,6 +433,52 @@
         wake();
       },
       retheme: function () { readTheme(); measureAvoid(); dirty = true; wake(); },
+      /** The streams playing now: [{id, label, lat, lon, cat}]. New ones fade in (after their ping lands), ended ones out. */
+      setActive: function (list) {
+        var now = performance.now() / 1000, seen = {};
+        (list || []).forEach(function (e) {
+          seen[e.id] = 1;
+          var a = active[e.id];
+          if (!a || a.gone) {
+            a = active[e.id] = { id: e.id, lat: e.lat * RAD, lon: e.lon * RAD, label: String(e.label || ''), cat: e.cat, from: now, gone: 0, phase: hash(e.id) };
+            var p = pings.filter(function (q) { return q.ids && q.ids.indexOf(e.id) >= 0; })[0];
+            if (p) a.ping = p;
+          }
+          a.cat = e.cat;
+        });
+        Object.keys(active).forEach(function (id) { if (!seen[id] && !active[id].gone) active[id].gone = now; });
+        dirty = true; wake();
+      },
+      activeGroups: function (t) {
+        var places = [], out = [];
+        Object.keys(active).sort().forEach(function (id) {
+          var a = active[id], from = landsAt(a, t);
+          var on = clamp((t - from) / 0.6) * (a.gone ? 1 - clamp((t - a.gone) / 0.8) : 1);
+          if (on <= 0) return;
+          var pl = places.filter(function (c) { return angDeg(c, a) < 1.2; })[0];
+          if (!pl) { pl = { lat: a.lat, lon: a.lon, cats: {} }; places.push(pl); }
+          var gr = pl.cats[a.cat] || (pl.cats[a.cat] = { lat: pl.lat, lon: pl.lon, labels: {}, cat: a.cat, n: 0, a: 0, phase: a.phase });
+          gr.n += 1; gr.a = Math.max(gr.a, on); gr.labels[a.label] = (gr.labels[a.label] || 0) + 1;
+        });
+        places.forEach(function (pl) {
+          var keys = Object.keys(pl.cats).sort();
+          keys.forEach(function (k, i) {
+            var gr = pl.cats[k], ls = Object.keys(gr.labels).sort(function (x, y) { return gr.labels[y] - gr.labels[x]; });
+            gr.label = ls[0] + (ls.length > 1 ? ' area' : '');
+            gr.fan = keys.length > 1 ? { i: i, k: keys.length } : null;
+            out.push(gr);
+          });
+        });
+        return out;
+      },
+      colorOf: function (cat, light) { return (opts.colorOf && opts.colorOf(cat, light)) || { rgb: light ? '42,120,214' : '57,135,229', shape: 'circle' }; },
+      setHits: function (h) { hitList = h; },
+      /** The dot under (x, y) in canvas pixels, for a tooltip: {label, n, cat} or null. */
+      hit: function (x, y) {
+        var best = null, bd = 1e9;
+        hitList.forEach(function (d) { var dd = (d.x - x) * (d.x - x) + (d.y - y) * (d.y - y); if (dd < d.r * d.r && dd < bd) { best = d; bd = dd; } });
+        return best;
+      },
       destroy: function () {
         if (ro) ro.disconnect(); if (io) io.disconnect();
         var k = globes.indexOf(g); if (k >= 0) globes.splice(k, 1);

@@ -24,7 +24,7 @@ from .config import DB_PATH, WEB_DIR, ServerCfg, env
 from .arr import Arr, ArrError
 from .billing import StripeClient
 from .cleanup import Cleanup
-from .globe import GeoDB, Globe, SampleGlobe
+from .globe import SAMPLE_SERVERS, GeoDB, Globe, SampleGlobe
 from .netdata import NetdataClient
 from .onplex import OnPlex
 from .plex import PlexAccount, PlexClient
@@ -249,11 +249,14 @@ def api_viewing(request: Request, tz: int = 0):
 def api_globe(request: Request, after: int | None = None):
     """Live streams globe (admin card): stream starts since `after` (none on the first call, so streams already
     playing do not ping), each only {id, at, label, lat, lon}: a random id, a city label and the city's centre.
-    Never a name, a Plex id or an IP. Plus how many streams started in the last hour."""
+    Never a name, a Plex id or an IP. Plus how many streams started in the last hour, the streams playing now
+    (`active`: id, label, lat, lon, type, server) and the server names in Settings order (`servers`, for colours)."""
     admin(request)
     g = sample_globe if poller.cfg.use_sample else globe
     out = g.since(after)
-    return {**out, "last_hour": g.last_hour(), "sample": poller.cfg.use_sample, "geo": geo.status()}
+    servers = SAMPLE_SERVERS if poller.cfg.use_sample else [s.name for s in poller.cfg.servers if s.enabled]
+    return {**out, "last_hour": g.last_hour(), "active": g.active(), "servers": servers,
+            "sample": poller.cfg.use_sample, "geo": geo.status()}
 
 
 @app.get("/api/status")
