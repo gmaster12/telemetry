@@ -10,6 +10,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -246,7 +247,7 @@ def api_viewing(request: Request, tz: int = 0):
 
 
 @app.get("/api/globe")
-def api_globe(request: Request, after: int | None = None):
+def api_globe(request: Request, after: int | None = None, trail_since: int | None = None):
     """Live streams globe (admin card): stream starts since `after` (none on the first call, so streams already
     playing do not ping), each only {id, at, label, lat, lon}: a random id, a city label and the city's centre.
     Never a name, a Plex id or an IP. Plus how many streams started in the last hour, the streams playing now
@@ -255,8 +256,9 @@ def api_globe(request: Request, after: int | None = None):
     g = sample_globe if poller.cfg.use_sample else globe
     out = g.since(after)
     servers = SAMPLE_SERVERS if poller.cfg.use_sample else [s.name for s in poller.cfg.servers if s.enabled]
+    extra = {"trail": g.trail(trail_since)} if trail_since is not None else {}
     return {**out, "last_hour": g.last_hour(), "active": g.active(), "servers": servers,
-            "sample": poller.cfg.use_sample, "geo": geo.status()}
+            "sample": poller.cfg.use_sample, "geo": geo.status(), **extra}
 
 
 @app.get("/api/status")
@@ -474,6 +476,60 @@ def put_cards(body: CardsIn, request: Request):
     return {"cards": [{"key": k, "label": label} for k, label in DASH_CARDS], "hidden": hidden}
 
 
+# ---------- Settings, Live streams globe: how the globe card moves, saved per admin account ----------
+GLOBE_DEFAULTS = {"zoom": 5.0, "cruise": 1.0, "hold": 3, "many": "busy", "line": True, "outline": True, "label": True,
+                  "speed": 75, "rest": "am", "color": "type", "join_km": 130, "rings": True,
+                  "night": False, "trail": False, "quiet": False}
+
+
+class GlobeIn(BaseModel):
+    zoom: float = Field(GLOBE_DEFAULTS["zoom"], ge=1, le=6)          # how far a new stream zooms in (1 = off)
+    cruise: float = Field(GLOBE_DEFAULTS["cruise"], ge=1, le=4)      # zoom kept while it turns (1 = whole globe)
+    hold: Literal[2, 3, 5] = GLOBE_DEFAULTS["hold"]                  # seconds zoomed in on a new stream
+    many: Literal["busy", "each"] = GLOBE_DEFAULTS["many"]
+    line: bool = GLOBE_DEFAULTS["line"]
+    outline: bool = GLOBE_DEFAULTS["outline"]
+    label: bool = GLOBE_DEFAULTS["label"]
+    speed: Literal[0, 20, 30, 45, 60, 75, 120, 180, 240] = GLOBE_DEFAULTS["speed"]  # seconds a turn; 0 = still
+    rest: Literal["am", "eu", "as", "busy"] = GLOBE_DEFAULTS["rest"]
+    color: Literal["type", "server"] = GLOBE_DEFAULTS["color"]
+    join_km: Literal[0, 50, 130, 300] = GLOBE_DEFAULTS["join_km"]
+    rings: bool = GLOBE_DEFAULTS["rings"]
+    night: bool = GLOBE_DEFAULTS["night"]
+    trail: bool = GLOBE_DEFAULTS["trail"]
+    quiet: bool = GLOBE_DEFAULTS["quiet"]
+
+
+def _globe_key(p: Principal) -> str:
+    return f"globe:{p.kind}:{p.subject}"
+
+
+def globe_settings(p: Principal) -> dict | None:
+    """This admin's globe settings, defaults filled in. None for viewers (they never get the globe)."""
+    if not p.is_admin:
+        return None
+    try:
+        saved = json.loads(store.get_setting(_globe_key(p)) or "{}")
+        return GlobeIn(**{**GLOBE_DEFAULTS, **{k: v for k, v in saved.items() if k in GLOBE_DEFAULTS}}).model_dump()
+    except (ValueError, TypeError):
+        return dict(GLOBE_DEFAULTS)
+
+
+@app.get("/api/settings/globe")
+def get_globe_settings(request: Request):
+    p = admin(request)
+    return {"settings": globe_settings(p), "defaults": GLOBE_DEFAULTS}
+
+
+@app.put("/api/settings/globe")
+def put_globe_settings(body: GlobeIn, request: Request):
+    p = admin(request)
+    data = body.model_dump()
+    changed = {k: v for k, v in data.items() if v != GLOBE_DEFAULTS[k]}
+    store.set_setting(_globe_key(p), json.dumps(changed) if changed else None)
+    return {"settings": data, "defaults": GLOBE_DEFAULTS}
+
+
 @app.get("/api/settings/summary")
 async def settings_summary():
     """One small call for the Settings home: what is set up, what is working and what needs a look."""
@@ -498,7 +554,8 @@ async def settings_summary():
     counts = poller.billing.counts() if has_key else {}
     return {
         "sample": cfg.use_sample,
-        "servers": {"total": len(rows), "enabled": len(enabled), "online": online, "offline": offline, "errors": errors},
+        "servers": {"total": len(rows), "enabled": len(enabled), "online": online, "offline": offline, "errors": errors,
+                    "list": [{"name": v["server"], "status": v.get("status")} for v in view][:24]},
         "accounts": len(store.list_accounts()),
         "netdata": {"mode": cfg.netdata.mode, "error": poller.netdata_error, "unlinked": unlinked,
                     "reporting": sum(1 for v in view if v.get("cpu_known")), "of": len(view)},
@@ -807,7 +864,7 @@ def auth_logout(request: Request):
 @app.get("/api/me")
 def api_me(request: Request):
     p = me(request)
-    return {**p.public(), "actions": p.is_admin and actions_enabled(), "cards_hidden": hidden_cards(p)}
+    return {**p.public(), "actions": p.is_admin and actions_enabled(), "cards_hidden": hidden_cards(p), "globe": globe_settings(p)}
 
 
 # ---------- stopping a stream (admins; Plex Pass) ----------

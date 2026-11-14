@@ -21,13 +21,19 @@
    Country highlight: when a new stream's ping lands, the country it is in gets a white outline with a soft glow (on the
    light card the white line has a thin dark edge so it shows), fading out with the ping. The country is found here in
    the browser from the city's rounded centre (web/globe-countries.js, Natural Earth 110m); nothing new comes from the
-   server. A coastal city that falls just outside the coarse outline takes the nearest country within about 1 degree. */
+   server. A coastal city that falls just outside the coarse outline takes the nearest country within about 1 degree.
+
+   Settings (Settings, Live streams globe; opts.settings, changed live with setOptions; saved per admin account):
+   zoom (how far a new stream zooms in, 1 = off), cruise (a zoom it keeps while it turns, 1 = the whole globe; a new
+   stream zooms in from there and comes back to it), hold (seconds zoomed in), many (busy: one swing to the busiest
+   area; each: one city at a time), line, outline, label, speed (seconds a turn, 0 = still: it swings to new streams and
+   drifts back to where it rests), rest (am, eu, as, or busy: the busiest place playing now), join_km (cities this
+   close share a dot), rings, night (land on the night side is dimmed, from the sun's place now), trail (setTrail:
+   faint rings where streams started today), quiet (1 AM to 7 AM local: no swing or zoom, pings play in place). */
 (function () {
   'use strict';
   var RAD = Math.PI / 180;
-  var PERIOD = 75;            // seconds per turn
-  var TILT = 22 * RAD;        // resting tilt: North America and Europe in view
-  var RM_LON = -88 * RAD;     // where it rests for reduced motion
+  var HOMES = { am: { lat: 22, lon: -84 }, eu: { lat: 46, lon: 12 }, as: { lat: 28, lon: 108 } };  // where it rests (degrees)
   var MERGE_DEG = 3.5, MERGE_S = 2.6, STAGGER_S = 0.32, HOLD_S = 1.6, STALE_S = 12, CLUSTER_DEG = 22;
   var LIFE = 4.2;
   var SERVER = { label: 'Dallas DC', lat: 32.8 * RAD, lon: -96.8 * RAD };
@@ -120,6 +126,30 @@
     }
     return new Float32Array(out);
   }
+
+  // Land dots for a globe kept zoomed in while it turns (settings.cruise): the whole world at about the coarse dots'
+  // spacing on screen. Made once per step size.
+  var worldDots = {};
+  function worldDotsFor(z) {
+    var step = Math.max(0.8, Math.round(20 / z) / 10);
+    if (worldDots[step]) return worldDots[step];
+    if (!COUNTRIES) loadCountries();
+    var out = [];
+    for (var la = -84; la <= 84; la += step) {
+      var ls = step / Math.max(0.2, Math.cos(la * RAD));
+      for (var lo = -180; lo < 180; lo += ls) if (countryHit(lo, la) >= 0) out.push(lo * RAD, la * RAD);
+    }
+    return (worldDots[step] = new Float32Array(out));
+  }
+
+  // Where the sun is overhead now (radians), for Day and night. Good to about a degree, plenty for dimming dots.
+  function sunNow(ms) {
+    var d = new Date(ms), start = Date.UTC(d.getUTCFullYear(), 0, 0);
+    var day = (ms - start) / 864e5, hours = d.getUTCHours() + d.getUTCMinutes() / 60;
+    var decl = -23.44 * Math.cos(2 * Math.PI / 365 * (day + 10));
+    return { lat: decl * RAD, lon: wrapDeg(180 - hours * 15) * RAD };
+  }
+  function wrapDeg(a) { while (a > 180) a -= 360; while (a < -180) a += 360; return a; }
 
   var reduce = false;
   try {
@@ -219,6 +249,20 @@
     });
   }
 
+  // ---------- today's trail: a faint ring where streams started today, bigger where more did ----------
+  function drawTrail(g, ctx, v, th) {
+    var list = g.trailList();
+    if (!list.length) return;
+    var path = new Path2D();
+    list.forEach(function (p) {
+      proj(v, p.lon, p.lat);
+      if (pz <= 0.05) return;
+      var r = (1.3 + Math.min(2.4, Math.log(p.n) * 0.9)) * (v.dotK || 1);
+      path.moveTo(px + r, py); path.arc(px, py, r, 0, Math.PI * 2);
+    });
+    ctx.lineWidth = 1; ctx.strokeStyle = rgba(th.muted, th.light ? 0.55 : 0.7); ctx.stroke(path);
+  }
+
   // ---------- streams playing now ----------
   function drawActive(g, ctx, v, t, th, still) {
     var groups = g.activeGroups(t), hits = [];
@@ -231,7 +275,7 @@
       if (front && !still) {
         var k = ((t / 2.4) + gr.phase) % 1;
         circle(ctx, px, py, r + 0.5 + k * 5); ctx.lineWidth = 1.4; ctx.strokeStyle = rgba(look.rgb, (1 - k) * 0.55 * f); ctx.stroke();
-      } else if (front) {
+      } else if (front && reduce && g.opt().rings) {
         circle(ctx, px, py, r + 2); ctx.fillStyle = rgba(look.rgb, 0.18 * f); ctx.fill();
       }
       ctx.beginPath();
@@ -250,22 +294,32 @@
     var INK = th.ink, VOLT = th.volt, light = th.light;
     circle(ctx, v.cx, v.cy, v.R); ctx.lineWidth = 1; ctx.strokeStyle = rgba(INK, 0.12); ctx.stroke();
     // Zoomed in: finer dots (v.detail) fade in over the coarse ones, so a small country still reads as land.
+    // Day and night: dots on the night side are dimmed (three steps, with a short dusk between).
+    var sun = v.S.night ? sunNow(Date.now()) : null, ss = sun ? Math.sin(sun.lat) : 0, cs = sun ? Math.cos(sun.lat) : 0;
     function landDots(set, alpha) {
       if (alpha <= 0.01) return;
-      var buckets = [new Path2D(), new Path2D(), new Path2D(), new Path2D()];
+      var buckets = [];
+      for (var q = 0; q < 12; q++) buckets.push(null);
       for (var i = 0; i < set.length; i += 2) {
         proj(v, set[i], set[i + 1]);
         if (pz <= 0.02 || px < -4 || py < -4 || px > v.w + 4 || py > v.h + 4) continue;
         var b = pz > 0.75 ? 3 : pz > 0.5 ? 2 : pz > 0.25 ? 1 : 0, r = (0.55 + 0.95 * pz) * (v.dotK || 1);
-        buckets[b].moveTo(px + r, py); buckets[b].arc(px, py, r, 0, Math.PI * 2);
+        if (sun) {
+          var lit = Math.sin(set[i + 1]) * ss + Math.cos(set[i + 1]) * cs * Math.cos(set[i] - sun.lon);
+          b += lit > 0.06 ? 0 : lit > -0.06 ? 4 : 8;
+        }
+        var path = buckets[b] || (buckets[b] = new Path2D());
+        path.moveTo(px + r, py); path.arc(px, py, r, 0, Math.PI * 2);
       }
-      [0.22, 0.4, 0.6, 0.82].forEach(function (a, k) { ctx.fillStyle = rgba(INK, a * alpha); ctx.fill(buckets[k]); });
+      var depth = [0.22, 0.4, 0.6, 0.82], light = [1, 0.6, 0.3];
+      buckets.forEach(function (path, k) { if (path) { ctx.fillStyle = rgba(INK, depth[k % 4] * light[Math.floor(k / 4)] * alpha); ctx.fill(path); } });
     }
     var mix = v.detail ? v.detail.mix : 0;
-    landDots(DOTS, 1 - mix);
+    landDots(v.base || DOTS, 1 - mix);
     if (v.detail) landDots(v.detail.dots, mix);
-    drawCountries(g, ctx, v, t, th);
-    drawActive(g, ctx, v, t, th, reduce);
+    if (v.S.trail) drawTrail(g, ctx, v, th);
+    if (v.S.outline) drawCountries(g, ctx, v, t, th);
+    drawActive(g, ctx, v, t, th, reduce || !v.S.rings);
 
     proj(v, SERVER.lon, SERVER.lat);
     var srv = pz > 0 ? { x: px, y: py } : null;
@@ -302,7 +356,7 @@
       if (halo < 1) { circle(ctx, px, py, 4 + halo * 16); ctx.fillStyle = rgba(VOLT, (1 - halo) * 0.55 * f); ctx.fill(); }
       circle(ctx, px, py, 1.5 + ease(la / 0.4) * 3.8); ctx.fillStyle = rgba(VOLT, fade * f); ctx.fill();
       ctx.lineWidth = 1.5; ctx.strokeStyle = rgba(INK, 0.9 * fade * f); ctx.stroke();
-      if (front && pz > 0.15 && age < LIFE - 0.6) labels.push({ x: px, y: py, text: labelText(p), a: fade, gap: 11 });
+      if (v.S.label && front && pz > 0.15 && age < LIFE - 0.6) labels.push({ x: px, y: py, text: labelText(p), a: fade, gap: 11 });
     });
     labels = labels.slice(-3);
     if (srv && !labels.some(function (l) { var dx = l.x - srv.x, dy = l.y - srv.y; return dx * dx + dy * dy < 900; })) {
@@ -340,11 +394,34 @@
     if (!DOTS || !DOTS.length) loadDots();
     var ctx = canvas.getContext('2d');
     var w = 1, h = 1, dpr = 1, onScreen = true, dirty = true, cxf = 0.5, avoid = [], clear = [], th = null;
-    var lam = reduce ? RM_LON : (opts.startLon != null ? opts.startLon : -70) * RAD, tilt = TILT;
-    // Zoom (opts.zoom): the swing also zooms in until the new stream's country fills most of the globe's room,
-    // stays zoomed (still turning) while the ping, line and outline play, then zooms back out. zoomOut.at is when.
-    var zoom = 1, zoomOut = null, lastHalf = 150, lastR = 120, detail = null;
-    var ZOOM_MAX = 5, ZOOM_VIEW_S = 2.6, ZOOM_OUT_S = 1.1;
+    var S = norm(opts.settings), busyHome = null, seek = false, homeSwing = false, trail = [], base = null, baseTimer = 0;
+    function norm(x) {
+      x = x || {};
+      var n = function (v, d) { v = Number(v); return isFinite(v) ? v : d; };
+      return { zoom: opts.zoom === false ? 1 : Math.max(1, Math.min(6, n(x.zoom, 5))), cruise: Math.max(1, Math.min(4, n(x.cruise, 1))),
+        hold: n(x.hold, 3), many: x.many === 'each' ? 'each' : 'busy', line: x.line !== false, outline: x.outline !== false,
+        label: x.label !== false, speed: Math.max(0, n(x.speed, 75)), rest: HOMES[x.rest] || x.rest === 'busy' ? x.rest : 'am',
+        joinDeg: Math.max(0.05, n(x.join_km, 130) / 111), rings: x.rings !== false, night: !!x.night, trail: !!x.trail, quiet: !!x.quiet };
+    }
+    function rate() { return S.speed > 0 ? Math.PI * 2 / S.speed : 0; }
+    function home() {
+      var hm = S.rest === 'busy' ? (busyHome || HOMES.am) : HOMES[S.rest];
+      return { lon: hm.lon * RAD, lat: Math.max(-25, Math.min(50, hm.lat)) * RAD };
+    }
+    function goHome() { if (rate()) homeSwing = true; else seek = true; }
+    function quietNow() { if (!S.quiet) return false; var hr = new Date().getHours(); return hr >= 1 && hr < 7; }
+    // Zoomed in while it turns: finer land dots for the whole world (made a moment after the setting settles).
+    function rebase() {
+      clearTimeout(baseTimer);
+      if (S.cruise < 1.15) { base = null; return; }
+      baseTimer = setTimeout(function () { base = worldDotsFor(S.cruise); dirty = true; wake(); }, 150);
+    }
+    var lam = home().lon, tilt = home().lat;
+    // Zoom: the swing also zooms in until the new stream's country fills most of the globe's room (at most S.zoom),
+    // stays zoomed (still turning) while the ping, line and outline play, then zooms back out to S.cruise.
+    var zoom = S.cruise, zoomOut = null, lastHalf = 150, lastR = 120, detail = null;
+    var ZOOM_OUT_S = 1.1;
+    rebase();
     function zoomFor(aim, lat, lon) {
       var reach = 0;
       aim.forEach(function (p) {
@@ -352,7 +429,7 @@
         reach = Math.max(reach, angDeg({ lat: lat, lon: lon }, p) + (r == null ? 6 : Math.min(r, 35)));
       });
       reach = Math.max(4, Math.min(80, reach));
-      return Math.max(1, Math.min(ZOOM_MAX, 0.82 * lastHalf / (lastR * Math.sin(reach * RAD))));
+      return Math.max(1, Math.min(S.zoom, 0.82 * lastHalf / (lastR * Math.sin(reach * RAD))));
     }
     var pings = [], queue = [], spin = null, holdUntil = 0, lastStart = 0;
     var active = {}, hitList = [];
@@ -415,8 +492,8 @@
         lam = spin.lam0 + spin.dl * e; tilt = spin.tilt0 + (spin.tilt1 - spin.tilt0) * e;
         if (spin.z1 != null) zoom = spin.z0 + (spin.z1 - spin.z0) * e;
         if (k >= 1) {
-          if (spin.z1 != null && spin.z1 > 1.05) {
-            zoomOut = { at: t + 0.9 + ZOOM_VIEW_S, from: spin.z1 };
+          if (spin.z1 != null && spin.z1 > S.cruise + 0.05) {
+            zoomOut = { at: t + 0.9 + S.hold, from: spin.z1 };
             holdUntil = zoomOut.at + ZOOM_OUT_S;
           } else holdUntil = t + HOLD_S;
           spin = null;
@@ -426,13 +503,17 @@
       // Zoomed in, the globe keeps turning at its usual pace (Glenn: no stopping); the swing aimed a little ahead,
       // so the city drifts across the middle while its ping plays.
       if (zoomOut) {
-        lam -= dt * (Math.PI * 2 / PERIOD);
+        lam -= dt * rate();
         if (t >= zoomOut.at) {
           var kz = (t - zoomOut.at) / ZOOM_OUT_S;
-          zoom = zoomOut.from + (1 - zoomOut.from) * inOut(kz);
-          if (kz >= 1) { zoom = 1; zoomOut = null; detail = null; }
+          zoom = zoomOut.from + (S.cruise - zoomOut.from) * inOut(kz);
+          if (kz >= 1) { zoom = S.cruise; zoomOut = null; detail = null; }
         }
         return;
+      }
+      // Quiet hours: new streams ping where they are, no swing and no zoom.
+      if (queue.length && quietNow()) {
+        queue.splice(0, queue.length).forEach(function (p, i) { release(p, t + i * STAGGER_S); });
       }
       if (queue.length) {
         var stale = queue.filter(function (p) { return t - p.born > STALE_S; });
@@ -442,7 +523,7 @@
         }
       }
       if (queue.length && t >= holdUntil) {
-        var batch = queue.length > 2 ? queue.splice(0, queue.length) : [queue.shift()];
+        var batch = queue.length > 2 && S.many === 'busy' ? queue.splice(0, queue.length) : [queue.shift()];
         var aim = batch;
         if (batch.length > 2) {
           var best = batch[0], bestN = -1;
@@ -456,12 +537,13 @@
         aim.forEach(function (p) { x += Math.cos(p.lat) * Math.cos(p.lon); y += Math.cos(p.lat) * Math.sin(p.lon); z += Math.sin(p.lat); });
         var lon = Math.atan2(y, x), lat = Math.atan2(z, Math.sqrt(x * x + y * y));
         // With zoom the swing lands half a hold's turn ahead of the city, so the city passes the middle mid-hold.
-        var lead = opts.zoom ? (0.9 + ZOOM_VIEW_S) / 2 * (Math.PI * 2 / PERIOD) : 0;
+        var zoomOn = S.zoom > S.cruise + 0.05;
+        var lead = zoomOn ? (0.9 + S.hold) / 2 * rate() : 0;
         var dl = wrap(lon + lead - lam), t1 = Math.max(-25 * RAD, Math.min(50 * RAD, lat));
         var z1 = null;
-        if (opts.zoom) {
-          t1 = Math.max(-70 * RAD, Math.min(75 * RAD, lat)); z1 = zoomFor(aim, lat, lon);
-          if (z1 > 1.3) {
+        if (zoomOn) {
+          t1 = Math.max(-70 * RAD, Math.min(75 * RAD, lat)); z1 = Math.max(S.cruise, zoomFor(aim, lat, lon));
+          if (z1 > Math.max(1.3, S.cruise + 0.2)) {
             // Enough grid to fill the card's corners at full zoom, at about the coarse dots' spacing on screen.
             var halfDiag = Math.sqrt(w * w + h * h) / 2;
             var span = Math.min(80, Math.asin(Math.min(1, halfDiag / (lastR * z1))) / RAD + 10);
@@ -472,10 +554,22 @@
         if (z1 != null) dur = Math.max(dur, 0.6 + 0.25 * Math.log(z1 / zoom + 1));
         spin = { t0: t, dur: dur, lam0: lam, dl: dl, tilt0: tilt, tilt1: t1, z0: zoom, z1: z1 };
         batch.forEach(function (p, i) { release(p, t + dur + i * STAGGER_S); });
+        seek = rate() === 0;
         return;
       }
-      lam -= dt * (Math.PI * 2 / PERIOD);
-      if (t > holdUntil + 3) tilt += (TILT - tilt) * Math.min(1, dt * 0.6);
+      var hm = home();
+      // The resting place changed while it turns: one smooth swing there, then it turns on from it.
+      if (homeSwing && t >= holdUntil) {
+        homeSwing = false;
+        var dh = wrap(hm.lon - lam);
+        spin = { t0: t, dur: 0.6 + 0.8 * Math.abs(dh) / Math.PI, lam0: lam, dl: dh, tilt0: tilt, tilt1: hm.lat, z0: zoom, z1: null };
+        return;
+      }
+      zoom += (S.cruise - zoom) * Math.min(1, dt * 3);           // the cruise setting changed: ease to it
+      lam -= dt * rate();
+      // Still: drift back to where it rests after a stream's hold.
+      if (seek && !rate() && t > holdUntil + 3) lam += wrap(hm.lon - lam) * Math.min(1, dt * 1.2);
+      if (t > holdUntil + 3) tilt += (hm.lat - tilt) * Math.min(1, dt * 0.6);
     }
 
     var g = {
@@ -496,7 +590,7 @@
         var R0 = radiusFor(cx, h / 2, Math.max(10, Math.min(h / 2, cx, w - cx) - 26));
         lastR = R0; lastHalf = Math.min(h / 2, cx, w - cx);
         var v = { w: w, h: h, cx: cx, cy: h / 2, R: R0 * zoom, zoom: zoom, dotK: 1 + (zoom - 1) * 0.08, lam: lam,
-          sp: Math.sin(tilt), cp: Math.cos(tilt), avoid: avoid, clear: clear,
+          sp: Math.sin(tilt), cp: Math.cos(tilt), avoid: avoid, clear: clear, S: S, base: base,
           detail: detail && zoom > 1.01 ? { dots: detail.dots, mix: clamp((zoom - 1) / Math.max(0.01, detail.z1 - 1) * 1.3 - 0.15) } : null };
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
@@ -505,8 +599,8 @@
       },
       reducedChanged: function () {
         if (reduce) {
-          var now = performance.now() / 1000;
-          lam = RM_LON; tilt = TILT; spin = null; zoom = 1; zoomOut = null; detail = null;
+          var now = performance.now() / 1000, hm = home();
+          lam = hm.lon; tilt = hm.lat; spin = null; zoom = S.cruise; zoomOut = null; detail = null;
           queue.forEach(function (p, i) { release(p, now + i * STAGGER_S); });
           queue = [];
         }
@@ -520,7 +614,7 @@
           var q = pings[i];
           if (now - q.born < MERGE_S && angDeg(q, p) < MERGE_DEG) { q.n += 1; q.startAt = Math.max(now, q.startAt); if (e.id) q.ids.push(e.id); wake(); return; }
         }
-        p.arc = angDeg(SERVER, p) > 1.5 ? arcPoints(SERVER, p, 40) : null;
+        p.arc = S.line && angDeg(SERVER, p) > 1.5 ? arcPoints(SERVER, p, 40) : null;
         p.country = countryAt(e.lat, e.lon);
         if (reduce) { p.startAt = Math.max(now, lastStart + STAGGER_S); lastStart = p.startAt; }
         else { p.startAt = Infinity; queue.push(p); }
@@ -543,6 +637,34 @@
           a.cat = e.cat;
         });
         Object.keys(active).forEach(function (id) { if (!seen[id] && !active[id].gone) active[id].gone = now; });
+        // Rest over "Busiest now": the place with the most streams within about 2,500 km, averaged.
+        var live = (list || []).map(function (e) { return { lat: e.lat * RAD, lon: e.lon * RAD }; });
+        if (live.length) {
+          var best = null, bestN = -1;
+          live.forEach(function (p) { var n = live.filter(function (q) { return angDeg(p, q) < CLUSTER_DEG; }).length; if (n > bestN) { best = p; bestN = n; } });
+          var x = 0, y = 0, z = 0;
+          live.filter(function (q) { return angDeg(best, q) < CLUSTER_DEG; }).forEach(function (p) { x += Math.cos(p.lat) * Math.cos(p.lon); y += Math.cos(p.lat) * Math.sin(p.lon); z += Math.sin(p.lat); });
+          var was = busyHome;
+          busyHome = { lon: Math.atan2(y, x) / RAD, lat: Math.atan2(z, Math.sqrt(x * x + y * y)) / RAD };
+          if (S.rest === 'busy' && !was) { goHome(); if (reduce) { lam = home().lon; tilt = home().lat; } }
+        }
+        dirty = true; wake();
+      },
+      /** Today's trail: [{lat, lon, n}] (degrees). */
+      setTrail: function (list) {
+        trail = (list || []).map(function (p) { return { lat: p.lat * RAD, lon: p.lon * RAD, n: Math.max(1, p.n | 0) }; });
+        dirty = true; wake();
+      },
+      trailList: function () { return trail; },
+      opt: function () { return S; },
+      /** New settings (Settings, Live streams globe): takes effect at once, easing to a new zoom or resting place. */
+      setOptions: function (x) {
+        var was = S;
+        S = norm(x);
+        if (S.cruise !== was.cruise) rebase();
+        if (S.rest !== was.rest || (S.speed !== was.speed && !S.speed)) goHome();
+        if (reduce) { var hm = home(); lam = hm.lon; tilt = hm.lat; zoom = S.cruise; }
+        if (!S.trail) trail = [];
         dirty = true; wake();
       },
       activeGroups: function (t) {
@@ -551,7 +673,7 @@
           var a = active[id], from = landsAt(a, t);
           var on = clamp((t - from) / 0.6) * (a.gone ? 1 - clamp((t - a.gone) / 0.8) : 1);
           if (on <= 0) return;
-          var pl = places.filter(function (c) { return angDeg(c, a) < 1.2; })[0];
+          var pl = places.filter(function (c) { return angDeg(c, a) < S.joinDeg; })[0];
           if (!pl) { pl = { lat: a.lat, lon: a.lon, cats: {} }; places.push(pl); }
           var gr = pl.cats[a.cat] || (pl.cats[a.cat] = { lat: pl.lat, lon: pl.lon, labels: {}, cat: a.cat, n: 0, a: 0, phase: a.phase });
           gr.n += 1; gr.a = Math.max(gr.a, on); gr.labels[a.label] = (gr.labels[a.label] || 0) + 1;
