@@ -112,7 +112,7 @@
     alerts: { title: 'Alerts', scope: 'all', lead: 'When a server counts as running hot. A hot server turns amber on the capacity rings and shows up under Alerts.' },
     access: { title: 'Access', scope: 'all', lead: 'Who can sign in and what each person can see. Anyone you share a Plex server with can sign in with Plex.' },
     billing: { title: 'Billing', scope: 'all', lead: 'Shows each person their own Stripe subscription. The key is read-only: nothing is ever charged or changed from here.' },
-    reqlog: { title: 'Request log', scope: 'all', lead: 'Every movie and series requested through this site: who asked, when, and where it stands in Seerr now.' },
+    reqlog: { title: 'Request log', scope: 'all', lead: 'Every movie, series, comic, ebook and audiobook requested through this site: who asked, when, and where it stands now.' },
     requests: { title: 'Requests', scope: 'all', lead: 'Connects your Seerr so people can find movies and series and request them here, without signing in to Seerr. Each person acts as their own Seerr account, so its permissions, limits and approvals still apply.' },
     books: { title: 'Books & comics', scope: 'all', lead: 'Shows the Greystar media site inside this dashboard, so people read comics and ebooks, listen to audiobooks and request more without signing in again.' },
     arr: { title: 'Radarr & Sonarr', scope: 'all', lead: 'Shows people how far their movies and shows have downloaded, and lets Unwatched cleanup remove titles nobody watched (with their files, so they are not downloaded again).' }
@@ -138,7 +138,7 @@
     access: 'access people viewers sections permissions admins admin login password sync users turn off',
     billing: 'billing stripe subscription key customers unmatched match paypal',
     requests: 'requests seerr overseerr api key 4k approve link people movies series',
-    reqlog: 'request log csv export needs you searches that found nothing import earlier',
+    reqlog: 'request log csv export needs you searches that found nothing import earlier books comics ebooks audiobooks not released not out yet',
     arr: 'radarr sonarr download progress unwatched cleanup delete remove days review auto',
     books: 'books comics ebooks audiobooks media site secret frame'
   };
@@ -1404,7 +1404,9 @@
 
   // ---------- Request log: every request made through this site (admins) ----------
   var LOG_GROUPS = [['all', 'All'], ['waiting', 'Waiting for approval'], ['approved', 'Approved'], ['available', 'Available'],
-    ['problem', 'Declined or failed'], ['ended', 'Canceled or removed']];
+    ['problem', 'Declined or failed'], ['ended', 'Canceled or removed'], ['unreleased', 'Not out yet']];
+  var LOG_KINDS = [['', 'All'], ['movie', 'Movies'], ['tv', 'Series'], ['comic', 'Comics'], ['ebook', 'Ebooks'], ['audiobook', 'Audiobooks']];
+  var KIND_NAME = { movie: 'Movie', tv: 'Series', comic: 'Comic', ebook: 'Ebook', audiobook: 'Audiobook' };
   var lg = { q: '', kind: '', group: 'all', page: 1, rows: [], data: null, busy: false, seq: 0, msg: null, timer: 0, ui: null };
   function logQuery() {
     return 'q=' + encodeURIComponent(lg.q) + '&kind=' + encodeURIComponent(lg.kind) + '&group=' + encodeURIComponent(lg.group);
@@ -1476,12 +1478,12 @@
       .then(function () { if (seq === lg.seq) { lg.busy = false; paintLog(); } });
   }
   function buildLog(pane) {
-    var search = el('input', { type: 'search', class: 'st-input st-log__search', id: 'lg-q', placeholder: 'Search by person, email or title',
+    var search = el('input', { type: 'search', class: 'st-input st-log__search', id: 'lg-q', placeholder: 'Search by person, email, title or author',
       'aria-label': 'Search the request log', value: lg.q, oninput: function () {
         clearTimeout(lg.timer);
         lg.timer = setTimeout(function () { lg.q = search.value.trim(); loadLog(false); }, 250);
       } });
-    var kinds = el('div', { class: 'st-seg', role: 'group', 'aria-label': 'Type' }, [['', 'All'], ['movie', 'Movies'], ['tv', 'Series']].map(function (k) {
+    var kinds = el('div', { class: 'st-seg st-log__kinds', role: 'group', 'aria-label': 'Type' }, LOG_KINDS.map(function (k) {
       return el('button', { type: 'button', 'data-kind': k[0], 'aria-pressed': lg.kind === k[0] ? 'true' : 'false', text: k[1], onclick: function () {
         lg.kind = k[0];
         kinds.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', b.dataset.kind === lg.kind ? 'true' : 'false'); });
@@ -1534,19 +1536,35 @@
     if (list.length === 1) return 'Season ' + list[0];
     return 'Seasons ' + (run && list.length > 2 ? list[0] + ' to ' + list[list.length - 1] : list.join(', '));
   }
+  // Not out yet: "Out Dec 1" (this year) or "Out Dec 1, 2027"; no date known: "Not out yet".
+  function soonText(u) {
+    if (!u.date) return 'Not out yet';
+    var d = new Date(u.date + 'T12:00:00');
+    var txt = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: d.getFullYear() === new Date().getFullYear() ? undefined : 'numeric' });
+    return (u.what === 'season' ? 'Airs ' : u.what === 'cinema' ? 'In cinemas ' : 'Out ') + txt;
+  }
   function logRow(r, base) {
     var at = new Date(r.at * 1000);
-    var poster = el('span', { class: 'st-log__poster', 'aria-hidden': 'true' });
-    if (r.poster && base) { var im = new Image(); im.onload = function () { poster.style.backgroundImage = 'url("' + im.src + '")'; }; im.src = base + r.poster; }
-    var href = '#/requests/' + (r.kind === 'movie' ? 'movie/' : 'series/') + r.tmdb;
-    var bits = [r.year, r.kind === 'movie' ? 'Movie' : 'Series', seasonText(r.seasons)].filter(Boolean).join(' · ');
+    var book = !!KIND_NAME[r.kind] && r.kind !== 'movie' && r.kind !== 'tv';
+    var poster = el('span', { class: 'st-log__poster' + (book ? ' st-log__poster--book st-log__poster--' + r.kind : ''), 'aria-hidden': 'true' },
+      book ? (r.title || '?').trim().charAt(0).toUpperCase() : null);
+    if (r.poster && (base || r.poster.charAt(0) === '/')) {
+      var im = new Image();
+      im.onload = function () { poster.style.backgroundImage = 'url("' + im.src + '")'; poster.textContent = ''; };
+      im.src = r.poster.charAt(0) === '/' ? r.poster : base + r.poster;
+    }
+    var href = book ? (r.open ? '#/books' + r.open : null) : '#/requests/' + (r.kind === 'movie' ? 'movie/' : 'series/') + r.tmdb;
+    var bits = [r.year, KIND_NAME[r.kind] || r.kind, seasonText(r.seasons), r.sub].filter(Boolean).join(' · ');
+    var soon = r.unreleased ? el('span', { class: 'st-tag st-tag--soon', title: 'Not released yet. It downloads once it is out.' },
+      el('span', { class: 'st-shape-ring', 'aria-hidden': 'true' }), soonText(r.unreleased)) : null;
     var sub = [r.decided && r.decided.by ? (r.state === 'declined' ? 'Declined by ' : 'Approved by ') + r.decided.by : null,
       r.hint, r.ended_at ? when(r.ended_at) : null].filter(Boolean).join(' · ') || null;
-    return el('li', { class: 'st-log__row' },
+    return el('li', { class: 'st-log__row' + (r.unreleased ? ' is-unreleased' : '') },
       poster,
       el('div', { class: 'st-log__what' },
-        el('a', { class: 'st-log__title', href: href, text: r.title, onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } }),
-        el('span', { class: 'st-log__meta' }, bits, r.is4k ? el('span', { class: 'st-tag', text: '4K' }) : null, r.source === 'imported' ? el('span', { class: 'st-tag', text: 'Imported', title: 'Brought in from Seerr; logged before the request log existed.' }) : null,
+        href ? el('a', { class: 'st-log__title', href: href, text: r.title, onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } })
+          : el('span', { class: 'st-log__title', text: r.title }),
+        el('span', { class: 'st-log__meta' }, bits, soon, r.is4k ? el('span', { class: 'st-tag', text: '4K' }) : null, r.source === 'imported' ? el('span', { class: 'st-tag', text: 'Imported', title: 'Brought in from Seerr; logged before the request log existed.' }) : null,
           r.help === 'notified' ? el('span', { class: 'st-tag st-tag--danger', text: 'Needs you', title: 'They tried it again once and then asked you to look.' })
             : r.help === 'retried' ? el('span', { class: 'st-tag', text: 'Tried again', title: 'They used their one try again.' }) : null)),
       el('div', { class: 'st-log__who' },
@@ -1555,7 +1573,8 @@
           var box = document.getElementById('lg-q'); if (box) box.value = q;
           lg.q = q; loadLog(false);
         } }),
-        el('span', { class: 'st-log__meta', text: r.who.admin_login ? 'Admin login' : [r.who.username ? '@' + r.who.username : null, r.who.email].filter(Boolean).join(' · ') })),
+        el('span', { class: 'st-log__meta', text: r.who.admin_login ? 'Admin login' : [r.who.username ? '@' + r.who.username : null, r.who.email].filter(Boolean).join(' · ')
+          || (r.who.kind === 'media' ? 'Media site account' : '') })),
       el('time', { class: 'st-log__when', datetime: at.toISOString(), title: at.toLocaleString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) },
         el('b', { text: at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }) }),
         el('span', { class: 'st-log__meta st-log__date', text: at.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) })),
@@ -1572,19 +1591,20 @@
     }));
     var c = (d && d.counts) || {};
     ui.chips.replaceChildren.apply(ui.chips, LOG_GROUPS.map(function (g) {
-      return el('button', { type: 'button', class: 'st-log__chip', 'aria-pressed': lg.group === g[0] ? 'true' : 'false', onclick: function () { lg.group = g[0]; loadLog(false); } },
-        g[1], el('b', { text: String(c[g[0]] || 0) }));
+      return el('button', { type: 'button', class: 'st-log__chip' + (g[0] === 'unreleased' ? ' st-log__chip--soon' : ''), 'aria-pressed': lg.group === g[0] ? 'true' : 'false', onclick: function () { lg.group = g[0]; loadLog(false); } },
+        g[0] === 'unreleased' ? el('span', { class: 'st-shape-ring', 'aria-hidden': 'true' }) : null, g[1], el('b', { text: String(c[g[0]] || 0) }));
     }));
     var notes = [];
     if (lg.msg) notes.push(el('p', { class: 'st-msg st-msg--' + lg.msg.kind, role: lg.msg.kind === 'error' ? 'alert' : 'status' }, lg.msg.kind === 'error' ? el('b', { text: 'Error: ' }) : null, lg.msg.text));
     if (d && d.error) notes.push(el('p', { class: 'st-msg st-msg--error', role: 'alert' }, el('b', { text: 'Seerr: ' }), d.error + ' The log still shows who asked for what; the status shows Unknown until Seerr answers.'));
+    if (d && d.media_error) notes.push(el('p', { class: 'st-msg st-msg--error', role: 'alert' }, el('b', { text: 'Media site: ' }), d.media_error + ' Comic, ebook and audiobook requests show again once it answers.'));
     ui.msg.replaceChildren.apply(ui.msg, notes);
     if (!d) { ui.list.replaceChildren(el('li', { class: 'st-note st-log__empty', text: 'Loading…' })); ui.more.hidden = true; return; }
     if (!lg.rows.length) {
       var filtered = lg.q || lg.kind || lg.group !== 'all';
       ui.list.replaceChildren(el('li', { class: 'st-log__empty' },
         el('b', { text: filtered ? 'No requests match.' : 'No requests yet.' }),
-        el('span', { class: 'st-note', text: filtered ? 'Try another search or status.' : 'Requests made on this site show up here as they are made. Requests from before the log existed can be brought in with Import earlier requests.' })));
+        el('span', { class: 'st-note', text: filtered ? 'Try another search, type or status.' : 'Requests made on this site show up here as they are made. Movie and series requests from before the log existed can be brought in with Import earlier requests.' })));
       ui.more.hidden = true;
       return;
     }

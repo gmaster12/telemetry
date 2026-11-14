@@ -162,6 +162,16 @@ files to add servers. Keep it that way.
   Show more (50 a page) and Download CSV (`/api/settings/requests/log.csv?tz=`, in the admin's time zone).
   "Import earlier requests" (`import_earlier`) brings in requests by people linked to Seerr made since they were
   linked, marked Imported (Seerr does not record where a request came from). A Settings home card shows counts.
+  Comics, ebooks and audiobooks are in the log too (Glenn, Nov 14 2026): the media site's signed admin feed
+  `GET /api/telemetry/log?days=400` (`Media.admin_log`, cached 60 s; `logForAdmins` in the media site's
+  `server/telemetry_feed.ts`) gives every one with who asked (Plex id, username, Plex email) and declined or cancelled
+  ones; `request_log.shape_book` puts them in the same rows (a Plex id known here gets the same name as their movies),
+  merged by time. Covers come through `GET /api/settings/requests/log/cover/<kind>/<id>` (admin-only), a letter tile
+  until then. Type switch: All, Movies, Series, Comics, Ebooks, Audiobooks. The media site not answering: movies and
+  series still show with a note (`media_error`). Movies and series that are not out yet (`mark_unreleased`, the same
+  TMDB dates as `waiting_reason`, now `release_wait` in `seerr.py`; checked only for waiting, approved, partly available
+  and failed rows) are orange rows with a ring and "Out Dec 1" / "Airs Jan 16, 2027" / "In cinemas ...", plus a
+  "Not out yet" status chip; the CSV has a Not released yet column.
 - Ratings and box office (Glenn's pick C, "Scores on every poster"): `GET /api/requests/scores?ids=movie:1,tv:2`
   (up to 60, `requests` section) returns per title Rotten Tomatoes critics/audience (`/movie/{id}/ratingscombined`,
   falling back to `/movie/{id}/ratings`; `/tv/{id}/ratings`), IMDb (from ratingscombined), TMDB user score and, for
@@ -307,6 +317,8 @@ files to add servers. Keep it that way.
 
 ## Live streams globe and Dashboard Cards (Glenn's pick 7 "Swing to the city", Nov 13 2026)
 
+- The globe is always centred in its card (`--gl-cx: 0.5`, Glenn, Nov 14 2026); it shrinks to keep clear of the title
+  and legend rather than moving aside.
 - Admin card `#globe-card` beside When people watch (same size, corner cut and header; `.sd-insights` is two equal columns
   from 1,000 px). Server capacity moved under the pair as a thin full-width block (`#capacity-card` spans the row; title,
   one line of rings, warning and Rebalance; rings wrap to a second line under 1,180 px). Phones: the globe is on the Home

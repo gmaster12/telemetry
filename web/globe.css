@@ -12,10 +12,10 @@
 .sd-globe { display: flex; flex-direction: column; min-height: 340px; overflow: hidden; container-type: inline-size; }
 .sd-globe > .sd-card__head, .sd-globe > .sd-globe__cap, .sd-globe > .sd-globe__note { position: relative; z-index: 2; }
 .sd-globe__stage { position: absolute; z-index: 1; top: 12px; right: 12px; bottom: 44px; left: 12px; }
-.sd-globe__stage canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; --gl-cx: 0.6; }
+/* The globe sits in the middle of the card (Glenn, Nov 14 2026); it shrinks to keep clear of the title and legend. */
+.sd-globe__stage canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; --gl-cx: 0.5; }
 /* Zoomed in, the land reaches the stage's edges: let it fade out there instead of stopping in a hard line. */
 .sd-globe__stage canvas { -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent); mask-image: linear-gradient(to bottom, #000 82%, transparent); }
-@container (max-width: 640px) { .sd-globe__stage canvas { --gl-cx: 0.64; } }
 .gs-app .sd-globe__cap { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: auto; font-size: 13px; line-height: 18px; color: var(--ink-muted); font-variant-numeric: tabular-nums; }
 .sd-globe__cap b { font-weight: 600; color: var(--ink); }
 .sd-globe__cap > i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--volt); box-shadow: 0 0 0 1.5px var(--ink); }

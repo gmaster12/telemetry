@@ -177,6 +177,19 @@ class Media:
         self._feed[key] = (time.time(), items)
         return items
 
+    async def admin_log(self, days: int = 400) -> list[dict]:
+        """Every comic, ebook and audiobook request from the last `days` days with who asked, for the Request log
+        (Settings, admins only; `GET /api/telemetry/log`). Cached a minute."""
+        key = f"log:{int(days)}"
+        hit = self._feed.get(key)
+        if hit and time.time() - hit[0] < RECENT_SECONDS:
+            return hit[1]
+        body = await self.call("GET", f"/api/telemetry/log?days={int(days)}")
+        keep = ("ref", "kind", "id", "title", "sub", "created", "state", "label", "open", "who")
+        items = [{k: x.get(k) for k in keep} for x in (body.get("items") or []) if isinstance(x, dict)]
+        self._feed[key] = (time.time(), items)
+        return items
+
     async def cover(self, kind: str, item_id: int) -> bytes | None:
         """One request's cover from the media site (`GET /api/telemetry/cover/<kind>/<id>`, a small WebP), or None.
         Kept in memory: a day for a cover, an hour for none, at most COVER_KEEP of them."""

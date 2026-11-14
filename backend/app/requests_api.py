@@ -18,7 +18,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from .arr import ArrError
-from .seerr import MEDIA_STATUS, REQUEST_STATUS, Requests, SeerrError, has
+from .seerr import MEDIA_STATUS, REQUEST_STATUS, Requests, SeerrError, has, release_wait
 
 log = logging.getLogger("telemetry.requests")
 
@@ -291,32 +291,11 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
     async def waiting_reason(row: dict) -> dict:
         """Why an approved request has not downloaded yet: not out yet (with the date it comes out, from TMDB through
         Seerr), or out but no copy found yet (Radarr or Sonarr keep looking on their own)."""
-        today = dt.date.today().isoformat()
         try:
             d = await svc.get(f"/{'movie' if row['kind'] == 'movie' else 'tv'}/{int(row['tmdbId'])}", ttl=SLOW)
         except SeerrError:
             return {"reason": "searching"}
-        if row["kind"] == "movie":
-            # Digital (4) or physical (5) release is when a copy can exist; a theatrical date alone is not enough.
-            dates = sorted((rd.get("release_date") or "")[:10] for c in ((d.get("releases") or {}).get("results") or [])
-                           for rd in c.get("release_dates") or [] if rd.get("type") in (4, 5) and rd.get("release_date"))
-            home = next((x for x in dates if x), None)
-            if home and home > today:
-                return {"reason": "unreleased", "date": home, "what": "home"}
-            if not home and (d.get("releaseDate") or "") > today:
-                return {"reason": "unreleased", "date": d["releaseDate"], "what": "cinema"}
-            return {"reason": "searching"}
-        wanted = set(row.get("seasons") or [])
-        future = sorted(x.get("airDate") for x in d.get("seasons") or []
-                        if x.get("seasonNumber") in wanted and x.get("airDate") and x["airDate"] > today)
-        nxt = d.get("nextEpisodeToAir") or {}
-        if nxt.get("airDate") and nxt.get("seasonNumber") in wanted and nxt["airDate"] >= today:
-            return {"reason": "airing", "date": nxt["airDate"], "season": nxt.get("seasonNumber"), "episode": nxt.get("episodeNumber")}
-        if future:
-            return {"reason": "unreleased", "date": future[0], "what": "season"}
-        if any(x.get("seasonNumber") in wanted and not x.get("airDate") for x in d.get("seasons") or []):
-            return {"reason": "unreleased", "date": None, "what": "season"}
-        return {"reason": "searching"}
+        return release_wait(d, row["kind"], row.get("seasons"), dt.date.today().isoformat())
 
     async def requests_page(res: dict, me_id: int | None, manage: bool) -> dict:
         rows = (res or {}).get("results") or []
