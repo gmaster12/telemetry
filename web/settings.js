@@ -1548,10 +1548,12 @@
     var book = !!KIND_NAME[r.kind] && r.kind !== 'movie' && r.kind !== 'tv';
     var poster = el('span', { class: 'st-log__poster' + (book ? ' st-log__poster--book st-log__poster--' + r.kind : ''), 'aria-hidden': 'true' },
       book ? (r.title || '?').trim().charAt(0).toUpperCase() : null);
-    if (r.poster && (base || r.poster.charAt(0) === '/')) {
+    // A book's cover is a route on this site; a movie or series poster is a TMDB path that hangs off the image base
+    // (it also starts with "/", so it must never be loaded from here).
+    if (r.poster && (book || base)) {
       var im = new Image();
       im.onload = function () { poster.style.backgroundImage = 'url("' + im.src + '")'; poster.textContent = ''; };
-      im.src = r.poster.charAt(0) === '/' ? r.poster : base + r.poster;
+      im.src = book ? r.poster : base + r.poster;
     }
     var href = book ? (r.open ? '#/books' + r.open : null) : '#/requests/' + (r.kind === 'movie' ? 'movie/' : 'series/') + r.tmdb;
     var bits = [r.year, KIND_NAME[r.kind] || r.kind, seasonText(r.seasons), r.sub].filter(Boolean).join(' · ');
