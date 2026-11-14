@@ -5,6 +5,7 @@ time, a city label and the city's centre. Card choices are saved per admin accou
 """
 import asyncio
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -190,3 +191,36 @@ def test_card_choices_are_per_admin_and_default_to_all(app):
     assert b.get("/api/settings/cards").json()["hidden"] == []
     a.put("/api/settings/cards", json={"hidden": []}, headers=H)
     assert a.get("/api/me").json()["cards_hidden"] == []
+
+
+def test_trail_is_city_centres_and_counts_only(tmp_path):
+    g = Globe(fake_geo(tmp_path), lambda ts: 0)
+    now = time.time()
+    g.started({"_ip": "8.8.8.8", "user": "alice", "user_id": "123", "server": "Atlas"}, now=now - 60)
+    g.started({"_ip": "8.8.8.8", "user": "bob", "user_id": "456", "server": "Atlas"}, now=now - 30)
+    g.starts.appendleft((int(now - 2 * 86400), 1.0, 2.0))   # two days ago: never in a trail
+    t = g.trail(0, now=now)
+    assert len(t) == 1 and t[0]["n"] == 2 and set(t[0]) == {"lat", "lon", "n"}
+    assert g.trail(int(now - 45), now=now)[0]["n"] == 1    # since the browser's midnight
+    for secret in ("alice", "bob", "123", "456", "8.8.8.8", "Atlas"):
+        assert secret not in repr(t)
+
+
+def test_globe_settings_are_per_admin_checked_and_on_me(app):
+    a = plex_client(app, "9001", "cluster@mail.com")
+    b = local_admin(app)
+    v = plex_client(app, "2001", "viewer@x.com", ["streams", "viewing"])
+    d = a.get("/api/settings/globe").json()
+    assert d["settings"] == d["defaults"] and d["settings"]["zoom"] == 5 and d["settings"]["cruise"] == 1
+    new = {**d["settings"], "cruise": 2.5, "speed": 0, "rest": "eu", "night": True, "zoom": 3}
+    r = a.put("/api/settings/globe", json=new, headers=H)
+    assert r.status_code == 200 and r.json()["settings"]["cruise"] == 2.5
+    assert a.get("/api/me").json()["globe"]["rest"] == "eu"
+    assert b.get("/api/me").json()["globe"]["rest"] == "am"           # another admin keeps their own
+    assert v.get("/api/me").json()["globe"] is None                  # viewers never get the globe
+    assert v.get("/api/settings/globe").status_code == 403
+    assert v.put("/api/settings/globe", json=new, headers=H).status_code == 403
+    for bad in ({"zoom": 9}, {"cruise": 0.5}, {"speed": 13}, {"rest": "moon"}, {"hold": 4}):
+        assert a.put("/api/settings/globe", json={**new, **bad}, headers=H).status_code == 422
+    a.put("/api/settings/globe", json=d["defaults"], headers=H)       # back to defaults: nothing saved
+    assert app.store.get_setting("globe:plex:9001") is None

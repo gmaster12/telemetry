@@ -103,7 +103,8 @@
   // Admins land on the home of cards; each card opens its section, with a back arrow to the home.
   // Viewers only have Display, so they go straight there.
   var VIEWS = {
-    home: { title: 'Settings', lead: 'Everything at a glance. Open a card to change it.' },
+    home: { title: 'Settings', lead: 'Four groups. Open one of their sections to change it.' },
+    globe: { title: 'Live streams globe', scope: 'account', lead: 'How the globe moves when a stream starts, and how it shows what is playing now. Saved to your admin account, so it looks the same on every device you sign in on.' },
     cards: { title: 'Dashboard Cards', scope: 'account', lead: 'Which cards show on your dashboard. Saved to your admin account, so the same cards show in every browser and on every device you sign in on. Other admins keep their own choice.' },
     display: { title: 'Display', scope: 'you', lead: 'Light or dark, and how the dashboard looks on this screen. Nobody else sees these changes, and your other devices keep their own.' },
     plex: { title: 'Plex servers', scope: 'all', lead: 'Where live streams come from. The dashboard asks each server what is playing every few seconds. Each server can belong to its own Plex account.' },
@@ -117,6 +118,30 @@
     arr: { title: 'Radarr & Sonarr', scope: 'all', lead: 'Shows people how far their movies and shows have downloaded, and lets Unwatched cleanup remove titles nobody watched (with their files, so they are not downloaded again).' }
   };
   var SCOPE_WORDS = { you: 'This browser only', account: 'Your account', all: 'Everyone' };
+  // The Settings home (Glenn's pick C, "Four rooms", Nov 13 2026): twelve sections in four groups. A group's scope tag
+  // says who its changes reach; inside a section the exact tag still shows (This browser only, Your account, Everyone).
+  var ROOMS = [
+    { key: 'you', title: 'Your dashboard', scope: 'Just you', views: ['display', 'cards', 'globe'] },
+    { key: 'data', title: 'Servers and data', scope: 'Everyone', views: ['plex', 'netdata', 'alerts'] },
+    { key: 'media', title: 'Requests and media', scope: 'Everyone', views: ['requests', 'reqlog', 'arr', 'books'] },
+    { key: 'people', title: 'People and billing', scope: 'Everyone', views: ['access', 'billing'] }
+  ];
+  function roomOf(view) { return ROOMS.filter(function (r) { return r.views.indexOf(view) >= 0; })[0] || null; }
+  // Find a setting: words people might look for, per section.
+  var FIND = {
+    display: 'look theme light dark appearance card style size cover art brightness clips moving home layout',
+    cards: 'dashboard cards hide show cards bandwidth servers when people watch capacity users alerts pills',
+    globe: 'globe zoom zoom level zoom while turning spin speed turning rotation still rest europe asia americas busiest line dallas outline country city name dots colour color type server join nearby rings pulse night day trail quiet hours',
+    plex: 'plex servers server token address ip url machine add remove link account owner',
+    netdata: 'netdata cpu network upload bandwidth metrics space room node cloud agent contexts',
+    alerts: 'alerts hot cpu threshold degraded amber',
+    access: 'access people viewers sections permissions admins admin login password sync users turn off',
+    billing: 'billing stripe subscription key customers unmatched match paypal',
+    requests: 'requests seerr overseerr api key 4k approve link people movies series',
+    reqlog: 'request log csv export needs you searches that found nothing import earlier',
+    arr: 'radarr sonarr download progress unwatched cleanup delete remove days review auto',
+    books: 'books comics ebooks audiobooks media site secret frame'
+  };
   var summary = null;
   var summaryAt = 0;
   var summaryTimer = null;
@@ -132,7 +157,17 @@
     var home = t === 'home';
     panel.classList.toggle('has-back', !home && isAdmin());
     document.getElementById('set-back').hidden = home || !isAdmin();
-    document.getElementById('set-crumb').hidden = home || !isAdmin();
+    var crumb = document.getElementById('set-crumb'), room = roomOf(t);
+    crumb.hidden = home || !isAdmin();
+    crumb.textContent = room ? 'Settings \u00b7 ' + room.title : 'Settings';
+    var sibs = document.getElementById('set-sibs');
+    sibs.hidden = home || !isAdmin() || !room;
+    if (!sibs.hidden) {
+      sibs.setAttribute('aria-label', 'Sections in ' + room.title);
+      sibs.replaceChildren.apply(sibs, room.views.map(function (k) {
+        return el('button', { type: 'button', class: 'st-sib', 'aria-current': k === t ? 'page' : null, text: VIEWS[k].title, onclick: function () { if (k !== tab) go(k); } });
+      }));
+    }
     document.getElementById('set-title').textContent = v.title;
     var scope = document.getElementById('set-scope');
     scope.hidden = !v.scope;
@@ -142,6 +177,7 @@
     lead.textContent = v.lead;
     lead.hidden = false;
     document.getElementById('card-size-reset').hidden = t !== 'display';
+    if (t !== 'globe') dropPreview();
     document.getElementById('st-home').hidden = !home;
     document.querySelectorAll('.st-pane').forEach(function (pane) { pane.hidden = pane.id !== 'st-pane-' + t; });
     if (changed) { panel.scrollTop = 0; }
@@ -157,6 +193,7 @@
     else if (t === 'arr') loadArr();
     else if (t === 'reqlog') openLog(changed);
     else if (t === 'cards') loadCards();
+    else if (t === 'globe') renderGlobe();
     else if (t !== 'display') loadState();
     if (window.sdRenderPreviews) window.sdRenderPreviews();
   }
@@ -219,118 +256,148 @@
     return out;
   }
 
-  function homeCard(view, opts) {
-    var card = el('article', { class: 'sd-card st-hcard' + (opts.cls ? ' ' + opts.cls : '') });
-    card.appendChild(el('span', { class: 'sd-notch', 'aria-hidden': 'true' }));
-    var goBtn = el('button', { type: 'button', class: 'sd-go', 'aria-label': opts.goLabel || ('Open ' + VIEWS[view].title), onclick: function () { go(view); } });
-    if (window.sdIcon) goBtn.appendChild(window.sdIcon('arrow'));
-    card.appendChild(goBtn);
-    if (opts.scope) card.appendChild(el('span', { class: 'st-scope st-scope--' + opts.scope, text: SCOPE_WORDS[opts.scope] || 'Everyone' }));
-    card.appendChild(el('h3', { class: 'st-hcard__title' }, el('button', { type: 'button', class: 'st-hcard__link', onclick: function () { go(view); } }, opts.title || VIEWS[view].title)));
-    if (opts.what) card.appendChild(el('p', { class: 'st-hcard__what', text: opts.what }));
-    (opts.body || []).forEach(function (n) { if (n) card.appendChild(n); });
-    if (opts.status) card.appendChild(el('div', { class: 'st-hcard__status' }, badgeEl(opts.status[0], opts.status[1])));
-    if (opts.facts && opts.facts.length) {
-      card.appendChild(el('dl', { class: 'st-facts' }, opts.facts.map(function (f) {
-        return el('div', null, el('dt', { text: f[1] }), el('dd', { text: String(f[0]) }));
-      })));
+  // ---------- the home: "Needs a look", then four groups ("rooms"), each with a headline and a row per section ----------
+  var findQ = '';
+  // A section's state in a few words: [tone, words]. Tone gives the shape: success circle, warning triangle,
+  // danger square, neutral ring (never colour alone).
+  function rowState(view, s, look) {
+    var gc = window.gsCards, gs = window.gsGlobeSettings ? window.gsGlobeSettings.get() : null;
+    if (view === 'display') return ['neutral', look.styleName + ', clips ' + (look.clips === 'on' ? 'on' : 'off')];
+    if (view === 'cards') { var off = gc ? gc.hidden().length : 0; return off ? ['neutral', off + (off === 1 ? ' card hidden' : ' cards hidden')] : ['success', 'All ' + (gc ? gc.keys.length : 9) + ' showing']; }
+    if (view === 'globe') {
+      if (!gs) return ['neutral', 'Default'];
+      var bits = [gs.zoom > 1 ? 'Zooms to ' + gs.zoom + 'x' : 'No zoom'];
+      if (gs.cruise > 1) bits.push('turns at ' + gs.cruise + 'x');
+      else if (!gs.speed) bits.push('still');
+      return ['neutral', bits.join(', ')];
     }
-    return card;
+    if (!s) return null;
+    var sv = s.servers, nd = s.netdata, al = s.alerts, ac = s.access, bl = s.billing, rq = s.requests || {}, lg = rq.log || {}, bk = s.books || {};
+    if (view === 'plex') return !sv.total ? ['warning', 'No servers yet'] : sv.offline.length ? ['danger', names(sv.offline, 1) + (sv.offline.length === 1 ? ' is down' : ' are down')]
+      : ['success', sv.enabled === 1 ? 'Online' : 'All ' + sv.enabled + ' online'];
+    if (view === 'netdata') return nd.mode === 'off' ? ['neutral', 'Off'] : nd.error ? ['danger', 'Last check failed']
+      : nd.of && nd.reporting < nd.of ? ['warning', nd.reporting + ' of ' + nd.of + ' reporting'] : ['success', nd.reporting + ' of ' + nd.of + ' reporting'];
+    if (view === 'alerts') return al.hot.length ? ['warning', names(al.hot, 1) + (al.hot.length === 1 ? ' is hot' : ' are hot')] : ['neutral', 'Hot at ' + Math.round(al.hot_cpu_pct) + '% CPU'];
+    if (view === 'access') return ac.sync_error ? ['danger', 'Loading people failed'] : !ac.synced_at ? ['warning', 'People not loaded'] : ['neutral', (ac.custom + ac.off) + ' custom or off'];
+    if (view === 'billing') return !bl.connected ? ['neutral', 'Not connected'] : bl.error ? ['danger', 'Last sync failed'] : bl.unmatched ? ['warning', bl.unmatched + ' not matched'] : ['success', 'Synced ' + (since(bl.synced_at) || 'soon')];
+    if (view === 'requests') return !rq.connected ? ['neutral', 'Not connected'] : rq.error ? ['danger', 'Seerr not answering'] : rq.pending ? ['warning', rq.pending + ' waiting'] : ['success', 'Seerr on'];
+    if (view === 'reqlog') return rq.needs_you ? ['danger', rq.needs_you + ' need' + (rq.needs_you === 1 ? 's' : '') + ' you'] : lg.total ? ['neutral', (lg.day || 0) + ' in the last 24 h'] : ['neutral', 'Nothing yet'];
+    if (view === 'books') return bk.enabled ? ['success', 'On'] : ['neutral', bk.has_secret ? 'Off' : 'Not connected'];
+    if (view === 'arr') {
+      var ar = s.arr || {}, on = ['radarr', 'sonarr'].filter(function (k) { return ar[k] && ar[k].url && ar[k].has_key; });
+      if (!on.length) return ['neutral', 'Not connected'];
+      if (['radarr', 'sonarr'].some(function (k) { return ar[k] && ar[k].error; })) return ['danger', 'Last check failed'];
+      return on.length < 2 ? ['warning', (on[0] === 'radarr' ? 'Radarr' : 'Sonarr') + ' only'] : ['success', 'Connected'];
+    }
+    return null;
   }
-
+  function shapeEl(tone) { return el('i', { class: 'st-shape st-shape--' + (tone || 'neutral'), 'aria-hidden': 'true' }); }
+  function stateEl(st) {
+    if (!st) return el('span', { class: 'st-rstate', text: '\u2026' });
+    return el('span', { class: 'st-rstate' }, st[0] === 'neutral' ? null : shapeEl(st[0]), el('span', { text: st[1] }), st[0] !== 'neutral' ? el('span', { class: 'sd-sr', text: ' (' + { success: 'fine', warning: 'needs a look', danger: 'problem' }[st[0]] + ')' }) : null);
+  }
+  function sectionRow(view, s, look, extra) {
+    return el('button', { type: 'button', class: 'st-rrow', onclick: function () { go(view); } },
+      el('span', { class: 'st-rrow__name' }, VIEWS[view].title, extra ? el('small', { text: extra }) : null),
+      stateEl(rowState(view, s, look)),
+      window.sdIcon ? window.sdIcon('arrow', 16) : null);
+  }
+  function headline(room, s) {
+    var big = function (n, unit) { return el('div', { class: 'st-room__big' }, el('b', { text: String(n) }), unit ? el('span', { text: unit }) : null); };
+    if (room.key === 'you') {
+      var gc = window.gsCards, off = gc ? gc.hidden().length : 0, all = gc ? gc.keys.length : 9;
+      return big((all - off) + ' of ' + all, 'cards showing');
+    }
+    if (!s) return null;
+    if (room.key === 'data') {
+      var sv = s.servers;
+      if (!sv.total) return big(0, 'servers yet');
+      var up = (sv.list || []).filter(function (x) { return x.status !== 'Offline'; }).length;
+      var rack = el('div', { class: 'st-rack', 'aria-hidden': 'true' }, (sv.list || []).map(function (x) {
+        return el('i', { class: 'st-rack__u' + (x.status === 'Offline' ? ' is-down' : x.status === 'Degraded' ? ' is-hot' : ''), title: x.name + ': ' + (x.status || '') });
+      }));
+      return el('div', { class: 'st-room__head-r' }, big(up + ' of ' + (sv.list || []).length, 'servers up'), rack);
+    }
+    if (room.key === 'media') {
+      var rq = s.requests || {}, lg = rq.log || {};
+      return rq.connected || lg.total ? big(lg.week || 0, 'requests this week') : big('Off', 'requests not connected');
+    }
+    if (room.key === 'people') {
+      return el('div', { class: 'st-room__pair' }, big(s.access.people, s.access.people === 1 ? 'person' : 'people'),
+        s.billing.connected ? big(s.billing.customers, s.billing.customers === 1 ? 'customer' : 'customers') : null);
+    }
+    return null;
+  }
+  function needsBar(issues) {
+    if (!summary) return el('section', { class: 'st-needs-bar is-quiet', 'aria-label': 'Needs a look' }, el('span', { class: 'st-needs-bar__t', text: msgs.home ? 'Could not load the overview: ' + msgs.home.text : 'Checking servers and connections\u2026' }));
+    if (!issues.length) return el('section', { class: 'st-needs-bar is-quiet', 'aria-label': 'Needs a look' }, shapeEl('success'), el('span', { class: 'st-needs-bar__t', text: 'Nothing needs a look' }));
+    return el('section', { class: 'st-needs-bar', 'aria-label': 'Needs a look' },
+      el('span', { class: 'st-needs-bar__t', text: issues.length === 1 ? 'Needs a look' : issues.length + ' things need a look' }),
+      el('ul', { class: 'st-needs-bar__list' }, issues.slice(0, 6).map(function (p) {
+        return el('li', null, el('button', { type: 'button', class: 'st-needs-bar__item', onclick: function () {
+          if (p.go) { if (window.sdOpenSettings) window.sdOpenSettings(false); location.hash = p.go; return; }
+          go(p.view);
+        } }, shapeEl(p.tone), el('span', { text: p.text.replace(/\.$/, '') })));
+      })));
+  }
+  function findBox() {
+    var input = el('input', { type: 'search', class: 'st-find__input', id: 'st-find', placeholder: 'Find a setting: zoom, Seerr, CPU, Stripe\u2026', autocomplete: 'off', value: findQ,
+      'aria-label': 'Find a setting',
+      oninput: function () { findQ = input.value; renderHomeBody(); },
+      onkeydown: function (e) {
+        if (e.key === 'Enter') { var first = document.querySelector('#st-home .st-found .st-rrow'); if (first) first.click(); }
+        if (e.key === 'Escape' && findQ) { e.stopPropagation(); findQ = ''; input.value = ''; renderHomeBody(); }
+      } });
+    return el('label', { class: 'st-find' }, window.sdIcon ? window.sdIcon('search', 18) : null, input);
+  }
+  function found(q, s, look) {
+    q = q.trim().toLowerCase();
+    var hits = [];
+    ROOMS.forEach(function (room) {
+      room.views.forEach(function (v) {
+        var title = VIEWS[v].title.toLowerCase(), words = (FIND[v] || '').split(' ');
+        var word = title.indexOf(q) >= 0 ? null : (FIND[v] || '').indexOf(q) >= 0 ? words.filter(function (w) { return w.indexOf(q.split(' ')[0]) >= 0; })[0] || q : undefined;
+        if (word !== undefined) hits.push({ view: v, room: room, word: word, first: title.indexOf(q) === 0 ? 0 : 1 });
+      });
+    });
+    hits.sort(function (a, b) { return a.first - b.first; });
+    if (!hits.length) return el('div', { class: 'st-found' }, el('p', { class: 'st-note', text: 'No setting matches \u201c' + q + '\u201d.' }));
+    return el('div', { class: 'st-found', role: 'list', 'aria-label': 'Settings that match' }, hits.map(function (h) {
+      return el('div', { role: 'listitem' }, sectionRow(h.view, s, look, h.room.title + (h.word ? ' \u00b7 ' + h.word : '')));
+    }));
+  }
+  function renderHomeBody() {
+    var body = document.getElementById('st-home-body');
+    if (!body) return;
+    var s = summary;
+    var look = window.sdLook ? window.sdLook() : { styleName: 'Classic', size: 100, light: 30, clips: 'on', style: 'classic' };
+    if (findQ.trim()) { body.replaceChildren(found(findQ, s, look)); return; }
+    var rooms = ROOMS.map(function (room) {
+      var views = room.views.filter(function (v) {
+        if (v === 'cards' && !window.gsCards) return false;
+        if (v === 'reqlog') { var rq = (s && s.requests) || {}; return !s || rq.connected || (rq.log || {}).total; }
+        return true;
+      });
+      return el('section', { class: 'st-room st-room--' + room.key, 'aria-labelledby': 'st-room-' + room.key },
+        el('div', { class: 'st-room__head' },
+          el('div', { class: 'st-room__titles' },
+            el('span', { class: 'st-scope st-room__scope ' + (room.key === 'you' ? 'st-scope--you' : 'st-scope--all'), text: room.scope }),
+            el('h3', { class: 'st-room__title', id: 'st-room-' + room.key, text: room.title })),
+          headline(room, s)),
+        el('div', { class: 'st-room__rows' }, views.map(function (v) { return sectionRow(v, s, look); })));
+    });
+    body.replaceChildren(needsBar(problems(s)), el('div', { class: 'st-rooms' }, rooms));
+  }
   function renderHome() {
     var box = document.getElementById('st-home');
     if (!box) return;
-    var s = summary;
-    var look = window.sdLook ? window.sdLook() : { styleName: 'Classic', size: 100, light: 30, clips: 'on', style: 'classic' };
-    var chips = el('div', { class: 'st-chips', id: 'st-look-chips' });
-    fillLookChips(chips, look);
-    var display = homeCard('display', { cls: 'st-hcard--display', scope: 'you', what: 'How stream cards look on this screen. This is how they look right now.',
-      body: [el('div', { class: 'st-preview__stage st-preview__stage--mini', 'data-sd-preview': 'mini' }), chips,
-        el('button', { type: 'button', class: 'st-btn st-btn--accent st-hcard__cta', text: 'Change the look', onclick: function () { go('display'); } })] });
-    var cards = [display];
-    var gc = window.gsCards;
-    if (gc) {
-      var off = gc.hidden().length, all = gc.keys.length;
-      cards.push(homeCard('cards', { scope: 'account', what: 'Which cards show on your dashboard, on every device you sign in on.',
-        status: off ? ['neutral', off + (off === 1 ? ' card hidden' : ' cards hidden')] : ['success', 'All cards showing'],
-        facts: [[(all - off) + ' of ' + all, 'cards showing']] }));
-    }
-    if (!s) {
-      box.replaceChildren(el('div', { class: 'st-homegrid' }, display, el('p', { class: 'st-note st-home__loading', text: msgs.home ? 'Could not load the overview: ' + msgs.home.text : 'Loading…' })));
-      if (window.sdRenderPreviews) window.sdRenderPreviews();
-      return;
-    }
-    var sv = s.servers;
-    cards.push(homeCard('plex', { scope: 'all', what: 'Where live streams come from. Each server is linked through the Plex account that owns it.',
-      status: !sv.total ? ['warning', 'No servers yet'] : sv.online === sv.enabled ? ['success', sv.enabled === 1 ? 'Online' : 'All ' + sv.enabled + ' online']
-        : [sv.offline.length ? 'danger' : 'neutral', sv.online + ' of ' + sv.enabled + ' online'],
-      facts: [[sv.total, sv.total === 1 ? 'server' : 'servers'], [s.accounts, s.accounts === 1 ? 'Plex account' : 'Plex accounts']] }));
-    var nd = s.netdata;
-    cards.push(homeCard('netdata', { scope: 'all', what: 'CPU and upload speed per server. Feeds the capacity rings and the bandwidth chart.',
-      status: nd.mode === 'off' ? ['neutral', 'Off'] : nd.error ? ['danger', 'Last check failed']
-        : nd.of && nd.reporting < nd.of ? ['warning', 'Partly reporting'] : ['success', nd.mode === 'cloud' ? 'Netdata Cloud' : 'From each agent'],
-      facts: nd.mode === 'off' ? [] : [[nd.reporting + '/' + nd.of, 'servers reporting CPU']] }));
-    var issues = problems(s);
-    var attn = homeCard(issues.length ? issues[0].view : 'plex', { cls: 'st-hcard--attn', goLabel: issues.length ? 'Open ' + VIEWS[issues[0].view].title : 'Open Plex servers',
-      title: issues.length ? (issues.length === 1 ? '1 thing needs a look' : issues.length + ' things need a look') : 'Nothing needs a look',
-      body: issues.length ? [el('ul', { class: 'st-issues' }, issues.slice(0, 4).map(function (p) {
-        return el('li', null, el('button', { type: 'button', onclick: function () {
-          if (p.go) { if (window.sdOpenSettings) window.sdOpenSettings(false); location.hash = p.go; return; }
-          go(p.view);
-        } }, badgeEl(p.tone, VIEWS[p.view].title), el('span', { text: p.text })));
-      })), issues.length > 4 ? el('p', { class: 'st-hcard__what', text: 'And ' + (issues.length - 4) + ' more.' }) : null]
-        : [el('p', { class: 'st-hcard__what', text: 'Servers, Netdata, people and billing all look fine. This card lists anything that needs fixing.' })] });
-    cards.push(attn);
-    var al = s.alerts;
-    cards.push(homeCard('alerts', { scope: 'all', what: 'When a server counts as running hot. Hot servers turn amber and show under Alerts.',
-      status: al.hot.length ? ['warning', names(al.hot) + (al.hot.length === 1 ? ' is hot' : ' are hot')] : ['success', 'No server is hot'],
-      facts: [[Math.round(al.hot_cpu_pct) + '%', 'CPU threshold']] }));
-    var ac = s.access;
-    cards.push(homeCard('access', { scope: 'all', what: 'Who can sign in and what each person sees.',
-      status: ac.sync_error ? ['danger', 'Loading people failed'] : ac.synced_at ? ['success', 'People loaded ' + since(ac.synced_at)] : ['warning', 'People not loaded yet'],
-      facts: [[ac.people, ac.people === 1 ? 'person' : 'people'], [ac.custom + ac.off, 'custom or off'], [ac.admins, ac.admins === 1 ? 'admin login' : 'admin logins']] }));
-    var bl = s.billing;
-    cards.push(homeCard('billing', { scope: 'all', what: bl.connected ? 'Shows each person their own Stripe subscription. Read-only key.' : 'Optional. Connect Stripe to show each person their own subscription.',
-      status: !bl.connected ? ['neutral', 'Not connected'] : bl.error ? ['danger', 'Last sync failed'] : bl.unmatched ? ['warning', bl.unmatched + ' not matched'] : ['success', 'Synced ' + (since(bl.synced_at) || 'soon')],
-      facts: bl.connected ? [[bl.customers, bl.customers === 1 ? 'customer' : 'customers']] : [] }));
-    var rq = s.requests || {};
-    cards.push(homeCard('requests', { scope: 'all', what: rq.connected ? 'People find movies and series and request them here, through your Seerr.' : 'Optional. Connect your Seerr so people can request from this site.',
-      status: !rq.connected ? ['neutral', 'Not connected'] : rq.error ? ['danger', 'Seerr not answering'] : rq.pending ? ['warning', rq.pending + ' waiting'] : ['success', 'Connected'],
-      facts: rq.connected ? [[rq.pending == null ? '?' : rq.pending, 'waiting for approval'], [rq.links, rq.links === 1 ? 'person linked' : 'people linked']] : [] }));
-    var lgc = rq.log || {};
-    if (rq.connected || lgc.total) {
-      cards.push(homeCard('reqlog', { scope: 'all', what: 'Every request made through this site, who made it and when, and its status now.',
-        status: lgc.total ? ['success', lgc.day ? lgc.day + ' in the last 24 h' : 'None in the last 24 h'] : ['neutral', 'Nothing requested yet'],
-        facts: [[lgc.week || 0, 'last 7 days'], [lgc.total || 0, 'all time'], [lgc.people || 0, lgc.people === 1 ? 'person' : 'people']] }));
-    }
-    var bk = s.books || {};
-    cards.push(homeCard('books', { scope: 'all', what: bk.enabled ? 'People read, listen and request books and comics from the Greystar media site, here.' : 'Optional. Show the Greystar media site here, signed in with Plex.',
-      status: bk.enabled ? ['success', 'On'] : bk.has_secret ? ['neutral', 'Off'] : ['neutral', 'Not connected'],
-      facts: [] }));
-    var ar = s.arr || {};
-    var arrOn = ['radarr', 'sonarr'].filter(function (k) { return ar[k] && ar[k].url && ar[k].has_key; });
-    var cu = s.cleanup || {};
-    cards.push(homeCard('arr', { scope: 'all', what: 'Download progress for people, and removing unwatched requests.',
-      status: !arrOn.length ? ['neutral', 'Not connected'] : ['radarr', 'sonarr'].some(function (k) { return ar[k] && ar[k].error; }) ? ['danger', 'Last check failed']
-        : arrOn.length < 2 ? ['warning', (arrOn[0] === 'radarr' ? 'Radarr' : 'Sonarr') + ' only'] : ['success', 'Connected'],
-      facts: [[cu.mode === 'auto' ? 'Auto delete' : cu.mode === 'review' ? 'Review only' : 'Off', 'Unwatched cleanup'], [cu.due || 0, 'due in 3 days']] }));
-    box.replaceChildren(el('div', { class: 'st-homegrid' }, cards));
-    if (window.sdRenderPreviews) window.sdRenderPreviews();
+    var had = document.activeElement && document.activeElement.id === 'st-find';
+    if (!document.getElementById('st-home-body')) box.replaceChildren(findBox(), el('div', { id: 'st-home-body', class: 'st-home__body' }));
+    renderHomeBody();
+    if (had) document.getElementById('st-find').focus();
   }
 
-  function fillLookChips(box, look) {
-    var chip = function (label, value) { return el('span', { class: 'st-chip' }, label ? label + ' ' : '', el('b', { text: value })); };
-    // Art brightness only applies to Classic; leave its chip out otherwise (a null here printed "null").
-    var chips = [chip('', look.styleName), chip('Size', look.size + '%')];
-    if (look.style === 'classic') chips.push(chip('Art', look.light + '%'));
-    chips.push(chip('Clips', look.clips === 'on' ? 'on' : 'off'));
-    box.replaceChildren.apply(box, chips);
-  }
-  window.addEventListener('gs:look', function (e) {
-    var chips = document.getElementById('st-look-chips');
-    if (chips) fillLookChips(chips, e.detail);
-  });
+  window.addEventListener('gs:look', function () { if (tab === 'home') renderHomeBody(); });
 
   // ---------- Plex: sign in ----------
   function startLink() {
@@ -1590,9 +1657,147 @@
       message('cards')));
   }
 
+  // ---------- Live streams globe (Settings, Your dashboard): saved per admin account, applied to the card at once ----------
+  var GLOBE_UI = [
+    { h: 'When a stream starts', items: [
+      { k: 'zoom', type: 'range', label: 'Zoom level', min: 1, max: 6, step: 0.5, ticks: ['Off', '2x', '3x', '4x', '5x', '6x'],
+        val: function (v) { return v <= 1 ? 'Off' : 'Up to ' + v + 'x'; },
+        hint: 'How close the globe moves in on the new stream\u2019s country. Small countries go all the way; big ones like the US stop once they fill the globe. Off keeps the whole globe in view.' },
+      { k: 'hold', type: 'seg', label: 'Stay zoomed for', opts: [[2, '2 s'], [3, '3 s'], [5, '5 s']], hint: 'It keeps turning the whole time, then zooms back out.' },
+      { k: 'many', type: 'seg', label: 'Several at once', opts: [['busy', 'Busiest area'], ['each', 'One by one']], hint: 'Three or more new streams together: one swing to where most of them are, or each city in turn.' },
+      { k: 'line', type: 'switch', label: 'Line from Dallas', hint: 'A line flies out from the servers to the city.' },
+      { k: 'outline', type: 'switch', label: 'Outline the country', hint: 'A white glow around the country, fading with the ping.' },
+      { k: 'label', type: 'switch', label: 'City name', hint: 'Shows \u201cToronto, CA\u201d beside the new dot.' }] },
+    { h: 'Turning', items: [
+      { k: 'cruise', type: 'range', label: 'Zoom while turning', min: 1, max: 4, step: 0.25, ticks: ['Whole globe', '2x', '3x', '4x'],
+        val: function (v) { return v <= 1 ? 'Whole globe' : v + 'x'; },
+        hint: 'Stays zoomed in this far all the time while it turns. A new stream zooms in from here and comes back to it.' },
+      { k: 'speed', type: 'steps', label: 'Speed', steps: [0, 240, 180, 120, 75, 60, 45, 30, 20], ticks: ['Still', 'Slow', 'Fast'],
+        val: function (v) { return v ? 'One turn every ' + (v >= 120 ? v / 60 + ' min' : v + ' s') : 'Still'; },
+        hint: 'Still: it swings to each new stream, then drifts back to where it rests.' },
+      { k: 'rest', type: 'seg', label: 'Rests over', opts: [['am', 'Americas'], ['eu', 'Europe'], ['as', 'Asia'], ['busy', 'Busiest now']], hint: 'Where it faces when the page opens. Busiest now: where most streams are playing.' }] },
+    { h: 'Streams playing now', items: [
+      { k: 'color', type: 'seg', label: 'Colour dots by', opts: [['type', 'Type'], ['server', 'Server']], hint: 'The same choice as the Type / Server switch on the card.' },
+      { k: 'join_km', type: 'seg', label: 'Join nearby cities', opts: [[0, 'Off'], [50, '50 km'], [130, '130 km'], [300, '300 km']], hint: 'Places this close share one dot, like \u201cDallas, TX area\u201d.' },
+      { k: 'rings', type: 'switch', label: 'Pulsing rings', hint: 'A soft ring beats around each playing dot.' }] },
+    { h: 'Extras', items: [
+      { k: 'night', type: 'switch', label: 'Day and night', hint: 'Dims the land on the side of the world where it is night right now.' },
+      { k: 'trail', type: 'switch', label: 'Today\u2019s trail', hint: 'A faint ring wherever a stream started today, bigger where more did. Starts over at midnight.' },
+      { k: 'quiet', type: 'switch', label: 'Quiet hours', hint: 'From 1 AM to 7 AM it stops swinging and zooming; new streams ping where they are.' }] }
+  ];
+  var TEST_CITIES = [['Sydney, AU', -33.9, 151.2], ['London, GB', 51.5, -0.1], ['Toronto, CA', 43.7, -79.4], ['Tokyo, JP', 35.7, 139.7],
+    ['Sao Paulo, BR', -23.6, -46.6], ['Berlin, DE', 52.5, 13.4], ['Manila, PH', 14.6, 121.0], ['Seattle, WA', 47.6, -122.3],
+    ['Mexico City, MX', 19.4, -99.1], ['Dublin, IE', 53.3, -6.3], ['Miami, FL', 25.8, -80.2], ['Auckland, NZ', -36.8, 174.8]];
+  var pv = null, pvTest = 0, globeSaved = null;
+  function gset() { return window.gsGlobeSettings; }
+  function dropPreview() { if (pv) { pv.destroy(); pv = null; } }
+  function feedPreview() {
+    if (!pv) return;
+    var st = gset().get(), snap = window.gsGlobeCard ? window.gsGlobeCard.snapshot() : { active: [] };
+    var give = function (list) {
+      if (pv) pv.setActive(list.map(function (d) { return { id: d.id, label: d.label, lat: d.lat, lon: d.lon, cat: st.color === 'server' ? d.server : d.type }; }));
+    };
+    if (snap.active.length) give(snap.active);
+    var midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+    if (!snap.active.length || st.trail) {
+      api('GET', '/api/globe' + (st.trail ? '?trail_since=' + Math.floor(midnight.getTime() / 1000) : '')).then(function (j) {
+        if (!snap.active.length) give(j.active || []);
+        if (pv && j.trail) pv.setTrail(j.trail);
+      }).catch(function () { /* the preview still turns */ });
+    }
+  }
+  function testPing(n) {
+    if (!pv) return;
+    var pick = n === 3 ? [TEST_CITIES[1], TEST_CITIES[5], TEST_CITIES[9]] : [TEST_CITIES[pvTest++ % TEST_CITIES.length]];
+    pick.forEach(function (c) { pv.ping({ label: c[0], lat: c[1], lon: c[2] }); });
+    var live = document.getElementById('st-globe-live');
+    if (live) live.textContent = 'Test stream from ' + pick.map(function (c) { return c[0]; }).join(', ') + '.';
+  }
+  function changeGlobe(patch) {
+    globeSaved = 'saving';
+    paintGlobeSaved();
+    gset().set(patch).then(function () { globeSaved = 'ok'; }).catch(function (e) { globeSaved = e.message || 'Could not save.'; }).then(paintGlobeSaved);
+  }
+  function paintGlobeSaved() {
+    var m = document.getElementById('st-globe-saved');
+    if (!m) return;
+    m.textContent = globeSaved === 'saving' ? 'Saving\u2026' : globeSaved === 'ok' ? 'Saved to your account.' : globeSaved ? 'Not saved: ' + globeSaved : '';
+    m.className = 'st-globeset__saved' + (globeSaved && globeSaved !== 'saving' && globeSaved !== 'ok' ? ' is-error' : '');
+  }
+  function globeControl(it, st) {
+    var id = 'gl-' + it.k, hint = it.hint ? el('p', { class: 'sd-field__hint', id: id + '-h', text: it.hint }) : null;
+    if (it.type === 'switch') {
+      var box = el('input', { type: 'checkbox', class: 'st-switch', id: id, checked: !!st[it.k], 'aria-describedby': hint ? id + '-h' : null, onchange: function () {
+        var p = {}; p[it.k] = box.checked; changeGlobe(p);
+      } });
+      return el('label', { class: 'st-switchrow st-glrow', for: id }, el('div', null, el('span', { class: 'st-switchrow__label', text: it.label }), hint), box);
+    }
+    if (it.type === 'seg') {
+      var seg = el('div', { class: 'st-seg st-seg--lg', role: 'group', 'aria-label': it.label }, it.opts.map(function (o) {
+        return el('button', { type: 'button', 'aria-pressed': String(st[it.k] === o[0]), text: o[1], onclick: function () {
+          Array.prototype.forEach.call(seg.children, function (b) { b.setAttribute('aria-pressed', String(b === this)); }, this);
+          var p = {}; p[it.k] = o[0]; changeGlobe(p);
+        } });
+      }));
+      return el('div', { class: 'st-glrow st-glrow--seg' }, el('div', null, el('span', { class: 'st-switchrow__label', text: it.label }), hint), seg);
+    }
+    // range: a slider with its value in words; "steps" walks a list (Speed)
+    var steps = it.type === 'steps', cur = st[it.k];
+    var idx = steps ? Math.max(0, it.steps.indexOf(cur)) : cur;
+    var out = el('output', { class: 'st-glrow__val', for: id, text: it.val(cur) });
+    var rng = el('input', { type: 'range', class: 'sd-range', id: id, min: steps ? 0 : it.min, max: steps ? it.steps.length - 1 : it.max, step: steps ? 1 : it.step, value: idx,
+      'aria-describedby': hint ? id + '-h' : null });
+    var fill = function () {
+      var lo = Number(rng.min), hi = Number(rng.max);
+      rng.style.setProperty('--fill', ((Number(rng.value) - lo) / (hi - lo) * 100) + '%');
+    };
+    rng.addEventListener('input', function () {
+      var v = steps ? it.steps[Number(rng.value)] : Number(rng.value);
+      out.textContent = it.val(v);
+      rng.setAttribute('aria-valuetext', it.val(v));
+      fill();
+      var p = {}; p[it.k] = v; changeGlobe(p);
+    });
+    rng.setAttribute('aria-valuetext', it.val(cur));
+    fill();
+    return el('div', { class: 'st-glrow st-glrow--range' },
+      el('div', { class: 'st-glrow__top' }, el('label', { class: 'st-switchrow__label', for: id, text: it.label }), out),
+      rng, el('div', { class: 'st-glrow__ticks', 'aria-hidden': 'true' }, it.ticks.map(function (t) { return el('span', { text: t }); })), hint);
+  }
+  function renderGlobe() {
+    var pane = document.getElementById('st-pane-globe');
+    if (!pane || !gset()) return;
+    var st = gset().get();
+    dropPreview();
+    if (!renderGlobe.hooked) { renderGlobe.hooked = true; gset().on(function (x) { if (pv) { pv.setOptions(x); feedPreview(); } if (tab === 'home') renderHomeBody(); }); }
+    var stage = el('div', { class: 'st-globeset__stage' });
+    var preview = el('aside', { class: 'st-preview st-globeset__pv', 'aria-label': 'Preview' },
+      el('div', { class: 'st-preview__head' }, el('span', { class: 'st-preview__label' }, el('i'), 'Preview')),
+      stage,
+      el('div', { class: 'st-row' },
+        el('button', { type: 'button', class: 'st-btn st-btn--primary', onclick: function () { testPing(1); } }, window.sdIcon ? window.sdIcon('play', 16) : null, 'Play a test stream'),
+        el('button', { type: 'button', class: 'st-btn', text: 'Three at once', onclick: function () { testPing(3); } })),
+      el('p', { class: 'st-preview__note', text: 'Test streams only play here, never on the dashboard. Your device asking for less motion keeps the globe still and never zooms in on new streams, whatever is set here.' }),
+      el('p', { class: 'sd-sr', id: 'st-globe-live', 'aria-live': 'polite' }));
+    var ctl = el('div', { class: 'st-globeset__ctl' }, GLOBE_UI.map(function (sec) {
+      return el('section', { class: 'st-section st-glsec' }, el('h3', { text: sec.h }), sec.items.map(function (it) { return globeControl(it, st); }));
+    }), el('div', { class: 'st-row' },
+      el('button', { type: 'button', class: 'st-btn', text: 'Reset globe to default', onclick: function () { changeGlobe(gset().defaults); renderGlobe(); } }),
+      el('span', { class: 'st-spacer' }),
+      el('p', { class: 'st-globeset__saved', id: 'st-globe-saved', role: 'status' })));
+    pane.replaceChildren(ctl, preview);
+    paintGlobeSaved();
+    var canvas = el('canvas', { role: 'img', 'aria-label': 'Preview of the live streams globe with these settings' });
+    stage.appendChild(canvas);
+    pv = window.gsGlobe.create(canvas, { settings: st, colorOf: function (cat, light) { return window.gsGlobeCard ? window.gsGlobeCard.look(cat, light) : null; } });
+    feedPreview();
+  }
+  new MutationObserver(function () { if (document.getElementById('settings-dock').hidden) dropPreview(); else if (tab === 'globe' && !pv) renderGlobe(); })
+    .observe(document.getElementById('settings-dock'), { attributes: true, attributeFilter: ['hidden'] });
+
   // ---------- render ----------
   function render() {
-    if (tab === 'display' || tab === 'home' || tab === 'reqlog' || tab === 'cards') return;
+    if (tab === 'display' || tab === 'home' || tab === 'reqlog' || tab === 'cards' || tab === 'globe') return;
     var pane = document.getElementById('st-pane-' + tab);
     if (!pane) return;
     var active = document.activeElement && pane.contains(document.activeElement) ? document.activeElement.id : null;

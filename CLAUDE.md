@@ -332,7 +332,7 @@ files to add servers. Keep it that way.
   its start event's id, so the card shows it only once the lime ping lands. `/api/globe` adds `active` ({id, label,
   lat, lon, type: direct|stream|transcode, server}) and `servers` (enabled names in Settings order). Colours: the
   validated three-colour chart palette (blue Direct play, orange Direct stream, green Transcode; light and dark steps in
-  `HUES`, `globe-card.js`); the card's Type / Server switch (saved per browser, `gs-globe-by`) colours by server instead,
+  `HUES`, `globe-card.js`); the card's Type / Server switch (saved per admin account with the globe settings) colours by server instead,
   the three colours times circle, square and diamond in Settings order. Lime stays for new streams only. Same city and
   colour share a bigger dot; places within about 130 km are one ("Dallas, TX area") and different colours there sit side
   by side. Legend with counts under the header ("Playing now 17"); hover or tap a dot: "Toronto, CA · 2 streams ·
@@ -349,6 +349,21 @@ files to add servers. Keep it that way.
   it zooms out over 1.1 s. Finer land dots (`detailDots`, a grid from the country outlines at about the coarse dots'
   screen spacing) fade in while zoomed; the globe fades out behind the title and legend (`v.clear`). Other new streams
   wait their turn (the 12 s stale rule still pings in place). Reduced motion never zooms.
+- Globe settings (Settings, Your dashboard, Live streams globe; Glenn, Nov 13 2026): saved per admin account like
+  Dashboard Cards (`globe:<kind>:<subject>`, only what differs from `GLOBE_DEFAULTS`; `GET/PUT /api/settings/globe`,
+  checked by `GlobeIn`; `/api/me` carries `globe`, null for viewers). `window.gsGlobeSettings` (top of `globe-card.js`)
+  applies a change to every globe at once (`setOptions`) and saves after a 450 ms pause. Settings: Zoom level (how far
+  a new stream zooms in, 1 to 6x, 5x default, 1 = off), Zoom while turning (`cruise`, 1 to 4x: it stays zoomed in this
+  far all the time, with finer world dots from `worldDotsFor`; a new stream zooms in from there and back to it),
+  Stay zoomed for (2, 3, 5 s), Several at once (busiest area or one by one), Line from Dallas, Outline the country, City
+  name, Speed (seconds a turn, 20 s to 4 min, or still: it swings to new streams and drifts back), Rests over
+  (Americas, Europe, Asia, busiest now), Colour dots by (the same setting as the card's Type / Server switch, which no
+  longer uses localStorage), Join nearby cities (off, 50, 130, 300 km), Pulsing rings, and extras: Day and night (land
+  on the night side dimmed, `sunNow`), Today's trail (faint rings where streams started since the browser's local
+  midnight: `/api/globe?trail_since=`, `Globe.trail`, only rounded centres and counts), Quiet hours (1 AM to 7 AM local:
+  no swing or zoom). The section has a live preview (a second globe fed with the card's streams, `feedPreview`) with
+  Play a test stream and Three at once (test pings only there). Reduced motion still never turns or zooms in on new
+  streams; a cruise zoom is kept as a still framing.
 - GeoIP: DB-IP "IP to City Lite" (CC BY 4.0; the card links "IP Geolocation by DB-IP", keep it), downloaded to
   `data/geo/dbip-city-lite.mmdb` from `download.db-ip.com/free/dbip-city-lite-YYYY-MM.mmdb.gz` (this month, else last
   month), checked every 6 hours, refreshed after 32 days (`Globe.loop`, `GeoDB.refresh`). Read with `maxminddb`. If it
@@ -520,18 +535,21 @@ design system). The dashboard adds its own patterns:
   and flip to show playback details.
 - Phones (see "Phone layout and addresses" below): a fixed bottom tab bar, compact stream rows
   with a bottom sheet, optional poster carousel.
-- Settings screen (Glenn's pick "Mix": a home of cards plus Display with a live
-  preview). Admins open the gear onto a home (`#st-home`, `renderHome` in
-  `settings.js`, data from `GET /api/settings/summary`): a tall Display card with a
-  small live preview of a stream card in the current look and chips for the
-  choices, then Plex servers, Netdata, a black "needs a look" card (`problems`:
-  servers not answering, missing Netdata nodes, failed syncs, unmatched Stripe
-  customers; each line opens the section that fixes it), Alerts, Access, Billing.
-  Every card says what it controls, shows a status (word plus shape) and a few
-  numbers, and has a scope tag: "This browser only" (Display) or "Everyone".
-  Opening a card shows that section alone (`setTab`, `data-view` on `#settings`)
-  with a back arrow, a "Settings" crumb, the title, the scope tag and a one-line
-  lead (`VIEWS`). Home and Display are 1120px wide, the other sections 760px,
+- Settings screen (Glenn's pick C "Four rooms", Nov 13 2026; it replaced "Mix", the home of twelve cards). Admins
+  open the gear onto a home (`#st-home`, `renderHome` / `renderHomeBody` in `settings.js`, data from
+  `GET /api/settings/summary`): a "Find a setting" box (`FIND` words per section; Enter opens the first match, Escape
+  clears), a black "Needs a look" bar (`problems`: servers not answering, missing Netdata nodes, failed syncs,
+  unmatched Stripe customers, requests needing you; each item opens the section that fixes it; "Nothing needs a look"
+  when clear), then four groups (`ROOMS`): Your dashboard (Display, Dashboard Cards, Live streams globe; tag "Just
+  you"), Servers and data (Plex servers, Netdata, Alerts), Requests and media (Requests, Request log, Radarr &
+  Sonarr, Books & comics), People and billing (Access, Billing), each "Everyone". A group has a headline number
+  (cards showing; servers up with a rack of pills from `servers.list`; requests this week; people and customers) and
+  one row per section with its state in a few words (`rowState`: word plus shape, circle fine, triangle needs a look,
+  square problem, no shape for plain facts). Two columns on desktops, one on phones.
+  Opening a row shows that section alone (`setTab`, `data-view` on `#settings`)
+  with a back arrow, a "Settings · <group>" crumb, the title, the section's own scope tag (This browser only, Your
+  account, Everyone), a one-line lead (`VIEWS`) and the group's sections as chips (`#set-sibs`) to move between them.
+  Home, Display, Request log and the globe are 1120px wide, the other sections 760px,
   over a dimmed page (`#set-scrim`; click or Escape closes). Viewers go straight
   to Display with no home. Display: style picked by picture (`.st-thumb`), card
   size, cover art brightness (`artlight` 0 to 100, default 30, drives

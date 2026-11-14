@@ -5,13 +5,42 @@
    - Coming back to a hidden tab, or to the card after 25 s away: what started meanwhile only updates the count.
    - At most 8 pings per batch (after a server restart there could be dozens); the count still has them all.
    Streams playing now (`active` in the reply): a small pulsing dot per city, coloured by stream type (blue Direct play,
-   orange Direct stream, green Transcode) or by server (the Type / Server switch, saved per browser in `gs-globe-by`;
+   orange Direct stream, green Transcode) or by server (the Type / Server switch, saved per admin account with the globe settings;
    three colours times circle, square and diamond, in Settings order so a server keeps its colour). The legend lists
    each with a count; hovering or tapping a dot shows "Toronto, CA · 2 streams · Transcode". The colours are the
    validated three-colour chart palette (all pairs pass for colour-blind eyes on both card colours); lime stays for
-   new streams. */
+   new streams.
+   Settings (Settings, Live streams globe; window.gsGlobeSettings): saved per admin account (GET/PUT
+   /api/settings/globe, and /api/me carries `globe` so the card is right on first paint). The card's Type / Server
+   switch is the same setting as "Colour dots by". Changes apply at once; saving waits for a pause in a slider. */
 (function () {
   'use strict';
+  // ---------- the admin's globe settings ----------
+  var DEFAULTS = { zoom: 5, cruise: 1, hold: 3, many: 'busy', line: true, outline: true, label: true, speed: 75, rest: 'am',
+    color: 'type', join_km: 130, rings: true, night: false, trail: false, quiet: false };
+  var mine = null, saveTimer = 0, saving = null, listeners = [];
+  function current() {
+    if (mine) return mine;
+    var me = window.dash && window.dash.me && window.dash.me();
+    return Object.assign({}, DEFAULTS, (me && me.globe) || {});
+  }
+  window.gsGlobeSettings = {
+    defaults: DEFAULTS,
+    get: current,
+    /** Change some settings: every globe follows at once; the save goes out after a short pause. */
+    set: function (patch, now) {
+      mine = Object.assign({}, current(), patch);
+      listeners.forEach(function (fn) { fn(mine); });
+      clearTimeout(saveTimer);
+      return new Promise(function (ok, fail) {
+        saveTimer = setTimeout(function () {
+          saving = window.gsUI.api('PUT', '/api/settings/globe', mine).then(function (j) { ok(j); }).catch(fail);
+        }, now ? 0 : 450);
+      });
+    },
+    on: function (fn) { listeners.push(fn); }
+  };
+
   var card = document.getElementById('globe-card');
   if (!card) return;
   var canvas = card.querySelector('canvas');
@@ -28,8 +57,7 @@
   var HUES = { light: ['42,120,214', '235,104,52', '27,175,122'], dark: ['57,135,229', '217,89,38', '25,158,112'] };
   var TYPES = [{ key: 'direct', name: 'Direct play' }, { key: 'stream', name: 'Direct stream' }, { key: 'transcode', name: 'Transcode' }];
   var SHAPES = ['circle', 'square', 'diamond'];
-  var active = [], servers = [], by = 'type';
-  try { by = localStorage.getItem('gs-globe-by') === 'server' ? 'server' : 'type'; } catch (e) { /* storage off */ }
+  var active = [], servers = [], by = current().color === 'server' ? 'server' : 'type';
 
   function lightCard() {
     var m = /(\d+)\D+(\d+)\D+(\d+)/.exec(getComputedStyle(canvas).color || '');
@@ -71,11 +99,22 @@
   if (byBox) byBox.addEventListener('click', function (e) {
     var b = e.target.closest('button[data-by]');
     if (!b || b.dataset.by === by) return;
-    by = b.dataset.by;
-    try { localStorage.setItem('gs-globe-by', by); } catch (err) { /* storage off */ }
+    window.gsGlobeSettings.set({ color: b.dataset.by }, true).catch(function () { /* kept on screen; saved next time */ });
+  });
+  window.gsGlobeSettings.on(function (st) {
+    by = st.color === 'server' ? 'server' : 'type';
+    if (globe) { globe.setOptions(st); if (!st.trail) globe.setTrail([]); }
     paintActive();
     if (globe) globe.retheme();
+    if (st.trail && !trailOn) { trailOn = true; cursorTrail(); }
+    trailOn = !!st.trail;
   });
+  var trailOn = !!current().trail;
+  function midnight() { var d = new Date(); d.setHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000); }
+  // Today's trail switched on: fetch it now rather than at the next round.
+  function cursorTrail() {
+    window.gsUI.api('GET', '/api/globe?trail_since=' + midnight()).then(function (j) { if (globe && j.trail) globe.setTrail(j.trail); }).catch(function () {});
+  }
   function showTip(e) {
     if (!globe || !tip) return;
     var r = canvas.getBoundingClientRect(), d = globe.hit(e.clientX - r.left, e.clientY - r.top);
@@ -99,8 +138,9 @@
   }
   function mount() {
     if (globe) return;
+    by = current().color === 'server' ? 'server' : 'type';   // /api/me has answered by now
     globe = window.gsGlobe.create(canvas, {
-      zoom: true,   // swing and zoom in to a new stream's country, keep turning, zoom back out (Glenn, Nov 13 2026)
+      settings: current(),   // zoom, turning, extras: Settings, Live streams globe (per admin account)
       colorOf: look,
       avoid: [card.querySelector('.sd-card__head'), card.querySelector('.sd-globe__cap'), card.querySelector('.sd-notch'), document.getElementById('globe-live')].filter(Boolean),
       clear: [card.querySelector('.sd-card-title'), card.querySelector('.sd-card-note'), card.querySelector('.sd-globe__note'), document.getElementById('globe-live')].filter(Boolean)
@@ -120,7 +160,10 @@
     mount();
     if (busy) return;
     busy = true;
-    var url = '/api/globe' + (cursor == null ? '' : '?after=' + cursor);
+    var q = [];
+    if (cursor != null) q.push('after=' + cursor);
+    if (current().trail) q.push('trail_since=' + midnight());
+    var url = '/api/globe' + (q.length ? '?' + q.join('&') : '');
     window.gsUI.api('GET', url).then(function (j) {
       var first = cursor == null;
       // Away for a while (another phone tab, the card scrolled off): what started meanwhile is old news.
@@ -130,6 +173,7 @@
       paint(j);
       servers = j.servers || [];
       active = j.active || [];
+      if (j.trail) globe.setTrail(j.trail);
       if (first || missed) { missed = false; paintActive(); return; }
       var evs = (j.events || []).slice(-MAX_PINGS);
       evs.forEach(function (e) { globe.ping(e); });
@@ -148,6 +192,10 @@
   try { window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () { if (globe) { globe.retheme(); paintActive(); } }); } catch (e) { /* old browser */ }
 
   window.gsGlobeCard = {
+    /** What the card has now, for the preview in Settings: the streams playing, the servers and the colours. */
+    snapshot: function () { return { active: active.slice(), servers: servers.slice(), by: by }; },
+    look: look,
+    cats: cats,
     /** Called on every dashboard redraw: start when the card first shows. */
     refresh: function () { if (shown() && cursor == null && !busy) poll(); else if (globe && shown()) globe.retheme(); }
   };

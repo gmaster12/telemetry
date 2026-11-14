@@ -36,6 +36,7 @@ log = logging.getLogger("telemetry.globe")
 DBIP_URL = "https://download.db-ip.com/free/dbip-city-lite-{ym}.mmdb.gz"
 REFRESH_DAYS = 32
 KEEP_EVENTS = 300
+KEEP_STARTS = 5000  # a day of stream starts for the trail
 TYPES = {"Direct play": "direct", "Direct stream": "stream", "Transcode": "transcode"}
 
 US_STATES = {
@@ -189,6 +190,7 @@ class Globe:
         self.seq = 0
         self._count = started_count  # streams started since a time (from the plays table); survives restarts
         self.live: dict[tuple[str, str], dict] = {}  # (server, session key) -> the dot for a stream playing now
+        self.starts: deque[tuple[int, float, float]] = deque(maxlen=KEEP_STARTS)  # (at, lat, lon): today's trail
 
     @staticmethod
     def _dot(row: dict, place: dict, dot_id: str) -> dict:
@@ -202,6 +204,7 @@ class Globe:
         self.seq += 1
         ev = {"seq": self.seq, "id": "s_" + secrets.token_urlsafe(6), "at": int(now or time.time()), **place}
         self.events.append(ev)
+        self.starts.append((ev["at"], place["lat"], place["lon"]))
         if row.get("session_key"):
             self.live[(str(row.get("server") or ""), str(row["session_key"]))] = self._dot(row, place, ev["id"])
         return ev
@@ -234,6 +237,16 @@ class Globe:
         playing do not ping."""
         out = [] if after is None else [{k: e[k] for k in ("id", "at", "label", "lat", "lon")} for e in self.events if e["seq"] > after]
         return {"events": out[-40:], "cursor": self.seq}
+
+    def trail(self, since: int, now: float | None = None) -> list[dict]:
+        """Where streams started since `since` (the browser's local midnight, at most a day back), one entry per city
+        centre with a count. Only the rounded centres the events already carry: no id, label, name or IP."""
+        cut = max(int(since), int((now or time.time()) - 86400))
+        n: dict[tuple[float, float], int] = {}
+        for at, lat, lon in self.starts:
+            if at >= cut:
+                n[(lat, lon)] = n.get((lat, lon), 0) + 1
+        return [{"lat": k[0], "lon": k[1], "n": v} for k, v in sorted(n.items(), key=lambda kv: -kv[1])][:400]
 
     def last_hour(self, now: float | None = None) -> int:
         if self._count is None:
@@ -277,6 +290,8 @@ class SampleGlobe(Globe):
         self._hour: deque[float] = deque(time.time() - random.random() * 3600 for _ in range(38))
         self._live: list[dict] = [self._sample_dot(c, "s_" + secrets.token_urlsafe(6))
                                   for c in random.choices(SAMPLE_CITIES, weights=[c[3] for c in SAMPLE_CITIES], k=16)]
+        for c in random.choices(SAMPLE_CITIES, weights=[c[3] for c in SAMPLE_CITIES], k=90):  # a day so far
+            self.starts.append((int(time.time() - random.random() * 12 * 3600), c[1], c[2]))
 
     @staticmethod
     def _sample_dot(c, dot_id: str) -> dict:
@@ -293,6 +308,7 @@ class SampleGlobe(Globe):
                 self.seq += 1
                 ev_id = "s_" + secrets.token_urlsafe(6)
                 self.events.append({"seq": self.seq, "id": ev_id, "at": int(now), "label": c[0], "lat": c[1], "lon": c[2]})
+                self.starts.append((int(now), c[1], c[2]))
                 self._live.append(self._sample_dot(c, ev_id))
                 self._hour.append(now)
             while len(self._live) > 12 and random.random() < 0.6:
