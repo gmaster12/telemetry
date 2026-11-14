@@ -69,6 +69,35 @@ CREATE TABLE IF NOT EXISTS title_scores (
 # Seerr's own numbers (server/constants/media.ts, server/lib/permissions.ts)
 MEDIA_STATUS = {1: "unknown", 2: "pending", 3: "processing", 4: "partial", 5: "available", 6: "blocklisted", 7: "deleted"}
 REQUEST_STATUS = {1: "pending", 2: "approved", 3: "declined", 4: "failed", 5: "completed"}
+
+
+def release_wait(d: dict, kind: str, seasons, today: str) -> dict:
+    """Is a movie or the requested seasons of a series out yet? From a Seerr /movie or /tv detail (TMDB's dates).
+    Movies: a digital (4) or physical (5) release is when a copy can exist; a theatrical date alone is not enough.
+    Series: a requested season that has not aired, or the next episode of one that is airing.
+    Returns {"reason": "unreleased", "date", "what"}, {"reason": "airing", ...} or {"reason": "searching"} (out)."""
+    if kind == "movie":
+        dates = sorted((rd.get("release_date") or "")[:10] for c in ((d.get("releases") or {}).get("results") or [])
+                       for rd in c.get("release_dates") or [] if rd.get("type") in (4, 5) and rd.get("release_date"))
+        home = next((x for x in dates if x), None)
+        if home and home > today:
+            return {"reason": "unreleased", "date": home, "what": "home"}
+        if not home and (d.get("releaseDate") or "") > today:
+            return {"reason": "unreleased", "date": d["releaseDate"], "what": "cinema"}
+        return {"reason": "searching"}
+    wanted = set(seasons or [])
+    future = sorted(x.get("airDate") for x in d.get("seasons") or []
+                    if x.get("seasonNumber") in wanted and x.get("airDate") and x["airDate"] > today)
+    nxt = d.get("nextEpisodeToAir") or {}
+    if nxt.get("airDate") and nxt.get("seasonNumber") in wanted and nxt["airDate"] >= today:
+        return {"reason": "airing", "date": nxt["airDate"], "season": nxt.get("seasonNumber"), "episode": nxt.get("episodeNumber")}
+    if future:
+        return {"reason": "unreleased", "date": future[0], "what": "season"}
+    if any(x.get("seasonNumber") in wanted and not x.get("airDate") for x in d.get("seasons") or []):
+        return {"reason": "unreleased", "date": None, "what": "season"}
+    if not wanted and (d.get("firstAirDate") or "") > today:
+        return {"reason": "unreleased", "date": d["firstAirDate"], "what": "season"}
+    return {"reason": "searching"}
 P = {"ADMIN": 2, "MANAGE_USERS": 8, "MANAGE_REQUESTS": 16, "REQUEST": 32, "AUTO_APPROVE": 128, "AUTO_APPROVE_MOVIE": 256,
      "AUTO_APPROVE_TV": 512, "REQUEST_4K": 1024, "REQUEST_4K_MOVIE": 2048, "REQUEST_4K_TV": 4096, "REQUEST_ADVANCED": 8192,
      "REQUEST_VIEW": 16384, "AUTO_APPROVE_4K": 32768, "AUTO_APPROVE_4K_MOVIE": 65536, "AUTO_APPROVE_4K_TV": 131072,

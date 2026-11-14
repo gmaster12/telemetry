@@ -1347,8 +1347,10 @@ def requests_unlink(plex_id: str):
 
 @app.get("/api/settings/requests/log")
 async def requests_log(q: str = "", kind: str = "", group: str = "all", page: int = 1, size: int = 50):
-    """Every request made through this site: who, what, when, and where it stands in Seerr now."""
-    rows, error = await request_log.build(seerr, directory)
+    """Every request made through this site: who, what, when, and where it stands now. Movies and series (Seerr),
+    and comics, ebooks and audiobooks (the media site)."""
+    errors: dict = {}
+    rows, error = await request_log.build(seerr, directory, media, errors)
     flags = seerr.help.flags([r["request"] for r in rows if r.get("request")])
     for r in rows:  # the one retry and Notify admin (app/request_help.py)
         f = flags.get(r.get("request") or 0) or {}
@@ -1356,12 +1358,24 @@ async def requests_log(q: str = "", kind: str = "", group: str = "all", page: in
     base = [r for r in rows if request_log.matches(r, q.strip(), kind, "all")]
     hit = [r for r in base if request_log.matches(r, "", "", group)]
     return {**request_log.page_of(hit, page, max(10, min(size, 200))), "counts": request_log.counts(base), "error": error,
-            "totals": seerr.log_counts(), "connected": seerr.configured(), "image_base": IMAGES + "w92"}
+            "totals": request_log.totals(rows, time.time()), "connected": seerr.configured(), "image_base": IMAGES + "w92",
+            "books": bool(media.enabled()), "media_error": errors.get("media")}
+
+
+@app.get("/api/settings/requests/log/cover/{kind}/{item_id}")
+async def requests_log_cover(kind: str, item_id: int):
+    """A comic, ebook or audiobook request's cover for the Request log (admins; from the media site, served from here)."""
+    if kind not in request_log.BOOK_KINDS or item_id < 1 or not media.enabled():
+        raise HTTPException(404, "No cover.")
+    body = await media.cover(kind, item_id)
+    if not body:
+        raise HTTPException(404, "No cover.")
+    return Response(content=body, media_type="image/webp", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/settings/requests/log.csv")
 async def requests_log_csv(q: str = "", kind: str = "", group: str = "all", tz: int = 0):
-    rows, _ = await request_log.build(seerr, directory)
+    rows, _ = await request_log.build(seerr, directory, media)
     rows = [r for r in rows if request_log.matches(r, q.strip(), kind, group)]
     tzinfo = dt.timezone(dt.timedelta(minutes=max(-14 * 60, min(14 * 60, tz))))
     name = "requests-" + dt.datetime.now(tzinfo).strftime("%Y-%m-%d") + ".csv"

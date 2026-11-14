@@ -81,3 +81,65 @@ def test_earlier_requests_import_once_and_only_since_linking(env):
     assert again["added"] == 0
     rows, _ = asyncio.run(request_log.build(svc, d))
     assert [(r["request"], r["source"], r["who"]["name"]) for r in rows] == [(91, "imported", "sable")]
+
+
+class FakeMedia:
+    """Stands in for the media site's admin feed (GET /api/telemetry/log)."""
+    def __init__(self, items, fail=False):
+        self.items, self.fail = items, fail
+
+    def enabled(self):
+        return True
+
+    async def admin_log(self, days=400):
+        if self.fail:
+            raise RuntimeError("The media site did not answer.")
+        return self.items
+
+
+def test_books_comics_and_audiobooks_are_in_the_log_and_unreleased_titles_are_marked(env, monkeypatch):
+    from app import request_log
+    store, d, svc = env
+    soon = (dt.date.today() + dt.timedelta(days=20)).isoformat()
+    monkeypatch.setitem(M.MOVIES[1001], "releaseDate", soon)
+    d.upsert_user({"id": "2001", "username": "sable", "title": "Sable Reyes", "email": "s@x.com"}, shared=True)
+    c = app_for(svc, d, principal("2001", "s@x.com", "sable"))
+    assert c.post("/api/requests/request", json={"mediaType": "movie", "mediaId": 1001}).json()["ok"]  # Night Harbor, not out for 20 days
+    assert c.post("/api/requests/request", json={"mediaType": "movie", "mediaId": 27205}).json()["ok"]  # Inception, long out
+    stamp = lambda t: time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(t))
+    media = FakeMedia([
+        {"ref": "audiobook:4", "kind": "audiobook", "id": 4, "title": "Four", "sub": "Some Author", "created": stamp(time.time() + 60),
+         "state": "work", "label": "Downloading 40%", "open": None, "who": {"plex": "2001", "username": "sable_m", "email": "s@x.com"}},
+        {"ref": "comic:9", "kind": "comic", "id": 9, "title": "Monstress", "sub": "Image, 2015", "created": stamp(time.time() - 3600),
+         "state": "follow", "label": "Following", "open": "/series/3", "who": {"plex": None, "username": "localreader", "email": None}},
+        {"ref": "ebook:2", "kind": "ebook", "id": 2, "title": "Dune", "sub": "Frank Herbert", "created": stamp(time.time() - 7200),
+         "state": "declined", "label": "Declined", "open": None, "who": {"plex": "2001", "username": "sable_m", "email": "s@x.com"}},
+    ])
+    rows, err = asyncio.run(request_log.build(svc, d, media))
+    assert err is None
+    assert [r["title"] for r in rows] == ["Four", "Inception", "Night Harbor", "Monstress", "Dune"]  # newest first, merged
+    by = {r["title"]: r for r in rows}
+    four = by["Four"]
+    assert four["kind"] == "audiobook" and four["state"] == "downloading" and four["label"] == "Downloading 40%"
+    assert four["who"]["name"] == "Sable Reyes" and four["who"]["kind"] == "plex"  # known Plex person: same name as their movies
+    assert four["poster"] == "/api/settings/requests/log/cover/audiobook/4"
+    assert by["Monstress"]["state"] == "following" and by["Monstress"]["who"] == {
+        "kind": "media", "id": "localreader", "name": "localreader", "username": "localreader", "email": None, "admin_login": False}
+    assert by["Dune"]["group"] == "problem"
+    # Night Harbor is not out yet; Inception is
+    assert by["Night Harbor"]["unreleased"] == {"date": soon, "what": "cinema"}
+    assert by["Inception"]["unreleased"] is None
+    # filters: one kind, books together, not out yet, the author
+    assert [r["title"] for r in rows if request_log.matches(r, "", "audiobook", "all")] == ["Four"]
+    assert [r["title"] for r in rows if request_log.matches(r, "", "books", "all")] == ["Four", "Monstress", "Dune"]
+    assert [r["title"] for r in rows if request_log.matches(r, "", "", "unreleased")] == ["Night Harbor"]
+    assert [r["title"] for r in rows if request_log.matches(r, "herbert", "", "all")] == ["Dune"]
+    assert request_log.counts(rows)["unreleased"] == 1
+    t = request_log.totals(rows, time.time())
+    assert t["total"] == 5 and t["people"] == 2
+    csv = request_log.to_csv(rows, dt.timezone.utc)
+    assert "Audiobook" in csv and soon in csv and "media site" in csv
+
+    # The media site not answering: movies and series still show, with a note
+    rows, err = asyncio.run(request_log.build(svc, d, FakeMedia([], fail=True)))
+    assert [r["title"] for r in rows] == ["Inception", "Night Harbor"] and "Media site" in err
