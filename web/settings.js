@@ -211,6 +211,11 @@
     var title = document.getElementById('set-title');
     if (title) title.focus({ preventScroll: true });
   }
+  // Opens Settings at one section (the Welcome back sheet's "Open Billing", "Open Needs you": notify.js).
+  window.stOpenTab = function (t) {
+    setTab(t);
+    if (window.sdOpenSettings) window.sdOpenSettings(true, false);
+  };
   document.getElementById('set-back').appendChild(window.sdIcon ? window.sdIcon('arrow', 18) : document.createTextNode('<'));
   document.getElementById('set-back').addEventListener('click', function () { go('home'); });
 

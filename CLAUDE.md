@@ -315,6 +315,40 @@ files to add servers. Keep it that way.
   `scrolling` (at most every 150 ms) since its scrolling is invisible here. It stays while a sheet holds the page, while a
   tab has keyboard focus, and for 0.8 s after a page change.
 
+## Notifications and the Welcome back sheet (Glenn's pick A "Welcome sheet", Nov 14 2026)
+
+- `app/notify.py` (`Notifier`, tables `notifications`, `notify_seen`, `notify_state`, `notify_readers`) keeps each
+  person's notifications so nothing is lost while they are away. `Notifier.loop` runs `tick` every 2 minutes:
+  - Movies and shows: Seerr's full list as its admin (`all_requests`); the requester is found through `seerr_links`
+    (Seerr id to Plex id). "started downloading" (Radarr/Sonarr queue, `STARTED_STAGES`), "is ready" (Seerr available;
+    a show when every requested season is), "could not be downloaded" (Seerr failed). Requests older than 45 days are
+    not followed.
+  - Comics, ebooks and audiobooks: the media site's signed admin feed (`Media.admin_log`, `book_state`), same three.
+  - Billing (Stripe, read-only copy): a member whose subscription is past due, unpaid or incomplete gets an URGENT
+    "Your payment did not go through" (`billing:payment`), pinned until Stripe says it is paid, then "Your payment went
+    through". Admins get one "N payments failed" with usernames.
+  - Admins (one shared list, `who = 'admins'`, seen marks per admin): the Needs you list, a server not answering (urgent
+    while down, from `poller.since`; once back: "Atlas was down for 14 minutes"), titles due for Unwatched cleanup.
+    "N new requests" since that admin's last visit is counted from `request_log` when the list is read, not stored.
+  - Transitions only: `notify_state` remembers each request's last state; a state is announced once and only forward
+    (or to failed). The first run only records (`notify_seeded`), so turning it on does not flood anyone.
+  - Never someone else's request in a member's list, never release names; members never see other members' names.
+- `GET /api/notifications` (any signed-in person: their own, plus the admins' list for admins): items (open urgent ones
+  first, then newest, 30 days, 60 at most), `unseen`, `pinned`, `since` (their last "Mark all as seen"), `welcome`.
+  `welcome` is true when there is something unseen or pinned AND either something new came since the sheet last opened
+  by itself or it last did so over 6 hours ago (`WELCOME_GAP`, a new visit). `POST /api/notifications/seen {ids?}`
+  (no ids: all, and this visit becomes `since`), `POST /api/notifications/shown` (the page opened it by itself).
+  Sample mode (no Plex server yet) answers made-up ones kept in memory (`sample_items`). `tests/test_notify.py`.
+- `web/notify.js` (`gsNotify`) and `web/notify.css`: a bell (`#bell`, before the gear) with a count (orange when an
+  urgent one is unseen). On page load, when `welcome` is true (once per browser tab, sessionStorage `gs-welcome-done`)
+  the Welcome back sheet opens by itself: "While you were away", "Welcome back, <first name>", "N things to catch up on
+  since <day time>", then Needs action (pinned, "Stays here until it is sorted out"), New and Earlier (seen). The page
+  behind is dimmed and slightly blurred (`backdrop-filter: blur(6px)`, Glenn's ask). Each row has its own button; using
+  it marks that one seen. Footer: Remind me next time (leaves them unseen) and Mark all as seen. The bell opens the same
+  sheet any time ("What is new", "Still to sort out", "You are all caught up"). Phones: the shared bottom sheet. Checked
+  every 60 s while the tab is visible; something new shows a pop-up (`.nt-pop`, tap to open) for 6 s. Hrefs: `#/...`
+  page addresses, `settings:<view>` opens that Settings section (`window.stOpenTab` in `settings.js`).
+
 ## Live streams globe and Dashboard Cards (Glenn's pick 7 "Swing to the city", Nov 13 2026)
 
 - The globe is always centred in its card (`--gl-cx: 0.5`, Glenn, Nov 14 2026); it shrinks to keep clear of the title
