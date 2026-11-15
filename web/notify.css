@@ -1,0 +1,108 @@
+/* Greystar Telemetry: the bell, the Welcome back sheet and the new-notification pop-up (notify.js;
+   Glenn's pick A "Welcome sheet", Nov 14 2026). The page behind the sheet is dimmed and slightly blurred. */
+
+/* ---------- the bell (shares the gear's round button look) ---------- */
+.sd-bell { position: relative; }
+.sd-bell[hidden] { display: none; }
+.nt-badge { position: absolute; top: 12px; right: 12px; min-width: 20px; height: 20px; padding: 0 5px; box-sizing: border-box; border-radius: 999px;
+  background: var(--volt); color: var(--on-fill); font-size: 12px; font-weight: 700; line-height: 20px; text-align: center;
+  box-shadow: 0 0 0 3px var(--surface-card); }
+.nt-badge.is-urgent { background: var(--ember); }
+.sd-bell[aria-expanded="true"] .nt-badge { box-shadow: 0 0 0 3px var(--surface-ink); }
+
+/* ---------- tints (the dashboard's own pastel tokens) ---------- */
+.nt-tint--volt { background: var(--volt); color: var(--on-fill); }
+.nt-tint--ember { background: var(--ember); color: var(--on-fill); }
+.nt-tint--danger { background: var(--danger); color: var(--on-danger); }
+.nt-tint--amber { background: var(--amber); color: var(--on-fill); }
+.nt-tint--sand { background: var(--tint-sand); color: var(--on-fill); }
+.nt-tint--lilac { background: var(--tint-lilac); color: var(--on-fill); }
+.nt-tint--rose { background: var(--tint-rose); color: var(--on-fill); }
+.nt-tint--sky { background: var(--tint-sky); color: var(--on-fill); }
+.nt-tint--peri { background: var(--periwinkle); color: var(--on-fill); }
+
+/* ---------- the sheet, over a dimmed and slightly blurred page ---------- */
+.nt-scrim { position: fixed; inset: 0; z-index: 65; display: flex; align-items: center; justify-content: center; padding: 40px 24px; box-sizing: border-box;
+  background: rgba(7, 9, 18, 0.5); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); opacity: 0; transition: opacity 0.22s ease; }
+.nt-scrim[hidden] { display: none; }
+.nt-scrim.is-in { opacity: 1; }
+
+.nt-sheet { display: flex; flex-direction: column; width: 100%; max-width: 760px; max-height: min(860px, calc(100vh - 80px)); box-sizing: border-box;
+  border-radius: var(--radius-xl, 44px); background: var(--surface-card); color: var(--ink); box-shadow: var(--shadow-float); outline: none;
+  transform: translateY(14px) scale(0.985); transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
+.nt-scrim.is-in .nt-sheet { transform: none; }
+.nt-sheet:not(.gs-sheet) > .gs-sheet__grab { display: none; }
+
+.nt-head { display: flex; align-items: flex-start; gap: 16px; padding: 32px 32px 8px; }
+.nt-head__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.nt-eyebrow { font-size: 13px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink); }
+.nt-eyebrow::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--volt); vertical-align: 1px; }
+.nt-title { margin: 0; font-size: 40px; line-height: 1.1; font-weight: 300; letter-spacing: -0.01em; }
+.nt-lead { font-size: 15px; color: var(--ink-muted); }
+.nt-x { flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: var(--surface-raised);
+  color: var(--ink); cursor: pointer; }
+.nt-x:focus-visible, .nt-btn:focus-visible, .nt-pop:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+
+.nt-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 4px 32px 8px; overscroll-behavior: contain; }
+.nt-sec { margin-top: 14px; }
+.nt-sec__name { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: 0.12em;
+  text-transform: uppercase; color: var(--ink-muted); }
+.nt-sec__note { font-size: 12px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.nt-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
+
+.nt-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 22px; background: var(--surface-raised); }
+.nt-row.is-pinned { background: color-mix(in srgb, var(--ember) 13%, var(--surface-raised)); box-shadow: inset 0 0 0 1px var(--ember); }
+.nt-row.is-seen:not(.is-pinned) { background: transparent; box-shadow: inset 0 0 0 1px var(--hairline); }
+.nt-row.is-seen:not(.is-pinned) .nt-art { opacity: 0.7; }
+.nt-row__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.nt-row__title { font-size: 16px; font-weight: 600; line-height: 1.3; }
+.nt-row__body { font-size: 14px; line-height: 1.4; color: var(--ink-muted); }
+.nt-row__when { flex: none; font-size: 12px; color: var(--ink-muted); white-space: nowrap; }
+
+.nt-art { position: relative; flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 50%; overflow: hidden; }
+.nt-art--poster { width: 44px; height: 62px; border-radius: 12px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; }
+.nt-art__word { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.nt-art__img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.nt-btn { flex: none; height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: transparent; color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--border-strong); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.nt-btn--accent { background: var(--volt); color: var(--on-fill); box-shadow: none; }
+.nt-btn--lg { height: 48px; padding: 0 24px; font-size: 15px; }
+.nt-btn:hover { filter: brightness(1.06); }
+
+.nt-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; padding: 16px 32px 28px; }
+.nt-empty { margin: 20px 0 8px; font-size: 15px; color: var(--ink-muted); }
+
+/* ---------- a pop-up for news that arrives while the person is on the site ---------- */
+.nt-pop { position: fixed; right: 28px; bottom: 28px; z-index: 64; display: flex; align-items: center; gap: 12px; width: min(420px, calc(100% - 32px));
+  padding: 14px 18px 14px 14px; border: 0; border-radius: 22px; background: var(--surface-ink); color: var(--on-ink); box-shadow: var(--shadow-float);
+  font: inherit; text-align: left; cursor: pointer; transform: translateY(20px); opacity: 0; transition: transform 0.25s, opacity 0.25s; }
+.nt-pop.is-in { transform: none; opacity: 1; }
+.nt-pop.is-urgent { box-shadow: var(--shadow-float), inset 0 0 0 2px var(--ember); }
+.nt-pop__icon { flex: none; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; }
+.nt-pop__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; color: var(--on-ink-muted); }
+.nt-pop__text b { font-size: 14px; font-weight: 600; color: var(--on-ink); }
+.nt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+
+/* ---------- phones: the shared bottom sheet (gsUI.sheet adds .gs-sheet and the scrim's own class) ---------- */
+@media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
+  html .nt-scrim { padding: 0; align-items: flex-end; }
+  html .nt-sheet.gs-sheet { max-height: calc(100vh - 48px); padding: 8px 0 0; border-radius: 28px 28px 0 0 !important; background: var(--surface-card); }
+  html .nt-head { padding: 6px 20px 4px; }
+  html .nt-title { font-size: 30px; }
+  html .nt-body { padding: 0 20px 8px; }
+  html .nt-row { flex-wrap: wrap; padding: 12px; gap: 10px 12px; }
+  html .nt-row__text { flex: 1 1 calc(100% - 70px); }
+  html .nt-row__when { order: 3; margin-left: 56px; }
+  html .nt-row .nt-btn { order: 4; margin-left: auto; }
+  html .nt-foot { padding: 12px 20px calc(16px + env(safe-area-inset-bottom)); }
+  html .nt-foot .nt-btn--lg { flex: 1 1 140px; }
+  html .nt-pop { right: 16px; left: 16px; width: auto; bottom: calc(var(--tabbar-space, 96px) + 8px); }
+  html .nt-badge { top: 4px; right: 4px; }
+  html .sd-bell { width: 48px; height: 48px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nt-scrim, .nt-sheet, .nt-pop { transition: none; }
+  .nt-sheet { transform: none; }
+}

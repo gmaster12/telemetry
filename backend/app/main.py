@@ -27,6 +27,7 @@ from .billing import StripeClient
 from .cleanup import Cleanup
 from .globe import SAMPLE_SERVERS, GeoDB, Globe, SampleGlobe
 from .netdata import NetdataClient
+from .notify import Notifier, make_router as notify_router
 from .onplex import OnPlex
 from .plex import PlexAccount, PlexClient
 from .poller import Poller
@@ -54,6 +55,8 @@ geo = GeoDB(Path(DB_PATH).parent / "geo", poller.http)
 globe = Globe(geo, directory.starts_since)
 sample_globe = SampleGlobe()
 poller.globe = globe
+# Notifications and the Welcome back sheet (Glenn's pick A, Nov 14 2026; app/notify.py)
+notifier = Notifier(store, seerr=seerr, arr=arr, media=media, billing=poller.billing, directory=directory, poller=poller, cleanup=cleanup)
 add_requests_section(store)
 add_mystreams_section(store)
 add_books_section(store)
@@ -73,7 +76,9 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(poller.run())
     sweep = asyncio.create_task(cleanup.loop())
     geo_task = asyncio.create_task(globe.loop())
+    notes = asyncio.create_task(notifier.loop())
     yield
+    notes.cancel()
     task.cancel()
     sweep.cancel()
     geo_task.cancel()
@@ -1614,6 +1619,7 @@ async def cleanup_delete(item_id: int, request: Request):
 
 
 app.include_router(make_router(seerr, directory, need, media, cleanup, arr, onplex))
+app.include_router(notify_router(notifier, me, lambda: poller.cfg.use_sample))
 
 
 # ---------- static dashboard ----------
