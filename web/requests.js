@@ -44,21 +44,25 @@
   function plural(n, a, b) { return n + ' ' + (n === 1 ? a : b); }
   var KIND_NAME = { movie: 'Movie', tv: 'Series' };
 
-  // What a title's status looks like: always a word plus a shape.
+  // What a title's status looks like: always a word plus a shape. The words come from the server
+  // (app/request_state.py, sent with /api/requests/me), so every page says the same thing.
+  function words() { return (me && me.words) || {}; }
+  window.gsRqWords = words;
   function mediaBadge(status, is4k) {
-    var x = {
-      available: ['success', 'Available'], partial: ['info', 'Partly available'], processing: ['info', 'Processing'],
-      pending: ['warning', 'Requested'], blocklisted: ['danger', 'Blocked'], deleted: ['neutral', 'Removed']
-    }[status];
+    var x = (words().media || {})[status];
     return x ? badge(x[0], (is4k ? '4K ' : '') + x[1]) : null;
   }
   // Seerr only takes a season that is not on Plex at all (or was deleted) and has no open request, failed ones
   // included (server/entity/MediaRequest.ts); anything else it skips, so the page does not offer it.
   function seasonOpen(st) { return st === 'unknown' || st === 'deleted'; }
   function requestBadge(status) {
-    var x = { pending: ['warning', 'Pending approval'], approved: ['info', 'Approved'], declined: ['danger', 'Declined'],
-      failed: ['danger', 'Failed'], completed: ['success', 'Available'] }[status];
+    var x = (words().request || {})[status];
     return x ? badge(x[0], x[1]) : badge('neutral', status);
+  }
+  // A request's stage (downloading, adding to Plex ...), in the same words as My requests.
+  function stageBadge(stage) {
+    var x = (words().stages || {})[stage];
+    return x ? badge(x[0], x[1]) : null;
   }
 
   function toast(text, tone) { return window.gsUI.toast(text, tone); }
@@ -153,6 +157,7 @@
   }
 
   function notConnected() {
+    document.title = 'Requests · Greystar Telemetry';   // the browser tab, not the last page's name
     body.replaceChildren(el('div', { class: 'rq-empty' },
       el('b', { text: 'Requests are not set up yet' }),
       el('span', { text: me && me.admin ? 'Connect your Seerr in Settings, Requests. People can then find movies and series and request them here.'
@@ -978,9 +983,8 @@
   }
 
   // ---------- my requests, approvals, watchlist, issues ----------
-  var FILTERS = [['all', 'All'], ['pending', 'Pending'], ['approved', 'Approved'], ['processing', 'Processing'], ['available', 'Available'], ['failed', 'Failed']];
   function filterChips(path, current, extra) {
-    return el('div', { class: 'rq-chips', role: 'group', 'aria-label': 'Show' }, FILTERS.map(function (f) {
+    return el('div', { class: 'rq-chips', role: 'group', 'aria-label': 'Show' }, (words().seerrFilters || []).map(function (f) {
       return el('a', { class: 'rq-chip', href: link(path, Object.assign({}, extra || {}, { filter: f[0] === 'all' ? null : f[0] })), 'aria-current': (current || 'all') === f[0] ? 'true' : null, text: f[1] });
     }));
   }
@@ -1009,7 +1013,7 @@
         el('a', { class: 'rq-rrow__title', href: link((q.kind === 'tv' ? 'series/' : 'movie/') + q.tmdbId) }, q.title, q.year ? el('span', { class: 'rq-muted', text: ' (' + q.year + ')' }) : null),
         el('span', { class: 'rq-rrow__meta', text: [KIND_NAME[q.kind], q.is4k ? '4K' : null, seasonText(q.seasons), (q.mine ? 'You' : (q.by && q.by.name)) + ', ' + fmtDate(q.created)].filter(Boolean).join(' · ') }),
         q.modifiedBy && q.status !== 'pending' ? el('span', { class: 'rq-muted', text: (q.status === 'declined' ? 'Declined by ' : 'Approved by ') + q.modifiedBy }) : null),
-      el('div', { class: 'rq-rrow__status' }, requestBadge(q.status), q.status === 'approved' && q.media.status === 'processing' ? badge('info', 'Downloading') : null),
+      el('div', { class: 'rq-rrow__status' }, requestBadge(q.status), q.status === 'approved' && (q.stage === 'downloading' || q.stage === 'importing') ? stageBadge(q.stage) : null),
       actions);
   }
   function decide(q, what, btn, onChange) {
@@ -1123,11 +1127,10 @@
   // comics) in one list, newest first, grouped by day in this browser's time zone. GET /api/requests/everything
   // pages both sides together (cursor). Filters work on what is loaded and load more when they show little.
   var EV_KINDS = [['all', 'Everything'], ['movie', 'Movies'], ['show', 'Shows'], ['comic', 'Comics'], ['ebook', 'Ebooks'], ['audiobook', 'Audiobooks']];
-  var EV_STATES = [['all', 'Any status'], ['work', 'In progress'], ['release', 'Waiting for release'], ['follow', 'Following'], ['ready', 'Ready'], ['problem', 'Needs attention']];
   var EV_KIND_WORD = { movie: 'Movie', show: 'Show', comic: 'Comic', ebook: 'Ebook', audiobook: 'Audiobook' };
   var EV_KIND_ICON = { movie: 'film', show: 'film', comic: 'book', ebook: 'book', audiobook: 'book' };
   function evBadge(x) {
-    var tone = { ready: 'success', work: 'info', release: 'neutral', follow: 'neutral', problem: 'danger' }[x.state] || 'neutral';
+    var tone = (words().tones || {})[x.state] || 'neutral';
     var b = badge(tone, x.label);
     b.classList.add('rq-ev-badge', 'rq-ev-badge--' + x.state);
     return b;
@@ -1213,7 +1216,7 @@
       var sc = { all: byKind.length };
       byKind.forEach(function (x) { sc[x.state] = (sc[x.state] || 0) + 1; });
       chip(kinds, EV_KINDS, 'kind', kc);
-      chip(states, EV_STATES, 'state', sc);
+      chip(states, words().filters || [], 'state', sc);
       sortBtn.textContent = st.order === 'desc' ? 'Newest first' : 'Oldest first';
       var shown = byKind.filter(function (x) { return st.state === 'all' || x.state === st.state; });
       list.replaceChildren();

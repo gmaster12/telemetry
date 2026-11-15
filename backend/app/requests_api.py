@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
+from . import request_state as rs
 from .arr import ArrError
 from .seerr import MEDIA_STATUS, REQUEST_STATUS, Requests, SeerrError, has, release_wait
 
@@ -119,7 +120,8 @@ BOOK_ACTIONS = ("retry", "notify", "cancel", "stop", "watch", "unwatch")
 
 def unify_seerr(x: dict, wait: dict | None) -> dict:
     """One Seerr request (a req_row) in My requests' shared words (the media site's feed uses the same ones):
-    work (In progress), release (Waiting for release), follow, ready, problem (Needs attention), or hidden."""
+    work (In progress), release (Waiting for release), follow, ready, problem (Needs attention), or hidden. The stage
+    and its words come from app/request_state.py, like everywhere else."""
     tv = x.get("kind") == "tv"
     seasons = x.get("seasons") or []
     sub = ", ".join(p for p in [x.get("year") or "", "4K" if x.get("is4k") else "",
@@ -129,23 +131,13 @@ def unify_seerr(x: dict, wait: dict | None) -> dict:
            "sortAt": x.get("created"), "progress": None, "wait": None, "note": None, "seasons": seasons,
            "open": f"#/requests/{'series' if tv else 'movie'}/{x.get('tmdbId')}",
            "canRetry": bool(x.get("canRetry")), "canRemove": bool(x.get("canRemove")), "is4k": bool(x.get("is4k"))}
-    status, media = x.get("status"), (x.get("media") or {}).get("status")
-    if status == "declined":
-        return {**out, "state": "hidden", "label": "Declined"}
-    if status == "failed":
-        return {**out, "state": "problem", "label": "Failed", "note": "Something went wrong getting it."}
-    if media == "available" or status == "completed":
-        return {**out, "state": "ready", "label": "Available"}
-    if media == "partial":
-        return {**out, "state": "ready", "label": "Partly available", "note": "Some of it is on Plex; the rest is on its way."}
-    if status == "pending":
-        return {**out, "state": "work", "label": "Waiting for approval"}
-    if x.get("downloading"):
-        return {**out, "state": "work", "label": "Downloading"}
-    w = wait or {"reason": "searching"}
-    if w.get("reason") in ("unreleased", "airing"):
-        return {**out, "state": "release", "label": "Airing" if w.get("reason") == "airing" else "Waiting for release", "wait": w}
-    return {**out, "state": "work", "label": "Searching", "wait": w}
+    stage = x.get("stage") or "approved"
+    if stage in ("approved", "release"):
+        w = wait or {"reason": "searching"}
+        stage = "release" if w.get("reason") in ("unreleased", "airing") else "approved"
+        out["wait"] = w
+    words = rs.member_words(stage, out["wait"])
+    return {**out, "stage": stage, "state": words["state"], "label": words["label"], "note": words["note"]}
 
 
 RECENT_DAYS, RECENT_SHOWN = 7, 80
@@ -155,24 +147,11 @@ DOWNLOADS_MAX = 6
 ACTIVE_STAGES = ("downloading", "queued", "paused", "importing", "retry", "problem")
 
 
-def public_status(state: str, label: str | None) -> tuple[str, str]:
-    """The viewer home's Recently requested shows a few plain words, each with its shape (never colour alone):
-    Available or Following (circle), Downloading (triangle), Not out yet (ring), Searching (square). A failed or
-    waiting request reads Searching there: what went wrong is the requester's business (My requests)."""
-    label = label or ""
-    if state == "ready":
-        return ("Partly available" if label == "Partly available" else "Available"), "circle"
-    if state == "follow":
-        return "Following", "circle"
-    if state == "release":
-        return "Not out yet", "ring"
-    if state == "work" and (label.startswith("Downloading") or label.startswith("Adding")):
-        return "Downloading", "triangle"
-    return "Searching", "square"
+public_status = rs.public_words   # Recently requested's four plain words (app/request_state.py)
 
 
 def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], media=None, cleanup=None, arr=None,
-                onplex=None) -> APIRouter:
+                onplex=None, status: rs.RequestStatus | None = None) -> APIRouter:
     r = APIRouter(prefix="/api/requests")
 
     STALE = ("processing", "pending", "partial")   # Seerr has not caught up with Plex (yet, or at all)
@@ -180,21 +159,9 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
     def iso(when: float) -> str:
         return dt.datetime.fromtimestamp(when, dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
-    async def plex_movie_at(tmdb: int, is4k: bool, prog: dict | None) -> float | None:
-        """Plex's own answer for a movie Radarr has finished with: is that file in the library?
-
-        Only asked once the download is done (`imported`), so a title still downloading costs nothing.
-        The file's size and name come from Radarr and stay on this side: they identify the copy for
-        Plex, and they are release names, which members never see."""
-        if not (onplex and prog and prog.get("stage") == "imported"):
-            return None
-        size = name = title = None
-        if arr:
-            try:
-                size, name, title = await arr.imported_file(int(tmdb), is4k)
-            except ArrError:
-                pass
-        return await onplex.movie(int(tmdb), is4k=is4k, size=size, file_name=name, title=title)
+    # Plex's own answer (app/onplex.py), asked the same way here, by the notifier and by Unwatched cleanup.
+    status = status or rs.RequestStatus(svc, arr, onplex)
+    plex_movie_at = status.movie_on_plex
 
     async def plex_media_state(mi: dict, kind: str, tmdb_id: int, title: str | None) -> dict:
         """`media_state`, plus Plex's own answer while Seerr still says a request is being worked on.
@@ -214,24 +181,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         await asyncio.gather(one(False), one(True))
         return st
 
-    async def plex_has_episodes(tvdb: int, tmdb: int | None, show: dict | None, is4k: bool) -> float | None:
-        """Plex's own answer for a show: are all the asked-for episodes Sonarr has finished with there?
-
-        Only asked when Sonarr has a file for every episode of the asked-for seasons, so a season still
-        coming in is left alone and costs nothing."""
-        if not (onplex and show):
-            return None
-        want = {(int(se["number"]), int(e["n"])) for se in show.get("seasons") or [] for e in se.get("episodes") or []
-                if e.get("stage") == "onplex" and e.get("n") and se.get("number")}
-        if not want or len(want) != int(show.get("total") or 0):
-            return None
-        title = None
-        if arr:
-            try:
-                title = ((await arr.series(int(tvdb), is4k)) or {}).get("title")
-            except ArrError:
-                pass
-        return await onplex.episodes(want, tvdb_id=int(tvdb), tmdb_id=tmdb, title=title, is4k=is4k)
+    plex_has_episodes = status.show_on_plex
 
     async def who(request: Request) -> tuple[Any, int | None]:
         p = need(request, "requests")
@@ -273,6 +223,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 "canCancel": (mine and status == "pending") or manage, "canDecide": manage and status == "pending",
                 "canRetry": status == "failed" and (mine or manage), "canRemove": status == "failed" and (mine or manage),
                 "downloading": bool(m.get("downloadStatus4k" if q.get("is4k") else "downloadStatus")),
+                "stage": rs.stage_of(q),   # where it stands, in the site's one set of words (app/request_state.py)
                 "media": {"status": MEDIA_STATUS.get(m.get("status4k" if q.get("is4k") else "status"), "unknown"), "tmdbId": m.get("tmdbId")}}
 
     def with_help(items: list[dict], manage: bool) -> list[dict]:
@@ -310,7 +261,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
     async def me(request: Request):
         p = need(request, "requests")
         if not svc.configured():
-            return {"connected": False, "admin": p.is_admin, "images": IMAGES}
+            return {"connected": False, "admin": p.is_admin, "images": IMAGES, "words": rs.vocabulary()}
         _, uid = await who(request)
         u = await run(me_info(uid))
         perms = int(u.get("permissions") or 0)
@@ -329,6 +280,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 pass
         return {
             "connected": True, "admin": p.is_admin, "pending": pending, "images": IMAGES,
+            "words": rs.vocabulary(),   # every request word the page shows (app/request_state.py)
             "user": {"id": u.get("id"), "name": u.get("displayName"), "avatar": u.get("avatar")},
             "can": {"movie": has(perms, "REQUEST", "REQUEST_MOVIE"), "tv": has(perms, "REQUEST", "REQUEST_TV"),
                     "movie4k": bool(pub.get("movie4kEnabled")) and has(perms, "REQUEST_4K", "REQUEST_4K_MOVIE"),

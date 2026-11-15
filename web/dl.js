@@ -158,8 +158,8 @@
     if (!sh || !sh.seasons || !sh.seasons.length) return null;
     var c = sh.counts || {};
     var done = c.onplex || 0;
-    var parts = [['onplex', 'On Plex', 'lime'], ['importing', 'Importing', 'sky'], ['downloading', 'Downloading', 'volt'], ['queued', 'Queued', 'grey'],
-      ['problem', 'Needs a look', 'danger'], ['searching', 'Looking for a copy', 'ring'], ['release', 'Not out yet', 'ring']];
+    // Episode stages, their words and tints come from the server (app/request_state.py, `episodes`).
+    var parts = (window.gsRqWords && window.gsRqWords().episodes) || [];
     var bar = el('span', { class: 'dl-split', 'aria-hidden': 'true' }, parts.map(function (p) {
       return c[p[0]] ? el('i', { class: 'dl-split--' + p[2], style: 'flex:' + c[p[0]] + ' 1 0' }) : null;
     }));

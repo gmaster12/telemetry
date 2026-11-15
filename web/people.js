@@ -87,6 +87,10 @@
     if (me.role !== 'admin' && me.kind === 'plex' && mySub && mySub.configured && window.gsHome) {
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); window.gsHome.show('subscription'); } }, icon('bookmark', 18), 'My subscription'));
     }
+    // Phones: Settings is here instead of the gear in the top bar (Glenn's pick 3A), which leaves room for the bell.
+    if (window.gsUI.isPhone() && window.sdOpenSettings) {
+      items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); window.sdOpenSettings(true, true); } }, icon('sliders', 18), 'Settings'));
+    }
     if (me.role === 'admin') {
       if (!(window.gsCards && window.gsCards.off('users'))) items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); focusUsers(); } }, icon('users', 18), 'Users'));
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); openSettingsTab('access'); } }, icon('sliders', 18), 'Access and logins'));
@@ -290,10 +294,18 @@
     var box = document.getElementById('sub-card');
     if (!box) return;
     box.replaceChildren();
-    // Admin without a subscription, or Stripe not connected: nothing to show.
-    var show = mySub && mySub.configured && !(me.role === 'admin' && mySub.status === 'none');
+    // Admin without a subscription: nothing to show. A member always gets the card, so My subscription is never a
+    // blank page; before Stripe is connected it says so.
+    var show = mySub && (me.role === 'admin' ? mySub.configured && mySub.status !== 'none' : true);
     box.hidden = !show;
-    if (show) box.appendChild(subscriptionCard(mySub, 'self'));
+    if (!show) return;
+    if (!mySub.configured) {
+      box.appendChild(el('div', { class: 'gp-sub' }, el('p', { class: 'gp-eyebrow gp-sub__eyebrow', text: 'Your subscription' }),
+        el('b', { class: 'gp-sub__plan', text: 'Nothing to show yet' }),
+        el('p', { class: 'gp-sub__note', text: 'Subscription details are not connected to this site yet. Ask the administrator if you have a question about your plan.' })));
+      return;
+    }
+    box.appendChild(subscriptionCard(mySub, 'self'));
   }
 
   // ---------- your servers (viewers): Online or Offline, and for how long ----------

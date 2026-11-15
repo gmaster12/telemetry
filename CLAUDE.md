@@ -41,7 +41,8 @@ files to add servers. Keep it that way.
   approves.
 - Do not change `SECRET_KEY` once set: it decrypts the saved tokens.
 - Stripe: only ever use a **restricted, read-only** key (Read on Customers,
-  Subscriptions, Products, Charges). Never add code that writes to Stripe or
+  Subscriptions, Products, Charges). A full secret key (`sk_`) is accepted but called out in red in Settings, Billing,
+  its home row and "Needs a look" until it is replaced (`full_stripe_key`, Glenn's pick 5B). Never add code that writes to Stripe or
   shows one person's billing to another viewer. Matching: a manual link in
   `billing_links` (Stripe email -> Plex id, permanent, set in Settings,
   Billing) wins; otherwise the Stripe email equals the Plex email
@@ -50,7 +51,8 @@ files to add servers. Keep it that way.
   (`ended_customers`; Glenn does not need them); customers with no subscription yet still show. The count
   (`counts()["unmatched"]`, also on the home card and "needs a look") matches, and a note says how many were left out.
 - Only the Plex account in `ADMIN_PLEX_EMAIL` (cluster@mail.com) is a Plex
-  administrator. Never add another way for a Plex account to become admin.
+  administrator. Never add another way for a Plex account to become admin. Every check goes through
+  `is_admin_email()` in `app/auth.py` (no case, no spaces; Glenn's pick 6A, Nov 15 2026).
   Extra admins are local logins (Settings, Access, or `app.tools.admin`).
 - Never log or print Plex account tokens of viewers. They are not stored; only
   the linked server-owner accounts' tokens are saved (encrypted) in
@@ -254,6 +256,20 @@ files to add servers. Keep it that way.
   (`SEERR_IMAGE_BASE` overrides for tests). `tests/mock_seerr.py` is a stand-in
   Seerr for tests and local browser checks.
 
+## Where a request stands (app/request_state.py; Glenn's picks O1A and 4A, Nov 15 2026)
+
+- One module decides a movie or show request's stage (`stage_of`): waiting, approved (searching), release, downloading,
+  importing, partial, ready, plus declined, failed and the log's canceled, removed, gone, unknown; books map on through
+  `from_shared`. `WORDS` gives every view its words for each stage: the Request log (label, tone, group; the log calls
+  ready "available"), My requests (`member_words`: the shared words work, release, follow, ready, problem), Recently
+  requested (`public_words`) and notifications (`notice_word`). Do not add another table of request words anywhere.
+- `RequestStatus.check` asks Radarr/Sonarr and Plex itself (`app/onplex.py`) the way the title pages do. The notifier
+  and Unwatched cleanup use it, so "is ready" goes out and the cleanup clock starts (at Plex's own time) as soon as the
+  title is on Plex, not when Seerr's scan catches up. `requests_api` uses the same object (`movie_on_plex`, `show_on_plex`).
+- The page types no request words of its own: `/api/requests/me` carries `words` (`vocabulary()`: stages, filters, tones,
+  log groups, Seerr request and media badges, the hub's groups, episode stages) and request rows carry `stage`; the Request
+  log answer carries `groups`. `window.gsRqWords()` (requests.js) hands them to `dl.js`. `tests/test_request_state.py`.
+
 ## Unwatched cleanup and download progress (Glenn's pick B, Nov 2026)
 
 - Radarr & Sonarr (`app/arr.py`, Settings, Radarr & Sonarr, `renderArr` in `settings.js`): slots `radarr`, `sonarr`,
@@ -333,6 +349,9 @@ files to add servers. Keep it that way.
   - Transitions only: `notify_state` remembers each request's last state; a state is announced once and only forward
     (or to failed). The first run only records (`notify_seeded`), so turning it on does not flood anyone.
   - Never someone else's request in a member's list, never release names; members never see other members' names.
+  - Nothing stays pinned forever (Glenn's pick 1A, Nov 15 2026): a server deleted while down has its notice taken back
+    (`withdraw`), one turned off is closed as "<name> is turned off"; removing the Stripe key takes back every open
+    payment notice; turning cleanup off closes its notice.
 - `GET /api/notifications` (any signed-in person: their own, plus the admins' list for admins): items (open urgent ones
   first, then newest, 30 days, 60 at most), `unseen`, `pinned`, `since` (their last "Mark all as seen"), `welcome`.
   `welcome` is true when there is something unseen or pinned AND either something new came since the sheet last opened
@@ -505,7 +524,10 @@ target, re-adding the same Plex machine relinks it. For an IP change, edit the a
 ## Polling (backend/app/poller.py)
 
 `Poller.run` polls Plex every `poll_seconds` and nothing else, so live streams
-show within seconds of a restart. Netdata runs in `_telemetry_loop` (CPU and
+show within seconds of a restart. One slow answer is not an outage (Glenn's pick 2A, Nov 15 2026): a server that
+misses a poll keeps its last streams, marked `stale` (dimmed on cards and rows, `is-stale`), and shows "Not answering"
+in the Servers card (`answering: false` in `/api/servers`) until it has missed `MISSES` (3) polls in a row, the same
+rule as `since` and the down notice; only then is it Offline and its streams end. Stale rows never extend or end a play. Netdata runs in `_telemetry_loop` (CPU and
 network queries in parallel). The slow account syncs run in `_upkeep_loop`
 (`upkeep`: plex.tv users every 6 hours, Stripe every 15 minutes); their last
 run times are saved in settings (`users_synced_at`, `billing_synced_at`) so a
@@ -640,8 +662,8 @@ design system). The dashboard adds its own patterns:
   person at a time, plus a short "Custom access or turned off" list.
 - Subscription card ("Your subscription", `#sub-card`, `people.js`): plan,
   price, status badge, renewal or end date, last payment. Shown to every
-  signed-in Plex user (hidden for an admin with no subscription, and when
-  Stripe is not connected). Admin sees it in the history drawer; the people
+  signed-in Plex user (hidden for an admin with no subscription). Before Stripe is
+  connected a member sees "Nothing to show yet", so `#/subscription` is never blank. Admin sees it in the history drawer; the people
   picker flags Past due, Unpaid, Canceled.
 - Streams starting and stopping use "Clock sweep" with the Live now bar
   (Glenn's pick; it replaced "Drop in, fall away", which had replaced Lime pulse).
@@ -766,6 +788,9 @@ design system). The dashboard adds its own patterns:
 - One bottom sheet for every overlay on phones (`gsUI.sheet`: grab bar, swipe down or tap the dimmed page to close,
   scroll lock): stream details, Settings, the history drawer, the account menu, the search kind menu, request
   dialogs, More. On desktop the same panels keep their own look.
+- Top bar on phones (Glenn's pick 3A, Nov 15 2026): no gear; Settings is the first item of the account menu, so the bell
+  takes the gear's place and Live now keeps its room (it ends in an ellipsis when it must). Closing Settings puts focus
+  back on the account button there.
 - One page header on phones (`#phead`, `renderPhead`, `window.sdPhead`): a small "Telemetry" (or section) eyebrow and
   a 32 px title under the top bar; `has-phead` hides the old titles inside cards. Requests title pages skip it
   (the poster block names the title). Light and Dark live in Settings, Display, Appearance (not the top bar).

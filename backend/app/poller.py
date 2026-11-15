@@ -19,6 +19,7 @@ from .plex import PlexAccount, PlexClient, normalize_session
 from .store import Directory, Store
 
 log = logging.getLogger("telemetry.poller")
+MISSES = 3  # polls in a row a server may miss before it counts as down (about 30 seconds)
 
 
 class Poller:
@@ -34,6 +35,9 @@ class Poller:
         # slow answer does not reset its up time.
         self.since: dict[str, dict] = self._load_since()
         self._fails: dict[int, tuple[int, float]] = {}
+        # Each server's streams from its last good answer. A server that misses a poll keeps showing them (marked
+        # `stale`) until it has missed MISSES polls in a row, the same rule as "down" (Glenn's pick 2A, Nov 15 2026).
+        self._last_rows: dict[int, list[dict]] = {}
         self.telemetry: dict[str, dict] = {}
         self.netdata_error: str | None = None
         self.netdata_ok_at: float | None = None
@@ -77,7 +81,7 @@ class Poller:
         else:
             n, first = self._fails.get(s.id, (0, now))
             self._fails[s.id] = (n + 1, first)
-            if n + 1 < 3:
+            if n + 1 < MISSES:
                 return
             online, started = False, first
         rec = self.since.get(key)
@@ -170,21 +174,30 @@ class Poller:
                     else:
                         self.clips.want(s.id, row["rating_key"])  # made in the background; shows from the next poll
                 rows.append(row)
-            self.server_state[s.name] = {"online": True, "error": None, "ok_at": time.time()}
+            self.server_state[s.name] = {"online": True, "answering": True, "error": None, "ok_at": time.time()}
             self._mark(s, True)
+            self._last_rows[s.id] = rows
             return rows
         except Exception as e:
             prev = self.server_state.get(s.name, {})
-            self.server_state[s.name] = {"online": False, "error": str(e), "ok_at": prev.get("ok_at")}
             self._mark(s, False)
-            log.warning("Plex poll failed for %s: %s", s.name, e)
+            misses = self._fails.get(s.id, (1, 0))[0]
+            log.warning("Plex poll failed for %s (%d in a row): %s", s.name, misses, e)
+            if misses < MISSES and prev.get("online"):
+                # One slow answer is not an outage: keep the last streams, marked, so nothing vanishes and comes back.
+                self.server_state[s.name] = {"online": True, "answering": False, "error": str(e), "ok_at": prev.get("ok_at")}
+                return [{**r, "stale": True} for r in self._last_rows.get(s.id, [])]
+            self.server_state[s.name] = {"online": False, "answering": False, "error": str(e), "ok_at": prev.get("ok_at")}
+            self._last_rows.pop(s.id, None)
             return []
 
     async def poll_plex(self) -> None:
         servers = [s for s in self.cfg.servers if s.enabled]
         results = await asyncio.gather(*(self._poll_server(s) for s in servers))
         rows = [r for rs in results for r in rs]
-        online = {name for name, st in self.server_state.items() if st.get("online")}
+        # Servers that answered this round. One that is only not answering (its rows are `stale`) keeps its plays
+        # open and its globe dots, like an offline one, and its streams are not counted again.
+        online = {name for name, st in self.server_state.items() if st.get("online") and st.get("answering", True)}
         try:
             self.track_plays(rows, online)
         except Exception:
@@ -205,7 +218,7 @@ class Poller:
         now = int(time.time())
         seen: set[tuple[str, str]] = set()
         for r in rows:
-            if not r.get("session_key"):
+            if not r.get("session_key") or r.get("stale"):
                 continue
             key = (r["server"], r["session_key"])
             seen.add(key)
@@ -502,6 +515,7 @@ class Poller:
                 "cpu_known": cpu is not None,
                 "net_out_mbps": t.get("net_out_mbps"),
                 "status": status,
+                "answering": bool(online and st.get("answering", True)),
                 "hot_for_min": self.store.hot_minutes(s.name, self.cfg.hot_cpu_pct) if online else 0,
                 "error": st.get("error"),
             })

@@ -300,6 +300,9 @@
 .sd-sweep--in { animation: sd-sweep 760ms cubic-bezier(0.4, 0, 0.2, 1) var(--sw-d, 0ms) both, sd-sweep-off 400ms ease calc(var(--sw-d, 0ms) + 1060ms) both; }
 .sd-sweep--out { --sw-c: #a7a7ad; animation: sd-unsweep 640ms cubic-bezier(0.4, 0, 0.2, 1) var(--sw-d, 0ms) both; }
 .sd-flip.is-new, .sd-row.is-new { animation: sd-fade-in 260ms ease-out var(--sw-d, 0ms) both; }
+/* A stream whose server missed a poll or two (Glenn's pick 2A): kept in place, dimmed, until the server answers. */
+.sd-flip.is-stale, .sd-row.is-stale { opacity: 0.55; transition: opacity 400ms ease; }
+.sd-flip.is-stale .sd-flip__inner > .sd-face:first-child, .sd-row.is-stale .sd-row__thumb { filter: grayscale(0.6); }
 .sd-flip.is-ending, .sd-row.is-ending { pointer-events: none; animation: sd-fade-out 280ms cubic-bezier(0.4, 0, 1, 1) calc(var(--sw-d, 0ms) + 640ms) both; }
 .sd-flip.is-ending .sd-flip__inner > .sd-face:first-child, .sd-row.is-ending .sd-row__thumb { animation: sd-greyout 640ms ease var(--sw-d, 0ms) both; }
 @keyframes sd-sweep { from { --sw-a: 0deg; } to { --sw-a: 360deg; } }

@@ -76,7 +76,9 @@
         max_streams: s.max_streams,
         hot_for_min: s.hot_for_min || 0,
         status: s.status,
-        status_label: s.status === 'Healthy' ? 'Online' : s.status === 'Degraded' ? 'High load' : 'Offline'
+        // A server that missed a poll or two is not down yet: its last streams stay, marked (Glenn's pick 2A).
+        status_label: s.status !== 'Offline' && s.answering === false ? 'Not answering'
+          : s.status === 'Healthy' ? 'Online' : s.status === 'Degraded' ? 'High load' : 'Offline'
       };
     })
   });
@@ -459,7 +461,7 @@
 
   /* Servers */
   const pickServer = (name) => dash.setParams({ server: dash.params().server === name ? null : name });
-  const SRV_KIND = { Online: 'online', 'High load': 'high', Offline: 'offline' };
+  const SRV_KIND = { Online: 'online', 'High load': 'high', 'Not answering': 'high', Offline: 'offline' };
   function renderServers() {
     const body = document.getElementById('srv-rows');
     const d = dash.data('server_load');
@@ -1037,6 +1039,10 @@
   // node: the card (or phone row); front: the card face the border goes around.
   function pulseMarks(node, r, front) {
     node.dataset.id = r.id;
+    if (r.stale) {  // its server missed a poll: what it said last, dimmed, until it answers or counts as down
+      node.classList.add('is-stale');
+      node.title = r.server + ' is not answering right now. This is what it said last.';
+    }
     const sweep = (cls) => { const s = el('span', 'sd-sweep ' + cls); s.setAttribute('aria-hidden', 'true'); (front || node).appendChild(s); };
     if (r._ended) {
       node.classList.add('is-ending');
@@ -1759,7 +1765,8 @@
     gear.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (!open) {
       if (setDetach) { setDetach(); setDetach = null; }
-      pvVideos.forEach((v) => v.pause()); if (was) gear.focus(); return;
+      // Back to whatever opened it: the gear, or on phones (no gear there) the account button.
+      pvVideos.forEach((v) => v.pause()); if (was) (gear.offsetParent ? gear : document.querySelector('#user .sd-user__btn') || gear).focus(); return;
     }
     if (!setDetach) setDetach = window.gsUI.sheet(document.getElementById('settings'), { onClose: () => openSettings(false), scrim: document.getElementById('set-scrim') });
     if (window.stOnOpen) window.stOnOpen(fresh);   // settings.js picks the home (admins) or Display (viewers)

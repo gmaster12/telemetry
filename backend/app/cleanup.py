@@ -98,11 +98,14 @@ def season_of(play: dict) -> int | None:
 
 
 class Cleanup:
-    def __init__(self, store, seerr, arr: Arr, poller=None):
+    def __init__(self, store, seerr, arr: Arr, poller=None, status=None):
         self.store = store
         self.seerr = seerr
         self.arr = arr
         self.poller = poller
+        # Plex's own answer, asked the way the title pages ask it (app/request_state.py), so the clock starts when the
+        # title is really on Plex, not when Seerr's scan catches up (Glenn's pick 4A, Nov 15 2026).
+        self.status = status
         self._busy = asyncio.Lock()
         self.last_error: str | None = None
         with store.lock:
@@ -259,8 +262,17 @@ class Cleanup:
                 ss = [s for s in m.get("seasons") or [] if not want or s.get("seasonNumber") in want]
                 if ss:
                     arrived = any(MEDIA_STATUS.get(s.get("status4k" if is4k else "status")) in ("available", "partial") for s in ss)
+            plex_at = None
+            if row["state"] == "waiting" and not arrived and self.status and status in ("processing", "pending", "partial"):
+                try:
+                    got = await self.status.check(q)
+                except Exception as e:  # noqa: BLE001  (a quiet Plex or Radarr leaves it to Seerr, as before)
+                    log.info("Cleanup: Plex check failed for %s: %s", row.get("title"), e)
+                    got = {}
+                if got.get("stage") == "ready":
+                    arrived, plex_at = True, got.get("plex_at")
             if row["state"] == "waiting" and arrived:
-                added = iso(m.get("mediaAddedAt"))
+                added = int(plex_at) if plex_at else iso(m.get("mediaAddedAt"))
                 start = added if added and added >= int(row["requested_at"]) else now
                 cols.update(state="running", available_at=start, deadline=start + (self.days() + int(row["extra_days"] or 0)) * DAY)
                 row.update(cols)

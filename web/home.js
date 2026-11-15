@@ -270,12 +270,9 @@
   }
 
   // ---------- Requests hub ----------
-  var STAGES = [
-    { id: 'ready', label: 'Ready to watch', shape: 'circle', filter: 'available', test: function (x) { return x.media && x.media.status === 'available'; } },
-    { id: 'way', label: 'On its way', shape: 'triangle', filter: 'processing', test: function (x) { return x.status === 'approved' && !(x.media && x.media.status === 'available'); } },
-    { id: 'wait', label: 'Waiting for approval', shape: 'square', filter: 'pending', test: function (x) { return x.status === 'pending'; } },
-    { id: 'failed', label: 'Failed', shape: 'square', filter: 'failed', test: function (x) { return x.status === 'failed'; } }
-  ];
+  // The hub's groups and which request stages go in each come from the server (app/request_state.py, `hub`).
+  var hubGroups = [];
+  function inGroup(g) { return function (x) { return (g.stages || []).indexOf(x.stage) >= 0; }; }
   function shape(s) {
     if (s === 'circle') return el('span', { class: 'vh-shape vh-shape--c', 'aria-hidden': 'true' });
     if (s === 'triangle') return el('span', { class: 'vh-shape vh-shape--t', 'aria-hidden': 'true' });
@@ -306,14 +303,14 @@
       el('div', { class: 'vh-sechead' }, el('h2', { class: 'vh-h2', text: 'Trending this week' }), el('a', { class: 'vh-link', href: rqLink(''), text: 'More' })),
       trend
     ];
-    var ready = get('/api/requests/me', 600000).then(function (m) { if (m && m.images) images = m.images; }).catch(function () {});
+    var ready = get('/api/requests/me', 600000).then(function (m) { if (m && m.images) images = m.images; if (m && m.words) hubGroups = m.words.hub || []; }).catch(function () {});
     ready.then(function () {
       return get('/api/requests/mine?filter=all');
     }).then(function (d) {
       var items = (d && d.items) || [];
-      var shown = STAGES.filter(function (s) { return s.id !== 'failed' || items.some(s.test); });
+      var shown = hubGroups.filter(function (s) { return s.id !== 'failed' || items.some(inGroup(s)); });
       stages.replaceChildren.apply(stages, shown.map(function (s) {
-        var list = items.filter(s.test);
+        var list = items.filter(inGroup(s));
         return el('a', { class: 'vh-stage vh-stage--' + s.id, href: rqLink('mine', { filter: s.filter }) },
           el('span', { class: 'vh-stage__head' }, shape(s.shape), el('b', { text: s.label }), el('span', { class: 'vh-stage__n', text: String(list.length) })),
           el('span', { class: 'vh-stage__list' }, list.slice(0, 2).map(function (x) {

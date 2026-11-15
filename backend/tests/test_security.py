@@ -91,3 +91,42 @@ def test_guesses_from_many_addresses_still_hit_the_username_limit(app):
     codes = [c.post("/api/auth/local", json={"username": "ops", "password": "wrong"},
                     headers={"X-Requested-With": "greystar", "X-Forwarded-For": f"198.51.100.{i}"}).status_code for i in range(22)]
     assert codes[:20] == [401] * 20 and codes[20:] == [429, 429]
+
+
+def test_plex_sign_in_finds_the_admin_whatever_the_case_of_the_email(app, monkeypatch):
+    """Glenn's pick 6A (Nov 15 2026): Plex may report Cluster@Mail.com. A fresh install must still let the admin in
+    (no shared users loaded yet) and link the account, and anyone else stays out."""
+    from app.plex import PlexAccount
+    M = app
+    infos = {"tokA": {"id": "9001", "username": "glenn", "email": " Cluster@Mail.com", "title": "Glenn"},
+             "tokB": {"id": "9002", "username": "mallory", "email": "cluster@mail.com.evil.net", "title": "M"}}
+    pins = {11: "tokA", 12: "tokB"}
+    nxt = iter([11, 12])
+
+    async def create_pin(self): return {"pin_id": next(nxt), "code": "X"}
+    async def check_pin(self, pin_id): return pins[pin_id]
+    async def user_info(self, token): return dict(infos[token])
+    monkeypatch.setattr(PlexAccount, "create_pin", create_pin)
+    monkeypatch.setattr(PlexAccount, "check_pin", check_pin)
+    monkeypatch.setattr(PlexAccount, "user_info", user_info)
+    h = {"X-Requested-With": "greystar"}
+    for pin, ok in ((11, True), (12, False)):
+        c = TestClient(M.app)
+        assert c.post("/api/auth/plex/start", headers=h).json()["pin_id"] == pin
+        r = c.get(f"/api/auth/plex/check/{pin}")
+        if ok:
+            assert r.status_code == 200 and r.json()["role"] == "admin"
+            assert c.get("/api/me").json()["role"] == "admin"
+            assert [a["plex_id"] for a in M.store.list_accounts()] == ["9001"]   # first run links this account
+        else:
+            assert r.status_code == 403
+
+
+def test_a_full_stripe_key_is_kept_but_called_out(app):
+    """Glenn's pick 5B (Nov 15 2026): an sk_ key is accepted, with a red warning in Settings, Billing and on the home."""
+    a = signed_in(app, "9001", "cluster@mail.com")
+    app.store.set_setting("stripe_key", "rk_live_readonly")
+    assert a.get("/api/settings/billing").json()["full_key"] is False
+    app.store.set_setting("stripe_key", "sk_live_everything")
+    assert a.get("/api/settings/billing").json()["full_key"] is True
+    assert a.get("/api/settings/summary").json()["billing"]["full_key"] is True

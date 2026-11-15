@@ -35,7 +35,7 @@ html.gs-locked, html.gs-locked body { overflow: hidden; overscroll-behavior: non
 html .sd-look { display: none !important; }
 /* Nothing playing: quiet words on the dark bar (an empty lime block said nothing). */
 html .sd-pill-lime:has(> .sd-pill-lime__none:only-child) { background: transparent; padding: 0 10px 0 0; }
-html .sd-pill-lime__none { min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--on-ink); opacity: 0.72; }
+html .sd-pill-lime__none { flex: 0 1 auto; min-width: 0; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--on-ink); opacity: 0.72; }
 /* One page header: an eyebrow and one title; the titles inside cards that would repeat it are hidden. */
 html .sd-phead[hidden] { display: none; }
 html .sd-phead__eyebrow, html .rq-eyebrow, html .sd-lockup__label { font-size: 11px; line-height: 16px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-muted); opacity: 1; }
@@ -51,7 +51,10 @@ html :is(.sd-navbtn, .sd-tab)[aria-label="Requests"]:not([aria-current="true"]) 
 html :is(.sd-navbtn, .sd-tab)[aria-label="Requests"]:not([aria-current="true"])::after { content: ""; position: absolute; top: 9px; right: 9px; width: 8px; height: 8px; border-radius: 50%;
   background: var(--volt); box-shadow: 0 0 0 2px var(--surface-card); }
 html .sd-tab[aria-label="Requests"]:not([aria-current="true"])::after { right: 13px; box-shadow: 0 0 0 2px var(--surface-ink); }
-html .gs-app:not([data-look="dark"]) .sd-navbtn[aria-label="Requests"]:not([aria-current="true"])::after { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3px rgba(80, 150, 30, 0.55); }
+html .gs-app[data-look="light"] .sd-navbtn[aria-label="Requests"]:not([aria-current="true"])::after { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3px rgba(80, 150, 30, 0.55); }
+@media (prefers-color-scheme: light) {
+  html .gs-app:not([data-look="dark"]) .sd-navbtn[aria-label="Requests"]:not([aria-current="true"])::after { box-shadow: 0 0 0 2px var(--surface-card), 0 0 0 3px rgba(80, 150, 30, 0.55); }
+}
 /* Settings, Display for someone who is not given streams: Appearance and the home layout only. */
 html .gs-no-streams .st-display { grid-template-columns: minmax(0, 1fr); }
 html .gs-no-streams .st-display :is(#card-style, .sd-field:has(#card-size), #art-light-field, #clip-mode, #clip-count-field, .st-preview) { display: none; }
@@ -100,6 +103,10 @@ html .gs-no-streams .st-display :is(#card-style, .sd-field:has(#card-size), #art
 /* ---------- phones ---------- */
 @media (max-width: 760px), (max-height: 500px) and (pointer: coarse) {
   :root { --tabbar-space: calc(108px + env(safe-area-inset-bottom)); }
+
+  /* Top bar (Glenn's pick 3A, Nov 15 2026): Settings lives in the account menu on phones, so the bell takes the
+     gear's place and Live now keeps its room. */
+  html #gear { display: none; }
 
   /* Room for the notch and the home indicator; the tab bar is pinned to the bottom of the screen. */
   html .gs-app.gs-app { padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) var(--tabbar-space) max(16px, env(safe-area-inset-left)); }

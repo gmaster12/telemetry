@@ -30,10 +30,9 @@ from typing import Any, Callable
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
-from .arr import ArrError
-from .request_log import book_state
+from . import request_state as rs
 from .requests_api import IMAGES
-from .seerr import MEDIA_STATUS, REQUEST_STATUS, SeerrError
+from .seerr import SeerrError
 
 try:
     from zoneinfo import ZoneInfo
@@ -87,7 +86,6 @@ REQUEST_DAYS = 45         # requests older than this are not followed any more
 LIST_MAX = 60
 WELCOME_GAP = 6 * 3600   # a visit after this long counts as coming back
 PAY_PROBLEM = ("past_due", "unpaid", "incomplete")
-STARTED_STAGES = ("downloading", "importing", "queued", "paused", "retry")
 # a request's states in order; a state is announced only when it moves forward (or to failed)
 RANK = {"waiting": 0, "started": 1, "ready": 2, "failed": 3}
 MEDIA_WORD = {"movie": "Movie", "tv": "Show", "comic": "Comic", "ebook": "Ebook", "audiobook": "Audiobook"}
@@ -98,11 +96,14 @@ def reader_of(p) -> str:
 
 
 class Notifier:
-    def __init__(self, store, seerr=None, arr=None, media=None, billing=None, directory=None, poller=None, cleanup=None):
+    def __init__(self, store, seerr=None, arr=None, media=None, billing=None, directory=None, poller=None, cleanup=None, status=None):
         self.store = store
         self.db = store.db
         self.seerr, self.arr, self.media, self.billing = seerr, arr, media, billing
         self.directory, self.poller, self.cleanup = directory, poller, cleanup
+        # Where a request stands, decided the way every page decides it, Plex's own answer included (Glenn's picks
+        # O1A and 4A, Nov 15 2026): "is ready" goes out when the title page says On Plex, not hours later.
+        self.status = status or rs.RequestStatus(seerr, arr)
         self.db.executescript(SCHEMA)
         self.db.commit()
         self.last_error: str | None = None
@@ -145,6 +146,18 @@ class Notifier:
                 self.db.execute("DELETE FROM notify_seen WHERE id = ?", (row["id"],))
             else:
                 self.db.execute("UPDATE notifications SET resolved_at = ? WHERE id = ?", (now, row["id"]))
+            self.db.commit()
+            return True
+
+    def withdraw(self, who: str, key: str) -> bool:
+        """Takes a notice back without an outcome: what it was about is gone (a server deleted while it was down,
+        the Stripe key removed while someone was past due). Nobody can say whether it was sorted out, so it goes."""
+        with self.store.lock:
+            row = self.db.execute("SELECT id FROM notifications WHERE who = ? AND key = ?", (who, key)).fetchone()
+            if row is None:
+                return False
+            self.db.execute("DELETE FROM notify_seen WHERE id = ?", (row["id"],))
+            self.db.execute("DELETE FROM notifications WHERE id = ?", (row["id"],))
             self.db.commit()
             return True
 
@@ -335,40 +348,8 @@ class Notifier:
         return out
 
     async def _seerr_state(self, q: dict, gate: asyncio.Semaphore) -> str:
-        m = q.get("media") or {}
-        kind = q.get("type") or m.get("mediaType") or "movie"
-        is4k = bool(q.get("is4k"))
-        rs = REQUEST_STATUS.get(q.get("status"))
-        if rs == "declined":
-            return "declined"
-        if rs == "failed":
-            return "failed"
-        ms = MEDIA_STATUS.get(m.get("status4k" if is4k else "status"))
-        if ms == "available" or rs == "completed":
-            return "ready"
-        if kind == "tv" and ms == "partial":
-            asked = {s.get("seasonNumber") for s in q.get("seasons") or [] if s.get("seasonNumber")}
-            have = {s.get("seasonNumber") for s in m.get("seasons") or []
-                    if MEDIA_STATUS.get(s.get("status4k" if is4k else "status")) == "available"}
-            if asked and asked <= have:
-                return "ready"
-        if rs != "approved" or ms not in ("processing", "partial", "pending") or not (self.arr and self.arr.configured()):
-            return "waiting"
-        tmdb = m.get("tmdbId")
-        try:
-            async with gate:
-                if kind == "movie":
-                    prog = await self.arr.movie_progress(int(tmdb), is4k) if tmdb else None
-                    return "started" if prog and prog.get("stage") in STARTED_STAGES + ("imported",) else "waiting"
-                tvdb = m.get("tvdbId")
-                if not tvdb:
-                    return "waiting"
-                seasons = sorted(s.get("seasonNumber") for s in q.get("seasons") or [] if s.get("seasonNumber"))
-                show = await self.arr.show_progress(int(tvdb), seasons, is4k)
-                eps = [e for se in (show or {}).get("seasons") or [] for e in se.get("episodes") or [] if e.get("stage") in STARTED_STAGES]
-                return "started" if eps else "waiting"
-        except ArrError:
-            return "waiting"
+        """waiting, started, ready, failed or declined (app/request_state.py decides; this only names it)."""
+        return rs.notice_word((await self.status.check(q, gate))["stage"])
 
     async def requests_tick(self, seeding: bool, now: int) -> None:
         if not (self.seerr and self.seerr.configured()):
@@ -444,8 +425,7 @@ class Notifier:
             kind = x.get("kind")
             if not pid or kind not in ("comic", "ebook", "audiobook"):
                 continue
-            s = book_state(x)
-            st = {"downloading": "started", "available": "ready", "partial": "ready", "failed": "failed"}.get(s, "waiting")
+            st = rs.notice_word(rs.from_shared(x.get("state"), x.get("label")))
             key = f"media:{x.get('ref') or (str(kind) + ':' + str(x.get('id')))}"
             if not self._moved(key, st, seeding, now):
                 continue
@@ -457,6 +437,11 @@ class Notifier:
     # ---------- billing ----------
     def billing_tick(self, now: int) -> None:
         if not (self.billing and self.store.get_setting("stripe_key")):
+            # Stripe was disconnected: nobody can tell any more whether a failed payment was sorted out, so the
+            # pinned "did not go through" notices are taken back rather than left pinned forever.
+            for r in self.db.execute("SELECT who, key FROM notifications WHERE key IN ('billing:payment', 'billing:failed') "
+                                     "AND resolved_at IS NULL").fetchall():
+                self.withdraw(r["who"], r["key"])
             return
         status = self.billing.status_map()
         bad = {pid: st for pid, st in status.items() if st in PAY_PROBLEM}
@@ -498,7 +483,18 @@ class Notifier:
                 self.resolve(ADMINS, "needs-you")
         # servers that stopped answering
         if self.poller:
-            names = {str(s["id"]): s["name"] for s in self.store.list_servers()}
+            rows = {str(s["id"]): s for s in self.store.list_servers()}
+            names = {k: s["name"] for k, s in rows.items() if s["enabled"]}
+            # A server deleted or turned off while it was down is no longer checked, so its notice would never clear.
+            for old in self.open_keys(ADMINS, "server:"):
+                sid = old.split(":")[1]
+                if sid in names:
+                    continue
+                if sid in rows:
+                    self.resolve(ADMINS, old, f"{rows[sid]['name']} is turned off",
+                                 "It was turned off in Settings while it was down, so it is no longer checked.", now)
+                else:
+                    self.withdraw(ADMINS, old)
             for sid, rec in dict(self.poller.since).items():
                 name = names.get(str(sid))
                 if not name:
@@ -528,6 +524,9 @@ class Notifier:
             for old in self.open_keys(ADMINS, "cleanup:"):
                 if old != key or not n:
                     self.resolve(ADMINS, old)
+        else:
+            for old in self.open_keys(ADMINS, "cleanup:"):   # cleanup turned off: nothing is due any more
+                self.resolve(ADMINS, old)
 
 
 def poster_url(path: str | None) -> str | None:

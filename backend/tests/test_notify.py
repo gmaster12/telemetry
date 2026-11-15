@@ -153,3 +153,36 @@ def test_routes_are_own_only(env):
     assert c.post("/api/notifications/seen", json={}).json()["seen"] == 1
     assert c.get("/api/notifications").json()["unseen"] == 0
     assert c.post("/api/notifications/shown").json()["ok"]
+
+
+def test_a_server_deleted_or_turned_off_while_down_does_not_stay_pinned(env):
+    """Glenn's pick 1A (Nov 15 2026): a notice whose cause is gone is cleared, never left pinned forever."""
+    class P:
+        since = {}
+    store, d, svc = env
+    a = store.add_server({"name": "Atlas", "plex_url": "http://atlas:32400", "enabled": 1}, None)
+    b = store.add_server({"name": "Beta", "plex_url": "http://beta:32400", "enabled": 1}, None)
+    poller = P()
+    n = notifier(env, poller=poller)
+    t0 = int(time.time())
+    poller.since = {str(a): {"online": False, "since": t0}, str(b): {"online": False, "since": t0}}
+    n.admin_tick(t0 + 60)
+    boss = principal("cluster", role="admin")
+    assert n.items_for(boss)["pinned"] == 2
+    store.delete_server(a)                                  # deleted while down: taken back
+    store.update_server(b, {"enabled": 0})                  # turned off while down: closed with a word
+    n.admin_tick(t0 + 3600)
+    got = n.items_for(boss)
+    assert got["pinned"] == 0
+    assert [x["title"] for x in got["items"] if x["kind"] == "server"] == ["Beta is turned off"]
+
+
+def test_removing_the_stripe_key_takes_back_payment_notices(env):
+    store, d, svc = env
+    n = notifier(env)
+    n.post("plex:2001", "billing:payment", "billing", "Your payment did not go through", urgent=True)
+    n.post("admins", "billing:failed", "billing", "1 payment failed", urgent=True)
+    store.set_setting("stripe_key", None)
+    n.billing_tick(int(time.time()) + 60)
+    assert n.items_for(principal("2001"))["items"] == []
+    assert [x for x in n.items_for(principal("cluster", role="admin"))["items"] if x["kind"] == "billing"] == []

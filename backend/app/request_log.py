@@ -18,29 +18,16 @@ import io
 from dataclasses import dataclass
 from typing import Any
 
-from .seerr import MEDIA_STATUS, REQUEST_STATUS, Requests, SeerrError, release_wait
+from . import request_state as rs
+from .seerr import REQUEST_STATUS, Requests, SeerrError, release_wait
 
-# state -> (label, tone, group). Groups are the filter chips.
-STATES = {
-    "waiting": ("Waiting for approval", "warning", "waiting"),
-    "approved": ("Approved", "info", "approved"),
-    "downloading": ("Downloading", "info", "approved"),
-    "partial": ("Partly available", "success", "available"),
-    "available": ("Available", "success", "available"),
-    "declined": ("Declined", "danger", "problem"),
-    "failed": ("Failed", "danger", "problem"),
-    "canceled": ("Canceled by them", "neutral", "ended"),
-    "removed": ("Removed from their list", "neutral", "ended"),
-    "gone": ("No longer in Seerr", "neutral", "ended"),
-    "unknown": ("Unknown (Seerr not answering)", "neutral", "all"),
-    # comics, ebooks and audiobooks (the media site): the label is the media site's own word
-    "release": ("Waiting for release", "warning", "approved"),
-    "following": ("Following", "success", "available"),
-}
+# Log state -> (label, tone, group). Groups are the filter chips. The words come from app/request_state.py (one set
+# for the whole site); the log calls the "ready" stage "available", as it always has.
+LOG_ID = {"ready": "available"}
+STATES = {LOG_ID.get(st, st): rs.log_words(st) for st in rs.STAGES}
 BOOK_KINDS = ("comic", "ebook", "audiobook")
 KINDS = ("movie", "tv") + BOOK_KINDS
 KIND_NAMES = {"movie": "Movie", "tv": "Series", "comic": "Comic", "ebook": "Ebook", "audiobook": "Audiobook"}
-WORKING = ("Downloading", "Adding")  # media site labels that mean a copy is on its way
 GROUPS = ["all", "waiting", "approved", "available", "problem", "ended"]
 
 
@@ -67,21 +54,8 @@ def state_of(row: dict, q: dict | None, known: bool) -> str:
         return row["ended"]
     if q is None:
         return "gone" if known and row.get("seerr_request") else "unknown"
-    st = REQUEST_STATUS.get(q.get("status"))
-    if st == "pending":
-        return "waiting"
-    if st in ("declined", "failed"):
-        return st
-    m = q.get("media") or {}
-    four = bool(row.get("is4k"))
-    media = MEDIA_STATUS.get(m.get("status4k" if four else "status"))
-    if media == "available":
-        return "available"
-    if media == "partial":
-        return "partial"
-    if m.get("downloadStatus4k" if four else "downloadStatus"):
-        return "downloading"
-    return "approved"
+    st = rs.stage_of(q, is4k=bool(row.get("is4k")))
+    return LOG_ID.get(st, st)
 
 
 def shape(row: dict, q: dict | None, known: bool, person: dict | None) -> dict:
@@ -107,11 +81,8 @@ def shape(row: dict, q: dict | None, known: bool, person: dict | None) -> dict:
 
 def book_state(item: dict) -> str:
     """The media site's shared words (work, release, follow, ready, problem, declined, cancelled) as log states."""
-    st, label = item.get("state"), str(item.get("label") or "")
-    if st == "work":
-        return "waiting" if label == "Waiting for approval" else "downloading" if label.startswith(WORKING) else "approved"
-    return {"release": "release", "follow": "following", "ready": "available", "problem": "failed",
-            "declined": "declined", "cancelled": "canceled"}.get(st, "approved")
+    st = rs.from_shared(item.get("state"), item.get("label"))
+    return {"ready": "available", "importing": "downloading"}.get(st, st)
 
 
 def shape_book(item: dict, directory, people: dict) -> dict | None:

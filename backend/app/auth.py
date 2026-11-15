@@ -45,6 +45,13 @@ def admin_plex_email() -> str | None:
     return v.strip().lower() if v else None
 
 
+def is_admin_email(email: str | None) -> bool:
+    """The one check for "is this the Plex administrator": ADMIN_PLEX_EMAIL, compared without case or spaces
+    (Plex may report Cluster@mail.com). Every caller uses this (Glenn's pick 6A, Nov 15 2026)."""
+    want = admin_plex_email()
+    return bool(want and email and email.strip().lower() == want)
+
+
 # ---------- passwords ----------
 def hash_password(pw: str) -> str:
     salt = os.urandom(16)
@@ -153,7 +160,7 @@ def plex_principal(store: Store, user: dict) -> Principal | None:
     if user.get("disabled"):
         return None
     email = (user.get("email") or "").lower() or None
-    is_admin = bool(email and email == admin_plex_email())
+    is_admin = is_admin_email(email)
     return Principal(kind="plex", subject=user["plex_id"], name=user.get("title") or user.get("username") or "Plex user",
                      role="admin" if is_admin else "viewer", sections=[] if is_admin else user_sections(store, user),
                      email=email, thumb=user.get("thumb"))

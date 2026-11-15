@@ -252,6 +252,7 @@
     if (s.access.sync_error) out.push({ view: 'access', tone: 'danger', text: 'Loading people from Plex failed.' });
     else if (s.accounts && !s.access.synced_at) out.push({ view: 'access', tone: 'warning', text: 'People have not been loaded from Plex yet.' });
     if (s.billing.connected && s.billing.error) out.push({ view: 'billing', tone: 'danger', text: 'Stripe: the last sync failed.' });
+    if (s.billing.full_key) out.push({ view: 'billing', tone: 'danger', text: 'Stripe: the saved key can change your Stripe account. Use a restricted read-only key.' });
     if (s.requests && s.requests.connected && s.requests.error) out.push({ view: 'requests', tone: 'danger', text: 'Seerr: ' + s.requests.error });
     if (s.requests && s.requests.pending) out.push({ view: 'requests', tone: 'warning', text: s.requests.pending + (s.requests.pending === 1 ? ' request is' : ' requests are') + ' waiting for approval.', go: '#/requests/manage' });
     if (s.requests && s.requests.needs_you) out.push({ view: 'reqlog', tone: 'danger', text: s.requests.needs_you + (s.requests.needs_you === 1 ? ' failed request needs' : ' failed requests need') + ' you: tried again once, then sent to you.' });
@@ -284,7 +285,7 @@
       : nd.of && nd.reporting < nd.of ? ['warning', nd.reporting + ' of ' + nd.of + ' reporting'] : ['success', nd.reporting + ' of ' + nd.of + ' reporting'];
     if (view === 'alerts') return al.hot.length ? ['warning', names(al.hot, 1) + (al.hot.length === 1 ? ' is hot' : ' are hot')] : ['neutral', 'Hot at ' + Math.round(al.hot_cpu_pct) + '% CPU'];
     if (view === 'access') return ac.sync_error ? ['danger', 'Loading people failed'] : !ac.synced_at ? ['warning', 'People not loaded'] : ['neutral', (ac.custom + ac.off) + ' custom or off'];
-    if (view === 'billing') return !bl.connected ? ['neutral', 'Not connected'] : bl.error ? ['danger', 'Last sync failed'] : bl.unmatched ? ['warning', bl.unmatched + ' not matched'] : ['success', 'Synced ' + (since(bl.synced_at) || 'soon')];
+    if (view === 'billing') return !bl.connected ? ['neutral', 'Not connected'] : bl.error ? ['danger', 'Last sync failed'] : bl.full_key ? ['danger', 'Full key, replace it'] : bl.unmatched ? ['warning', bl.unmatched + ' not matched'] : ['success', 'Synced ' + (since(bl.synced_at) || 'soon')];
     if (view === 'requests') return !rq.connected ? ['neutral', 'Not connected'] : rq.error ? ['danger', 'Seerr not answering'] : rq.pending ? ['warning', rq.pending + ' waiting'] : ['success', 'Seerr on'];
     if (view === 'reqlog') return rq.needs_you ? ['danger', rq.needs_you + ' need' + (rq.needs_you === 1 ? 's' : '') + ' you'] : lg.total ? ['neutral', (lg.day || 0) + ' in the last 24 h'] : ['neutral', 'Nothing yet'];
     if (view === 'books') return bk.enabled ? ['success', 'On'] : ['neutral', bk.has_secret ? 'Off' : 'Not connected'];
@@ -1091,6 +1092,7 @@
               clearDrafts('bl'); editingKey = false;
               msgs.billing = r.missing && r.missing.length
                 ? { kind: 'error', text: 'Saved, but the key cannot read ' + r.missing.join(', ') + '. Add Read access for those in Stripe.' }
+                : r.full_key ? { kind: 'error', text: 'Saved, but this is your full secret key. Replace it with a restricted read-only key (see the warning above).' }
                 : { kind: 'ok', text: 'Saved. Loading customers and subscriptions from Stripe now.' };
               setTimeout(loadBilling, 4000);
               return loadBilling();
@@ -1099,6 +1101,9 @@
         billing.has_key ? el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Cancel', onclick: function () { editingKey = false; render(); } }) : null));
     var stripeSec = el('section', { class: 'st-section' }, el('h3', { text: 'Stripe' }));
     if (billing.has_key && !editingKey) {
+      // Glenn's pick 5B: a full secret key (sk_) is accepted but called out in red until it is replaced.
+      if (billing.full_key) stripeSec.appendChild(el('p', { class: 'st-msg st-msg--error', role: 'alert' }, el('b', { text: 'This key can change your Stripe account. ' }),
+        'It is your full secret key, which can charge, refund and delete. This site only reads, so replace it with a restricted key: in Stripe, Developers, API keys, Create restricted key, Read on Customers, Subscriptions, Products and Charges.'));
       stripeSec.append(
         el('p', { class: 'st-note', text: billing.synced_at ? 'Connected. Last loaded from Stripe ' + when(billing.synced_at) + '; it refreshes every 15 minutes.' : 'Connected. Loading from Stripe…' }),
         el('p', { class: 'st-note', text: (c.customers || 0) + ' Stripe customers · ' + (c.matched || 0) + ' matched to a Plex user · ' + (c.unmatched || 0) + ' not matched · ' + (c.links || 0) + ' linked by hand' }),
@@ -1408,8 +1413,6 @@
   }
 
   // ---------- Request log: every request made through this site (admins) ----------
-  var LOG_GROUPS = [['all', 'All'], ['waiting', 'Waiting for approval'], ['approved', 'Approved'], ['available', 'Available'],
-    ['problem', 'Declined or failed'], ['ended', 'Canceled or removed'], ['unreleased', 'Not out yet']];
   var LOG_KINDS = [['', 'All'], ['movie', 'Movies'], ['tv', 'Series'], ['comic', 'Comics'], ['ebook', 'Ebooks'], ['audiobook', 'Audiobooks']];
   var KIND_NAME = { movie: 'Movie', tv: 'Series', comic: 'Comic', ebook: 'Ebook', audiobook: 'Audiobook' };
   var lg = { q: '', kind: '', group: 'all', page: 1, rows: [], data: null, busy: false, seq: 0, msg: null, timer: 0, ui: null };
@@ -1597,7 +1600,8 @@
       return el('div', null, el('dt', { text: f[1] }), el('dd', { text: String(f[0]) }));
     }));
     var c = (d && d.counts) || {};
-    ui.chips.replaceChildren.apply(ui.chips, LOG_GROUPS.map(function (g) {
+    // The status chips and their words come with the log (app/request_state.py `LOG_GROUPS`).
+    ui.chips.replaceChildren.apply(ui.chips, ((d && d.groups) || []).map(function (g) {
       return el('button', { type: 'button', class: 'st-log__chip' + (g[0] === 'unreleased' ? ' st-log__chip--soon' : ''), 'aria-pressed': lg.group === g[0] ? 'true' : 'false', onclick: function () { lg.group = g[0]; loadLog(false); } },
         g[0] === 'unreleased' ? el('span', { class: 'st-shape-ring', 'aria-hidden': 'true' }) : null, g[1], el('b', { text: String(c[g[0]] || 0) }));
     }));

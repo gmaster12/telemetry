@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from . import sample
 from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, add_books_section, add_mystreams_section, add_requests_section, admin_plex_email, check_password, default_sections,
+                   is_admin_email,
                    end_session, hash_password, new_session, password_problem, plex_principal, principal_for, record_failure,
                    set_cookie, throttled, user_sections)
 from .config import DB_PATH, WEB_DIR, ServerCfg, env
@@ -33,6 +34,7 @@ from .plex import PlexAccount, PlexClient
 from .poller import Poller
 from . import request_log
 from .media import Media
+from .request_state import LOG_GROUPS, RequestStatus
 from .requests_api import IMAGES, make_router
 from .secrets import SecretBox
 from .seerr import Requests, SeerrError
@@ -49,14 +51,17 @@ seerr = Requests(store, poller.http)
 media = Media(store, poller.http)
 arr = Arr(store, poller.http)
 onplex = OnPlex(store, seerr, poller)
-cleanup = Cleanup(store, seerr, arr, poller)
+# Where a request stands, asked of Radarr/Sonarr and Plex the same way everywhere (app/request_state.py)
+status = RequestStatus(seerr, arr, onplex)
+cleanup = Cleanup(store, seerr, arr, poller, status=status)
 # Live streams globe (admin card): stream starts by city. The location database sits next to the SQLite file.
 geo = GeoDB(Path(DB_PATH).parent / "geo", poller.http)
 globe = Globe(geo, directory.starts_since)
 sample_globe = SampleGlobe()
 poller.globe = globe
 # Notifications and the Welcome back sheet (Glenn's pick A, Nov 14 2026; app/notify.py)
-notifier = Notifier(store, seerr=seerr, arr=arr, media=media, billing=poller.billing, directory=directory, poller=poller, cleanup=cleanup)
+notifier = Notifier(store, seerr=seerr, arr=arr, media=media, billing=poller.billing, directory=directory, poller=poller, cleanup=cleanup,
+                    status=status)
 add_requests_section(store)
 add_mystreams_section(store)
 add_books_section(store)
@@ -568,7 +573,7 @@ async def settings_summary():
         "access": {"people": people["n"], "custom": people["custom"], "off": people["off"],
                    "admins": len(directory.list_admins()), "synced_at": poller.users_synced_at or None,
                    "sync_error": poller.users_sync_error, "history_imported_at": int(imported) if imported else None},
-        "billing": {"connected": has_key, "synced_at": poller.billing_synced_at or None, "error": poller.billing_error,
+        "billing": {"connected": has_key, "full_key": has_key and full_stripe_key(), "synced_at": poller.billing_synced_at or None, "error": poller.billing_error,
                     "customers": counts.get("customers", 0), "unmatched": counts.get("unmatched", 0)},
         "requests": await requests_summary(),
         "books": media.settings(),
@@ -817,7 +822,7 @@ async def auth_plex_check(pin_id: int, request: Request):
     if not token:
         return {"pending": True}
     info = await acct.user_info(token)
-    is_admin = bool(info.get("email") and info["email"] == admin_plex_email())
+    is_admin = is_admin_email(info.get("email"))
     known = directory.get_user(info["id"]) or (directory.find_user_by_email(info["email"]) if info.get("email") else None)
     if not is_admin and not known:
         record_failure("plex:" + _client_ip(request))
@@ -935,7 +940,7 @@ def _user_public(u: dict, with_email: bool = True) -> dict:
         "email": u.get("email") if with_email else None, "thumb": u.get("thumb"), "shared": bool(u.get("shared")),
         "owner": bool(u.get("is_owner")), "disabled": bool(u.get("disabled")), "last_seen": u.get("last_seen"),
         "last_login": u.get("last_login"), "custom_sections": json.loads(u["sections"]) if u.get("sections") else None,
-        "sections": user_sections(store, u), "admin": bool(u.get("email") and u["email"].lower() == admin_plex_email()),
+        "sections": user_sections(store, u), "admin": is_admin_email(u.get("email")),
         "servers": json.loads(u["servers"]) if u.get("servers") else [],
     }
 
@@ -1110,9 +1115,15 @@ class BillingLinkIn(BaseModel):
     plex_id: str = Field(min_length=1, max_length=64)
 
 
+def full_stripe_key() -> bool:
+    """True when the saved key is Stripe's full secret key (sk_), which can change anything in the account, instead
+    of a restricted read-only one (rk_). Accepted, with a red warning in Settings (Glenn's pick 5B, Nov 15 2026)."""
+    return (store.get_setting("stripe_key") or "").startswith("sk_")
+
+
 @app.get("/api/settings/billing")
 def get_billing():
-    return {"has_key": bool(store.get_setting("stripe_key")), "synced_at": poller.billing_synced_at or None,
+    return {"has_key": bool(store.get_setting("stripe_key")), "full_key": full_stripe_key(), "synced_at": poller.billing_synced_at or None,
             "error": poller.billing_error, "counts": poller.billing.counts(), "links": poller.billing.links()}
 
 
@@ -1128,7 +1139,7 @@ async def put_billing(body: StripeKeyIn):
     store.set_setting("stripe_key", key)
     poller.billing_synced_at = 0  # sync right away
     poller.kick()
-    return {"ok": True, "missing": missing}
+    return {"ok": True, "missing": missing, "full_key": key.startswith("sk_")}
 
 
 @app.delete("/api/settings/billing")
@@ -1206,7 +1217,7 @@ def put_user_access(plex_id: str, body: UserAccessIn):
     u = directory.get_user(plex_id)
     if not u:
         raise HTTPException(404, "No such user.")
-    if body.disabled and u.get("email") and u["email"].lower() == admin_plex_email():
+    if body.disabled and is_admin_email(u.get("email")):
         raise HTTPException(409, "The administrator Plex account cannot be turned off.")
     sections = [s for s in body.sections if s in SECTION_KEYS] if body.sections is not None else None
     directory.set_user_access(plex_id, sections=sections, use_defaults=body.use_defaults, disabled=body.disabled)
@@ -1364,7 +1375,7 @@ async def requests_log(q: str = "", kind: str = "", group: str = "all", page: in
     hit = [r for r in base if request_log.matches(r, "", "", group)]
     return {**request_log.page_of(hit, page, max(10, min(size, 200))), "counts": request_log.counts(base), "error": error,
             "totals": request_log.totals(rows, time.time()), "connected": seerr.configured(), "image_base": IMAGES + "w92",
-            "books": bool(media.enabled()), "media_error": errors.get("media")}
+            "books": bool(media.enabled()), "media_error": errors.get("media"), "groups": LOG_GROUPS}
 
 
 @app.get("/api/settings/requests/log/cover/{kind}/{item_id}")
@@ -1618,7 +1629,7 @@ async def cleanup_delete(item_id: int, request: Request):
     return res
 
 
-app.include_router(make_router(seerr, directory, need, media, cleanup, arr, onplex))
+app.include_router(make_router(seerr, directory, need, media, cleanup, arr, onplex, status))
 app.include_router(notify_router(notifier, me, lambda: poller.cfg.use_sample))
 
 
