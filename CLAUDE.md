@@ -633,7 +633,7 @@ design system). The dashboard adds its own patterns:
   clears), a black "Needs a look" bar (`problems`: servers not answering, missing Netdata nodes, failed syncs,
   unmatched Stripe customers, requests needing you; each item opens the section that fixes it; "Nothing needs a look"
   when clear), then four groups (`ROOMS`): Your dashboard (Display, Dashboard Cards, Live streams globe; tag "Just
-  you"), Servers and data (Plex servers, Netdata, Alerts), Requests and media (Requests, Request log, Radarr &
+  you"), Servers and data (Plex servers, Netdata, Alerts, Backups), Requests and media (Requests, Request log, Radarr &
   Sonarr, Books & comics), People and billing (Access, Billing), each "Everyone". A group has a headline number
   (cards showing; servers up with a rack of pills from `servers.list`; requests this week; people and customers) and
   one row per section with its state in a few words (`rowState`: word plus shape, circle fine, triangle needs a look,
@@ -742,8 +742,8 @@ design system). The dashboard adds its own patterns:
   (`ui.css`; the ring read as a second selected item).
 - Your servers (viewers, Plex sign-ins): `GET /api/me/servers` lists only the servers shared with them
   (`users.servers`, old names through `server_aliases`), each Online or Offline and since when, nothing
-  else. `Poller._mark` saves the time each server went up or down in setting `server_since` (a server
-  counts as down after 3 failed polls in a row, so a blip keeps its up time). Shown at the END OF THE LIME
+  else, from the server's one health record (`Poller.health_of`; `_record` saves when it went up or down in setting
+  `server_since`; a server counts as down after 3 failed polls in a row, so a blip keeps its up time). Shown at the END OF THE LIME
   Live now bar (Glenn's pick B, `.sd-srvseg`, `paintSeg` in `people.js`, placed by `renderNewest` via
   `gsServerSeg`): all up is a quiet "Your servers ● ATLAS ● ORION-3 All up"; any down turns it red with
   "ORION-3 is down for 2 h 14 min, since 8:45 AM". On phones the bar takes its own full-width row and
