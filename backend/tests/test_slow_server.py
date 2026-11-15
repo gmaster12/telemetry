@@ -63,3 +63,19 @@ def test_an_answer_after_one_miss_carries_on_as_if_nothing_happened(poller):
     assert [r.get("stale") for r in p.streams] == [None]
     assert p.servers_view()[0]["answering"] is True and p.since[str(1)]["online"] is True
     assert len(p.directory.history("2001")) == 1          # still the same play, not a new one
+
+
+def test_one_record_answers_for_every_part_of_the_site(poller):
+    """Glenn's pick O3A (Nov 15 2026): the Servers card, Settings, "Your servers" and the notifier all read the same
+    health record, kept by server id, so they never disagree about whether a server is up."""
+    p, answers = poller
+    poll(p)
+    answers["ok"] = False
+    for n in (1, 2, 3):
+        poll(p)
+        h, view, since = p.health_of(1), p.servers_view()[0], p.state_since(1)
+        assert h["misses"] == n and h["answering"] is False
+        assert since["online"] is h["online"] and (view["status"] == "Offline") is (not h["online"])
+    assert h["online"] is False and since["since"] == int(h["first_miss"])
+    saved = __import__("json").loads(p.store.get_setting("server_since"))
+    assert saved == {"1": {"online": False, "since": since["since"]}}

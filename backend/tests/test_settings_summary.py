@@ -27,7 +27,9 @@ def test_summary_counts_servers_people_and_problems(main):
     s.add_server({"name": "Atlas", "plex_url": "http://a:32400", "max_streams": 8, "netdata_node": "n1"}, "t")
     s.add_server({"name": "Lyra", "plex_url": "http://l:32400", "max_streams": 8}, "t")
     M.poller.reload()
-    M.poller.server_state = {"Atlas": {"online": True}, "Lyra": {"online": False, "error": "timed out"}}
+    ids = {r["name"]: r["id"] for r in s.list_servers()}
+    M.poller.health = {ids["Atlas"]: {**M.poller._blank(), "online": True, "answering": True, "since": 1},
+                       ids["Lyra"]: {**M.poller._blank(), "online": False, "misses": 3, "since": 2, "error": "timed out"}}
     M.directory.upsert_user({"id": "2001", "username": "sable", "email": "s@x.com"}, shared=True)
     M.directory.upsert_user({"id": "2002", "username": "kit", "email": "k@x.com"}, shared=True)
     M.directory.set_user_access("2002", sections=["streams"], use_defaults=False, disabled=False)

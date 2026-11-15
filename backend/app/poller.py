@@ -29,16 +29,15 @@ class Poller:
         self.cfg: AppCfg = store.app_config()
         self.clients: dict[int, PlexClient] = {}
         self.streams: list[dict] = []
-        self.server_state: dict[str, dict] = {}
-        # When each server last went up or down ({server id: {"online", "since"}}), saved so a restart does not
-        # reset "Down for" or "Up for". A server counts as down after 3 failed polls in a row (about 30 s), so one
-        # slow answer does not reset its up time.
-        self.since: dict[str, dict] = self._load_since()
-        self._fails: dict[int, tuple[int, float]] = {}
-        # Each server's streams from its last good answer. A server that misses a poll keeps showing them (marked
-        # `stale`) until it has missed MISSES polls in a row, the same rule as "down" (Glenn's pick 2A, Nov 15 2026).
+        # ONE health record per server, by id (Glenn's pick O3A, Nov 15 2026): {online, answering, misses, since,
+        # error, ok_at}. A server counts as down only after MISSES polls in a row without an answer (about 30 s);
+        # before that it is online but not answering, and keeps its last streams (pick 2A). The Servers card, the
+        # Settings home, "Your servers" in the Live now bar and the notifier all read this, so they always agree.
+        # When each went up or down is saved (setting server_since), so a restart does not reset "Down for".
+        self.health: dict[int, dict] = self._load_health()
+        # Each server's streams from its last good answer, shown (marked `stale`) while it is not answering.
         self._last_rows: dict[int, list[dict]] = {}
-        self.telemetry: dict[str, dict] = {}
+        self.telemetry: dict[int, dict] = {}   # Netdata CPU and upload by server id
         self.netdata_error: str | None = None
         self.netdata_ok_at: float | None = None
         self.art: dict[tuple[int, str], str] = {}
@@ -51,12 +50,12 @@ class Poller:
         # Looping card clips, cut from each title's own file (app/clips.py); kept next to the database.
         self.clips = Clips(os.environ.get("CLIPS_DIR") or Path(getattr(store, "path", "data/x.db")).parent / "clips")
         self.directory = Directory(store)
-        self.active_plays: dict[tuple[str, str], dict] = {}
+        self.active_plays: dict[tuple[int, str], dict] = {}   # (server id, session key) -> open play
         # Remembered across restarts, so a restart does not redo a full plex.tv and Stripe copy.
         self.users_synced_at: float = self._saved_time("users_synced_at")
         self.users_sync_error: str | None = None
         self.client_id: str = "greystar-telemetry"
-        self.owner_by_server: dict[str, str] = {}
+        self.owner_by_server: dict[int, str] = {}   # server id -> plex.tv id of the account that owns it
         self.billing = Billing(store)
         self.billing_synced_at: float = self._saved_time("billing_synced_at")
         self.billing_error: str | None = None
@@ -65,29 +64,52 @@ class Poller:
         self._load_owners()
         self.directory.close_stale_plays()
 
-    def _load_since(self) -> dict[str, dict]:
+    def _load_health(self) -> dict[int, dict]:
         try:
-            return json.loads(self.store.get_setting("server_since") or "{}")
+            saved = json.loads(self.store.get_setting("server_since") or "{}")
         except ValueError:
-            return {}
+            saved = {}
+        out = {}
+        for k, rec in saved.items():
+            try:
+                out[int(k)] = {**self._blank(), "online": bool(rec.get("online")), "answering": bool(rec.get("online")),
+                               "since": rec.get("since")}
+            except (TypeError, ValueError, AttributeError):
+                continue
+        return out
+
+    @staticmethod
+    def _blank() -> dict:
+        return {"online": False, "answering": False, "misses": 0, "first_miss": None, "since": None, "error": None, "ok_at": None}
+
+    def _record(self, s, ok: bool, error: str | None = None, now: float | None = None) -> dict:
+        """One poll's answer (or none) into the server's health record. Returns the record."""
+        now = now or time.time()
+        h = self.health.setdefault(s.id, self._blank())
+        if ok:
+            h.update(answering=True, misses=0, first_miss=None, error=None, ok_at=now)
+            online, started = True, now
+        else:
+            h.update(answering=False, misses=h["misses"] + 1, first_miss=h["first_miss"] or now, error=error)
+            if h["misses"] < MISSES:
+                return h   # not answering yet, not down: whatever it was, it stays
+            online, started = False, h["first_miss"]
+        if h["online"] != online or h["since"] is None:
+            h["online"], h["since"] = online, int(started)
+            self.store.set_setting("server_since", json.dumps(self.since))
+        return h
 
     def _mark(self, s, ok: bool, now: float | None = None) -> None:
-        now = now or time.time()
-        key = str(s.id)
-        if ok:
-            self._fails.pop(s.id, None)
-            online = True
-            started = now
-        else:
-            n, first = self._fails.get(s.id, (0, now))
-            self._fails[s.id] = (n + 1, first)
-            if n + 1 < MISSES:
-                return
-            online, started = False, first
-        rec = self.since.get(key)
-        if rec is None or rec.get("online") != online:
-            self.since[key] = {"online": online, "since": int(started)}
-            self.store.set_setting("server_since", json.dumps(self.since))
+        self._record(s, ok, None if ok else "No answer", now)
+
+    def health_of(self, server_id: int) -> dict:
+        """A copy of one server's health record (a blank one, offline, for a server not polled yet)."""
+        return dict(self.health.get(int(server_id)) or self._blank())
+
+    @property
+    def since(self) -> dict[str, dict]:
+        """When each server went up or down: {server id as text: {"online", "since"}} (the notifier reads this)."""
+        return {str(k): {"online": h["online"], "since": h["since"]} for k, h in self.health.items() if h.get("since") is not None}
 
     def state_since(self, server_id: int) -> dict | None:
         return self.since.get(str(server_id))
@@ -108,11 +130,11 @@ class Poller:
 
     # ---------- config ----------
     def _load_owners(self) -> None:
-        self.owner_by_server = {s["name"]: s["owner_plex_id"] for s in self.store.list_servers() if s.get("owner_plex_id")}
+        self.owner_by_server = {s["id"]: s["owner_plex_id"] for s in self.store.list_servers() if s.get("owner_plex_id")}
 
-    def owner_for(self, server: str) -> str | None:
+    def owner_for(self, server_id: int | None) -> str | None:
         """plex.tv id of the account that owns this server (Plex reports its owner as local account 1)."""
-        oid = self.owner_by_server.get(server)
+        oid = self.owner_by_server.get(int(server_id)) if server_id is not None else None
         if oid:
             return oid
         only = self.directory.owner()
@@ -124,8 +146,7 @@ class Poller:
         self._load_owners()
         live = {s.id for s in self.cfg.servers}
         self.clients = {k: v for k, v in self.clients.items() if k in live}
-        names = {s.name for s in self.cfg.servers}
-        self.server_state = {k: v for k, v in self.server_state.items() if k in names}
+        self.health = {k: v for k, v in self.health.items() if k in live}
         self._wake.set()
         self._tel_wake.set()
 
@@ -174,20 +195,15 @@ class Poller:
                     else:
                         self.clips.want(s.id, row["rating_key"])  # made in the background; shows from the next poll
                 rows.append(row)
-            self.server_state[s.name] = {"online": True, "answering": True, "error": None, "ok_at": time.time()}
-            self._mark(s, True)
+            self._record(s, True)
             self._last_rows[s.id] = rows
             return rows
         except Exception as e:
-            prev = self.server_state.get(s.name, {})
-            self._mark(s, False)
-            misses = self._fails.get(s.id, (1, 0))[0]
-            log.warning("Plex poll failed for %s (%d in a row): %s", s.name, misses, e)
-            if misses < MISSES and prev.get("online"):
+            h = self._record(s, False, str(e))
+            log.warning("Plex poll failed for %s (%d in a row): %s", s.name, h["misses"], e)
+            if h["online"]:
                 # One slow answer is not an outage: keep the last streams, marked, so nothing vanishes and comes back.
-                self.server_state[s.name] = {"online": True, "answering": False, "error": str(e), "ok_at": prev.get("ok_at")}
                 return [{**r, "stale": True} for r in self._last_rows.get(s.id, [])]
-            self.server_state[s.name] = {"online": False, "answering": False, "error": str(e), "ok_at": prev.get("ok_at")}
             self._last_rows.pop(s.id, None)
             return []
 
@@ -197,14 +213,14 @@ class Poller:
         rows = [r for rs in results for r in rs]
         # Servers that answered this round. One that is only not answering (its rows are `stale`) keeps its plays
         # open and its globe dots, like an offline one, and its streams are not counted again.
-        online = {name for name, st in self.server_state.items() if st.get("online") and st.get("answering", True)}
+        answered = {s.id for s in servers if self.health_of(s.id)["answering"]}
         try:
-            self.track_plays(rows, online)
+            self.track_plays(rows, answered)
         except Exception:
             log.exception("history tracking failed")
         if self.globe is not None:
             try:
-                self.globe.playing(rows, online)
+                self.globe.playing(rows, {s.name for s in servers if s.id in answered})
             except Exception:
                 log.exception("globe update failed")
         for r in rows:
@@ -213,18 +229,19 @@ class Poller:
         self.streams = rows
         self.last_poll = time.time()
 
-    def track_plays(self, rows: list[dict], online_servers: set[str]) -> None:
-        """Open, extend and close playback history rows from consecutive polls."""
+    def track_plays(self, rows: list[dict], online_servers: set[int]) -> None:
+        """Open, extend and close playback history rows from consecutive polls. `online_servers`: the ids of the
+        servers that answered this round; a play on any other is left open."""
         now = int(time.time())
-        seen: set[tuple[str, str]] = set()
+        seen: set[tuple[int, str]] = set()
         for r in rows:
             if not r.get("session_key") or r.get("stale"):
                 continue
-            key = (r["server"], r["session_key"])
+            key = (r.get("server_id"), r["session_key"])
             seen.add(key)
             if r.get("user_id") == "1":
                 # Plex reports the server owner as local account 1, not their plex.tv id.
-                r["user_id"] = self.owner_for(r["server"])
+                r["user_id"] = self.owner_for(r.get("server_id"))
             if r.get("user_id"):
                 self.directory.saw_user(r["user_id"], r.get("user"), r.get("user_thumb"))
                 self.directory.add_user_server(r["user_id"], r["server"])
@@ -348,7 +365,7 @@ class Poller:
                 name = accounts.get(account, "")
                 user = self.directory.get_user(account) if account and account != "1" else None
                 if account == "1":
-                    oid = self.owner_for(s.name)
+                    oid = self.owner_for(s.id)
                     user = self.directory.get_user(oid) if oid else None
                 if user is None and name:
                     m = self.directory.db.execute("SELECT * FROM users WHERE username = ? COLLATE NOCASE OR title = ? COLLATE NOCASE", (name, name)).fetchone()
@@ -378,7 +395,8 @@ class Poller:
             self.telemetry, self.netdata_error = {}, None
             return
         try:
-            self.telemetry = await nd.snapshot()
+            snap = await nd.snapshot()   # by server name (how Netdata nodes are matched); kept by id
+            self.telemetry = {s.id: snap[s.name] for s in self.cfg.servers if s.name in snap}
             self.netdata_error, self.netdata_ok_at = None, time.time()
         except Exception as e:
             self.netdata_error = str(e)
@@ -393,11 +411,12 @@ class Poller:
         for s in self.cfg.servers:
             if not s.enabled:
                 continue
-            mine = [r for r in self.streams if r["server"] == s.name]
-            t = self.telemetry.get(s.name, {})
+            mine = [r for r in self.streams if r.get("server_id") == s.id]
+            t = self.telemetry.get(s.id, {})
             rows.append({
                 "server": s.name,
-                "online": self.server_state.get(s.name, {}).get("online", False),
+                "server_id": s.id,
+                "online": self.health_of(s.id)["online"],
                 "streams": len(mine),
                 "bandwidth_mbps": round(sum(r["bitrate_mbps"] for r in mine if r["state"] != "Paused"), 2),
                 "cpu_pct": t.get("cpu_pct"),
@@ -497,10 +516,10 @@ class Poller:
         for s in self.cfg.servers:
             if not s.enabled:
                 continue
-            st = self.server_state.get(s.name, {})
-            t = self.telemetry.get(s.name, {})
+            st = self.health_of(s.id)
+            t = self.telemetry.get(s.id, {})
             cpu = t.get("cpu_pct")
-            online = st.get("online", False)
+            online = st["online"]
             if not online:
                 status = "Offline"
             elif cpu is not None and cpu >= self.cfg.hot_cpu_pct:
@@ -515,8 +534,8 @@ class Poller:
                 "cpu_known": cpu is not None,
                 "net_out_mbps": t.get("net_out_mbps"),
                 "status": status,
-                "answering": bool(online and st.get("answering", True)),
-                "hot_for_min": self.store.hot_minutes(s.name, self.cfg.hot_cpu_pct) if online else 0,
+                "answering": bool(online and st["answering"]),
+                "hot_for_min": self.store.hot_minutes(s.id, self.cfg.hot_cpu_pct) if online else 0,
                 "error": st.get("error"),
             })
         return out

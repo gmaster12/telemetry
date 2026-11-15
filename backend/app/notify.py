@@ -96,7 +96,8 @@ def reader_of(p) -> str:
 
 
 class Notifier:
-    def __init__(self, store, seerr=None, arr=None, media=None, billing=None, directory=None, poller=None, cleanup=None, status=None):
+    def __init__(self, store, seerr=None, arr=None, media=None, billing=None, directory=None, poller=None, cleanup=None, status=None,
+                 backups=None):
         self.store = store
         self.db = store.db
         self.seerr, self.arr, self.media, self.billing = seerr, arr, media, billing
@@ -104,6 +105,7 @@ class Notifier:
         # Where a request stands, decided the way every page decides it, Plex's own answer included (Glenn's picks
         # O1A and 4A, Nov 15 2026): "is ready" goes out when the title page says On Plex, not hours later.
         self.status = status or rs.RequestStatus(seerr, arr)
+        self.backups = backups   # the nightly database copies (app/backup.py): a failed one is the admins' to sort out
         self.db.executescript(SCHEMA)
         self.db.commit()
         self.last_error: str | None = None
@@ -481,6 +483,16 @@ class Notifier:
                           ", ".join(titles) + more + ".", "Open Needs you", "settings:reqlog", urgent=True, now=now)
             else:
                 self.resolve(ADMINS, "needs-you")
+        # the nightly database copy (Glenn's pick K2A): pinned while the last one failed, closed by the next good one
+        if self.backups:
+            st = self.backups.status()
+            if st.get("error"):
+                self.post(ADMINS, "backup:failed", "backup", "The nightly database copy failed",
+                          str(st["error"])[:200], "Open Backups", "settings:backups", urgent=True, now=now)
+            else:
+                for old in self.open_keys(ADMINS, "backup:"):
+                    self.resolve(ADMINS, old, "The database copy is working again", "The last nightly copy was made.", now)
+
         # servers that stopped answering
         if self.poller:
             rows = {str(s["id"]): s for s in self.store.list_servers()}

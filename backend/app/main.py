@@ -34,6 +34,7 @@ from .plex import PlexAccount, PlexClient
 from .poller import Poller
 from . import request_log
 from .media import Media
+from .backup import Backups
 from .request_state import LOG_GROUPS, RequestStatus
 from .requests_api import IMAGES, make_router
 from .secrets import SecretBox
@@ -60,8 +61,9 @@ globe = Globe(geo, directory.starts_since)
 sample_globe = SampleGlobe()
 poller.globe = globe
 # Notifications and the Welcome back sheet (Glenn's pick A, Nov 14 2026; app/notify.py)
+backups = Backups(store)   # nightly copies of the database in data/backups (Glenn's pick K2A)
 notifier = Notifier(store, seerr=seerr, arr=arr, media=media, billing=poller.billing, directory=directory, poller=poller, cleanup=cleanup,
-                    status=status)
+                    status=status, backups=backups)
 add_requests_section(store)
 add_mystreams_section(store)
 add_books_section(store)
@@ -82,7 +84,9 @@ async def lifespan(app: FastAPI):
     sweep = asyncio.create_task(cleanup.loop())
     geo_task = asyncio.create_task(globe.loop())
     notes = asyncio.create_task(notifier.loop())
+    copies = asyncio.create_task(backups.loop())
     yield
+    copies.cancel()
     notes.cancel()
     task.cancel()
     sweep.cancel()
@@ -190,13 +194,20 @@ def see_streams(request: Request) -> Principal:
     return p
 
 
+def public_health(server_id: int) -> dict:
+    """A server's health record as Settings and /api/status show it (app/poller.py `health`, by id)."""
+    h = poller.health_of(server_id)
+    return {"online": h["online"], "answering": h["answering"], "misses": h["misses"], "since": h["since"],
+            "error": h["error"], "ok_at": h["ok_at"]}
+
+
 def own_streams(p: Principal, rows: list[dict]) -> list[dict]:
     """Streams on this person's own Plex account. Plex reports a server's owner as local account 1."""
     if p.kind != "plex":
         return []
     me_id = str(p.subject)
     return [r for r in rows if str(r.get("user_id") or "") == me_id
-            or (str(r.get("user_id") or "") == "1" and poller.owner_for(r.get("server")) == me_id)]
+            or (str(r.get("user_id") or "") == "1" and poller.owner_for(r.get("server_id")) == me_id)]
 
 
 def visible_streams(p: Principal) -> list[dict]:
@@ -223,7 +234,7 @@ def api_bandwidth(request: Request):
     need(request, "bandwidth")
     if poller.cfg.use_sample:
         return wrap(sample.bandwidth(), True)
-    return wrap(store.bandwidth_last_hour([s.name for s in poller.cfg.servers if s.enabled]), False)
+    return wrap(store.bandwidth_last_hour([s.id for s in poller.cfg.servers if s.enabled]), False)
 
 
 _daily_cache: dict[tuple, tuple[float, list]] = {}
@@ -237,11 +248,11 @@ def api_bandwidth_daily(request: Request, tz: int = 0):
     tz = max(-840, min(840, tz))
     if poller.cfg.use_sample:
         return wrap(sample.bandwidth_daily(tz), True)
-    names = tuple(s.name for s in poller.cfg.servers if s.enabled)
-    key, now = (tz, names), time.time()
+    ids = tuple(s.id for s in poller.cfg.servers if s.enabled)
+    key, now = (tz, ids), time.time()
     hit = _daily_cache.get(key)
     if not hit or now - hit[0] > 60:
-        hit = (now, store.bandwidth_daily(list(names), tz))
+        hit = (now, store.bandwidth_daily(list(ids), tz))
         _daily_cache.clear()
         _daily_cache[key] = hit
     return wrap(hit[1], False)
@@ -279,10 +290,11 @@ def api_status(request: Request):
         "sample": cfg.use_sample,
         "last_poll": poller.last_poll,
         "history_minutes": store.history_minutes(),
-        "servers": [{"name": s.name, "enabled": s.enabled, **poller.server_state.get(s.name, {})} for s in cfg.servers],
+        "servers": [{"id": s.id, "name": s.name, "enabled": s.enabled, **public_health(s.id)} for s in cfg.servers],
         "netdata": {"mode": cfg.netdata.mode, "error": poller.netdata_error, "ok_at": poller.netdata_ok_at},
         "users": {"synced_at": poller.users_synced_at or None, "error": poller.users_sync_error},
         "clips": poller.clips.status(),
+        "backups": {k: v for k, v in backups.status().items() if k != "files"},
     }
 
 
@@ -420,7 +432,7 @@ def get_settings():
             "id": r["id"], "name": r["name"], "plex_url": r["plex_url"], "has_token": bool(r["token_enc"]),
             "max_streams": r["max_streams"], "capacity_mbps": r["capacity_mbps"], "netdata_node": r["netdata_node"],
             "netdata_agent_url": r["netdata_agent_url"], "enabled": bool(r["enabled"]), "machine_id": r["machine_id"],
-            "state": poller.server_state.get(r["name"], {}),
+            "state": public_health(r["id"]),
         } for r in rows],
         "plex_accounts": [{"id": a["plex_id"], "username": a["username"], "name": a["title"] or a["username"], "email": a["email"],
                            "servers": [r["name"] for r in rows if r.get("owner_plex_id") == a["plex_id"]]} for a in store.list_accounts()],
@@ -549,12 +561,12 @@ async def settings_summary():
     view = sample.servers() if cfg.use_sample else poller.servers_view()
     offline, errors = [], []
     for r in enabled:
-        st = poller.server_state.get(r["name"], {})
-        if st.get("online") is False:
+        st = poller.health_of(r["id"])
+        if not st["online"] and (st["since"] is not None or st["misses"]):   # down, not merely not polled yet
             offline.append(r["name"])
             if st.get("error"):
                 errors.append({"name": r["name"], "error": str(st["error"])[:200]})
-    online = sum(1 for r in enabled if poller.server_state.get(r["name"], {}).get("online") is True)
+    online = sum(1 for r in enabled if poller.health_of(r["id"])["online"])
     unlinked = [r["name"] for r in enabled if not (r["netdata_node"] if cfg.netdata.mode == "cloud" else r["netdata_agent_url"])] \
         if cfg.netdata.mode != "off" else []
     people = store.db.execute(
@@ -579,7 +591,23 @@ async def settings_summary():
         "books": media.settings(),
         "arr": {k: {"url": v["url"], "has_key": v["has_key"], "error": v["error"]} for k, v in arr.settings().items()},
         "cleanup": {**cleanup.settings(), "due": cleanup.due_count()},
+        "backups": {k: v for k, v in backups.status().items() if k not in ("files", "folder")},
     }
+
+
+@app.get("/api/settings/backups")
+def get_backups():
+    """The nightly database copies (app/backup.py): when, how many, any error. Names and sizes only."""
+    return backups.status()
+
+
+@app.post("/api/settings/backups/run")
+async def run_backup():
+    try:
+        made = await backups.run_now()
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(500, f"The copy failed: {e}")
+    return {"ok": True, **made, **backups.status()}
 
 
 async def requests_summary() -> dict:
@@ -1089,10 +1117,8 @@ def api_my_servers(request: Request):
         servers = [s for s in servers if s.id in ids]
     out = []
     for s in servers:
-        rec = poller.state_since(s.id) or {}
-        live = poller.server_state.get(s.name, {}).get("online")
-        online = rec.get("online") if rec else live
-        out.append({"id": s.id, "name": s.name, "online": online, "since": rec.get("since") if rec else None})
+        h = poller.health_of(s.id)   # the same record the Servers card and the notifier read (pick O3A)
+        out.append({"id": s.id, "name": s.name, "online": h["online"] if h["since"] is not None else None, "since": h["since"]})
     return {"servers": out, "now": int(time.time())}
 
 

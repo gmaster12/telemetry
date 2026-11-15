@@ -16,9 +16,9 @@ def live(app):
 
 def rows():
     return [
-        {"id": "A-1", "user": "sable", "user_id": "2001", "server": "Alpha", "rating_key": "11", "title": "Mine"},
-        {"id": "A-2", "user": "rook", "user_id": "2002", "server": "Alpha", "rating_key": "12", "title": "Someone else"},
-        {"id": "B-1", "user": "owner", "user_id": "1", "server": "Beta", "rating_key": "13", "title": "Owner of Beta"},
+        {"id": "A-1", "user": "sable", "user_id": "2001", "server": "Alpha", "server_id": 1, "rating_key": "11", "title": "Mine"},
+        {"id": "A-2", "user": "rook", "user_id": "2002", "server": "Alpha", "server_id": 1, "rating_key": "12", "title": "Someone else"},
+        {"id": "B-1", "user": "owner", "user_id": "1", "server": "Beta", "server_id": 2, "rating_key": "13", "title": "Owner of Beta"},
     ]
 
 
@@ -37,7 +37,7 @@ def test_full_streams_still_sees_everyone(app):
 
 def test_server_owner_shown_as_account_1_is_matched(app, monkeypatch):
     app.poller.streams = rows()
-    monkeypatch.setattr(app.poller, "owner_for", lambda server: "3003" if server == "Beta" else None)
+    monkeypatch.setattr(app.poller, "owner_for", lambda server_id: "3003" if server_id == 2 else None)
     v = signed_in(app, "3003", "o@x.com", ["mystreams"])
     assert [r["id"] for r in v.get("/api/streams").json()["rows"]] == ["B-1"]
 

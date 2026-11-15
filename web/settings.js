@@ -115,6 +115,7 @@
     reqlog: { title: 'Request log', scope: 'all', lead: 'Every movie, series, comic, ebook and audiobook requested through this site: who asked, when, and where it stands now.' },
     requests: { title: 'Requests', scope: 'all', lead: 'Connects your Seerr so people can find movies and series and request them here, without signing in to Seerr. Each person acts as their own Seerr account, so its permissions, limits and approvals still apply.' },
     books: { title: 'Books & comics', scope: 'all', lead: 'Shows the Greystar media site inside this dashboard, so people read comics and ebooks, listen to audiobooks and request more without signing in again.' },
+    backups: { title: 'Backups', scope: 'all', lead: 'A copy of this dashboard\'s database every night: watch history, the request log, people and settings. The last 14 are kept on this server.' },
     arr: { title: 'Radarr & Sonarr', scope: 'all', lead: 'Shows people how far their movies and shows have downloaded, and lets Unwatched cleanup remove titles nobody watched (with their files, so they are not downloaded again).' }
   };
   var SCOPE_WORDS = { you: 'This browser only', account: 'Your account', all: 'Everyone' };
@@ -122,7 +123,7 @@
   // says who its changes reach; inside a section the exact tag still shows (This browser only, Your account, Everyone).
   var ROOMS = [
     { key: 'you', title: 'Your dashboard', scope: 'Just you', views: ['display', 'cards', 'globe'] },
-    { key: 'data', title: 'Servers and data', scope: 'Everyone', views: ['plex', 'netdata', 'alerts'] },
+    { key: 'data', title: 'Servers and data', scope: 'Everyone', views: ['plex', 'netdata', 'alerts', 'backups'] },
     { key: 'media', title: 'Requests and media', scope: 'Everyone', views: ['requests', 'reqlog', 'arr', 'books'] },
     { key: 'people', title: 'People and billing', scope: 'Everyone', views: ['access', 'billing'] }
   ];
@@ -135,6 +136,7 @@
     plex: 'plex servers server token address ip url machine add remove link account owner',
     netdata: 'netdata cpu network upload bandwidth metrics space room node cloud agent contexts',
     alerts: 'alerts hot cpu threshold degraded amber',
+    backups: 'backup backups copy copies restore database history safe nightly',
     access: 'access people viewers sections permissions admins admin login password sync users turn off',
     billing: 'billing stripe subscription key customers unmatched match paypal',
     requests: 'requests seerr overseerr api key 4k approve link people movies series',
@@ -191,6 +193,7 @@
     else if (t === 'requests') loadRequests();
     else if (t === 'books') loadBooks();
     else if (t === 'arr') loadArr();
+    else if (t === 'backups') loadBackups();
     else if (t === 'reqlog') openLog(changed);
     else if (t === 'cards') loadCards();
     else if (t === 'globe') renderGlobe();
@@ -246,6 +249,9 @@
     if (!s.servers.total) out.push({ view: 'plex', tone: 'warning', text: 'No Plex servers yet. The dashboard shows sample data until you add one.' });
     if (s.servers.offline.length) out.push({ view: 'plex', tone: 'danger', text: names(s.servers.offline) + (s.servers.offline.length === 1 ? ' is' : ' are') + ' not answering.' });
     if (s.netdata.error) out.push({ view: 'netdata', tone: 'danger', text: 'Netdata: the last check failed.' });
+    var bu = s.backups || {};
+    if (bu.error) out.push({ view: 'backups', tone: 'danger', text: 'Backups: the last nightly copy of the database failed.' });
+    else if (bu.count && bu.overdue) out.push({ view: 'backups', tone: 'warning', text: 'Backups: no copy of the database in over a day.' });
     if (s.netdata.unlinked.length) out.push({ view: 'plex', tone: 'warning', text: names(s.netdata.unlinked) + (s.netdata.unlinked.length === 1 ? ' has' : ' have') + ' no Netdata node, so CPU and upload are unknown.' });
     else if (s.netdata.mode !== 'off' && !s.netdata.error && s.netdata.of && s.netdata.reporting < s.netdata.of)
       out.push({ view: 'netdata', tone: 'warning', text: 'CPU is coming in from ' + s.netdata.reporting + ' of ' + s.netdata.of + ' servers. Check the metric names.' });
@@ -284,6 +290,12 @@
     if (view === 'netdata') return nd.mode === 'off' ? ['neutral', 'Off'] : nd.error ? ['danger', 'Last check failed']
       : nd.of && nd.reporting < nd.of ? ['warning', nd.reporting + ' of ' + nd.of + ' reporting'] : ['success', nd.reporting + ' of ' + nd.of + ' reporting'];
     if (view === 'alerts') return al.hot.length ? ['warning', names(al.hot, 1) + (al.hot.length === 1 ? ' is hot' : ' are hot')] : ['neutral', 'Hot at ' + Math.round(al.hot_cpu_pct) + '% CPU'];
+    if (view === 'backups') {
+      var bu = s.backups || {};
+      if (bu.error) return ['danger', 'Last copy failed'];
+      if (!bu.count) return ['warning', bu.running ? 'Making the first copy' : 'No copy yet'];
+      return bu.overdue ? ['warning', 'Last copy ' + since(bu.newest)] : ['success', 'Copied ' + since(bu.newest) + ', ' + bu.count + ' kept'];
+    }
     if (view === 'access') return ac.sync_error ? ['danger', 'Loading people failed'] : !ac.synced_at ? ['warning', 'People not loaded'] : ['neutral', (ac.custom + ac.off) + ' custom or off'];
     if (view === 'billing') return !bl.connected ? ['neutral', 'Not connected'] : bl.error ? ['danger', 'Last sync failed'] : bl.full_key ? ['danger', 'Full key, replace it'] : bl.unmatched ? ['warning', bl.unmatched + ' not matched'] : ['success', 'Synced ' + (since(bl.synced_at) || 'soon')];
     if (view === 'requests') return !rq.connected ? ['neutral', 'Not connected'] : rq.error ? ['danger', 'Seerr not answering'] : rq.pending ? ['warning', rq.pending + ' waiting'] : ['success', 'Seerr on'];
@@ -654,13 +666,15 @@
     }
     var list = el('ul', { class: 'st-list' });
     state.servers.forEach(function (s) {
+      // The server's one health record (app/poller.py, by id): the same answer the Servers card and Live now bar give.
       var st = s.state || {};
       var online = st.online === true;
+      var down = !online && (st.since != null || st.misses > 0);
       var item = el('li', { class: 'st-item' });
       item.appendChild(el('div', { class: 'st-item__top' },
-        el('span', { class: 'st-dot ' + (!s.enabled ? '' : online ? 'st-dot--online' : st.online === false ? 'st-dot--offline' : ''), 'aria-hidden': 'true' }),
+        el('span', { class: 'st-dot ' + (!s.enabled ? '' : online ? 'st-dot--online' : down ? 'st-dot--offline' : ''), 'aria-hidden': 'true' }),
         el('span', { class: 'st-item__name', text: s.name }),
-        el('span', { class: 'st-tag', text: !s.enabled ? 'Paused' : online ? 'Online' : st.online === false ? 'Offline' : 'Checking' }),
+        el('span', { class: 'st-tag', text: !s.enabled ? 'Paused' : online ? (st.answering === false ? 'Not answering' : 'Online') : down ? 'Offline' : 'Checking' }),
         el('span', { class: 'st-spacer' }),
         el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Edit', 'aria-expanded': editingId === s.id ? 'true' : 'false',
           onclick: function () { editingId = editingId === s.id ? null : s.id; removingId = null; render(); } })));
@@ -1258,6 +1272,51 @@
     pane.appendChild(el('section', { class: 'st-section' }, el('h3', { text: 'Who sees it' }),
       el('p', { class: 'st-note', text: 'Books & comics is an access section, on for everyone by default. Turn it off for someone in Access, like any other section. It needs a Plex sign-in: the media site finds the person by their Plex account (or makes one for them, approved straight away).' }),
       el('p', { class: 'st-note', text: 'Everyone can request comics, ebooks and audiobooks. Listening to audiobooks needs the Audiobooks add-on, which is turned on per person on the media site.' })));
+  }
+
+  // ---------- Backups: nightly copies of the database (app/backup.py, Glenn's pick K2A) ----------
+  var backups = null;
+  function loadBackups() {
+    if (!isAdmin()) return Promise.resolve();
+    return Promise.all([api('GET', '/api/settings/backups'), state ? null : api('GET', '/api/settings')]).then(function (r) {
+      backups = r[0];
+      if (r[1]) state = r[1];
+    }).then(render).catch(function (e) { setMsg('load', 'error', e.message); });
+  }
+  function sizeWords(n) {
+    if (n == null) return '';
+    return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  }
+  function renderBackups(pane) {
+    var b = backups;
+    if (!b) { pane.appendChild(el('p', { class: 'st-note', text: 'Loading…' })); return; }
+    var head = b.error ? badgeEl('danger', 'Last copy failed') : !b.count ? badgeEl('warning', 'No copy yet')
+      : b.overdue ? badgeEl('warning', 'Over a day old') : badgeEl('success', 'Up to date');
+    var hour = new Date(2000, 0, 1, b.hour).toLocaleTimeString([], { hour: 'numeric' });
+    var sec = el('section', { class: 'st-section' }, el('h3', null, 'Nightly copies ', head));
+    if (b.error) sec.appendChild(el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), b.error));
+    sec.appendChild(el('p', { class: 'st-note', text: b.count
+      ? 'Newest ' + since(b.newest) + '. ' + b.count + ' of ' + b.keep + ' kept, ' + sizeWords(b.size) + ' in all. A new copy is made at ' + hour + ' Central each night.'
+      : 'The first copy is made a minute after the dashboard starts, then at ' + hour + ' Central each night.' }));
+    sec.appendChild(el('div', { class: 'st-row' },
+      el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['bk-run'] || b.running ? 'Copying…' : 'Make a copy now', disabled: busy['bk-run'] || b.running, onclick: function () {
+        withBusy('bk-run', api('POST', '/api/settings/backups/run').then(function (r) {
+          msgs.backups = { kind: 'ok', text: 'Copied: ' + r.name + ' (' + sizeWords(r.size) + ').' };
+          return loadBackups();
+        }).catch(function (e) { setMsg('backups', 'error', e.message); return loadBackups(); }));
+      } })));
+    sec.appendChild(message('backups'));
+    if (b.files && b.files.length) {
+      sec.appendChild(el('ul', { class: 'st-list' }, b.files.map(function (f) {
+        return el('li', { class: 'st-item st-item--row' }, el('span', { class: 'st-item__meta is-mono', text: f.name }),
+          el('span', { class: 'st-item__meta', text: new Date(f.at * 1000).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) + ' \u00b7 ' + sizeWords(f.size) }));
+      })));
+    }
+    pane.appendChild(sec);
+    pane.appendChild(el('section', { class: 'st-section' }, el('h3', { text: 'Restoring a copy' }),
+      el('p', { class: 'st-note', text: 'The copies are in the data/backups folder next to the dashboard\'s docker-compose.yml on this server (' + b.folder + ' inside the container). To go back to one: stop the dashboard, unzip the copy over data/telemetry.db, and start it again. Saved tokens and keys in a copy only work with the same SECRET_KEY, so keep the .env file somewhere safe as well.' }),
+      el('pre', { class: 'st-pre' }, 'docker compose stop\ngunzip -c data/backups/<copy>.db.gz > data/telemetry.db\ndocker compose start'),
+      el('p', { class: 'st-note', text: 'The copies sit on the same disk as the dashboard, so they cover a bad change or a damaged file, not losing the server itself.' })));
   }
 
   // ---------- Radarr & Sonarr (download progress, Unwatched cleanup) ----------
@@ -1858,6 +1917,8 @@
       renderRequests(pane);
     } else if (tab === 'books') {
       renderBooks(pane);
+    } else if (tab === 'backups') {
+      renderBackups(pane);
     } else if (tab === 'arr') {
       renderArr(pane);
     } else if (tab === 'access') {

@@ -142,6 +142,11 @@ class Store:
             if col not in cols:  # Unwatched cleanup matches plays to requested titles by these (cleanup.py)
                 self.db.execute(f"ALTER TABLE plays ADD COLUMN {col} {typ}")
                 self.db.commit()
+        cols = {r["name"] for r in self.db.execute("PRAGMA table_info(samples)")}
+        if "server_id" not in cols:  # the minute history follows the server, not its name (Glenn's pick O3A)
+            self.db.execute("ALTER TABLE samples ADD COLUMN server_id INTEGER")
+            self.db.commit()
+        self.db.execute("CREATE INDEX IF NOT EXISTS samples_server_ts ON samples (server_id, ts)")
         self.db.execute("CREATE INDEX IF NOT EXISTS plays_server_item ON plays (server_id, rating_key)")
         self.db.execute("CREATE INDEX IF NOT EXISTS plays_started ON plays (started_at)")
         self.db.commit()
@@ -167,9 +172,14 @@ class Store:
             self.db.commit()
 
     def link_plays(self) -> int:
-        """Give plays saved without a server id one: first by an old name in server_aliases, then by a current
-        server name. plays.server is left alone, as the record of what the server was called then."""
+        """Give plays (and minute history) saved without a server id one: first by an old name in server_aliases,
+        then by a current server name. The name columns are left alone, as the record of what it was called then."""
         with self.lock:
+            for table in ("samples",):
+                self.db.execute(f"UPDATE {table} SET server_id = (SELECT server_id FROM server_aliases WHERE old_name = {table}.server) "
+                                f"WHERE server_id IS NULL AND server IN (SELECT old_name FROM server_aliases)")
+                self.db.execute(f"UPDATE {table} SET server_id = (SELECT id FROM servers WHERE servers.name = {table}.server) "
+                                f"WHERE server_id IS NULL AND server IN (SELECT name FROM servers)")
             a = self.db.execute("UPDATE plays SET server_id = (SELECT server_id FROM server_aliases WHERE old_name = plays.server) "
                                 "WHERE server_id IS NULL AND server IN (SELECT old_name FROM server_aliases)").rowcount
             b = self.db.execute("UPDATE plays SET server_id = (SELECT id FROM servers WHERE servers.name = plays.server) "
@@ -190,6 +200,7 @@ class Store:
         """Everything that pointed at one server id now points at another (a deleted or re-added server)."""
         with self.lock:
             n = self.db.execute("UPDATE plays SET server_id = ? WHERE server_id = ?", (int(to_id), int(from_id))).rowcount
+            self.db.execute("UPDATE samples SET server_id = ? WHERE server_id = ?", (int(to_id), int(from_id)))
             self.db.execute("UPDATE server_aliases SET server_id = ? WHERE server_id = ?", (int(to_id), int(from_id)))
             self.db.commit()
         return n
@@ -237,18 +248,50 @@ class Store:
             self.db.commit()
 
     # ---------- settings ----------
+    # Settings are kept in memory (Glenn's pick H2A, Nov 15 2026): every request, a stylesheet included, used to read
+    # several of them (sections, the media site for the security header) and decrypt the media secret. They are read
+    # once, changed in memory whenever this process saves one, and read again after SETTINGS_TTL seconds in case
+    # something outside this process (python -m app.tools...) changed the database.
+    SETTINGS_TTL = 60
+
+    def _settings_now(self) -> dict[str, str | None]:
+        now = time.monotonic()
+        cache = getattr(self, "_settings", None)
+        if cache is None or now - self._settings_at > self.SETTINGS_TTL:
+            with self.lock:
+                cache = {r["key"]: r["value"] for r in self.db.execute("SELECT key, value FROM settings")}
+            self._settings, self._settings_at = cache, now
+        return cache
+
     def get_setting(self, key: str, default: str | None = None) -> str | None:
-        with self.lock:
-            row = self.db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        if not row or row["value"] in (None, ""):
+        raw = self._settings_now().get(key)
+        if raw in (None, ""):
             return default
-        return self.box.open(row["value"]) if key in SECRET_SETTINGS else row["value"]
+        if key not in SECRET_SETTINGS:
+            return raw
+        opened = getattr(self, "_opened", None)
+        if opened is None:
+            opened = self._opened = {}
+        hit = opened.get(key)
+        if hit and hit[0] == raw:
+            return hit[1]
+        value = self.box.open(raw)
+        opened[key] = (raw, value)
+        return value
 
     def set_setting(self, key: str, value: str | None) -> None:
         stored = self.box.seal(value) if key in SECRET_SETTINGS else value
         with self.lock:
             self.db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, stored))
             self.db.commit()
+            cache = getattr(self, "_settings", None)
+            if cache is not None:
+                cache[key] = stored
+            getattr(self, "_opened", {}).pop(key, None)
+
+    def forget_settings(self) -> None:
+        """Read every setting from the database again on the next use."""
+        self._settings = None
 
     # ---------- servers ----------
     def list_servers(self) -> list[dict]:
@@ -317,8 +360,10 @@ class Store:
         ts = ts or int(time.time()) // 60 * 60
         with self.lock:
             self.db.executemany(
-                "INSERT OR REPLACE INTO samples VALUES (?,?,?,?,?,?,?)",
-                [(ts, r["server"], int(r["online"]), r["streams"], r["bandwidth_mbps"], r.get("cpu_pct"), r.get("net_out_mbps")) for r in rows],
+                "INSERT OR REPLACE INTO samples (ts, server, online, streams, bandwidth_mbps, cpu_pct, net_out_mbps, server_id) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                [(ts, r["server"], int(r["online"]), r["streams"], r["bandwidth_mbps"], r.get("cpu_pct"), r.get("net_out_mbps"),
+                  r.get("server_id")) for r in rows],
             )
             self.db.commit()
 
@@ -327,17 +372,18 @@ class Store:
             self.db.execute("DELETE FROM samples WHERE ts < ?", (int(time.time()) - days * 86400,))
             self.db.commit()
 
-    def bandwidth_last_hour(self, servers: list[str] | None = None) -> list[dict]:
+    def bandwidth_last_hour(self, servers: list[int] | None = None) -> list[dict]:
+        """Total bandwidth per minute, last hour. `servers`: server ids (renaming a server keeps its history)."""
         since = int(time.time()) - 3600
         q = "SELECT ts, SUM(bandwidth_mbps) AS v FROM samples WHERE ts >= ?"
         args: list = [since]
         if servers:
-            q += f" AND server IN ({','.join('?' * len(servers))})"
-            args += servers
+            q += f" AND server_id IN ({','.join('?' * len(servers))})"
+            args += [int(x) for x in servers]
         cur = self.db.execute(q + " GROUP BY ts ORDER BY ts", args)
         return [{"minute": time.strftime("%Y-%m-%dT%H:%M:00Z", time.gmtime(r["ts"])), "mbps": round(r["v"] or 0, 1)} for r in cur]
 
-    def bandwidth_daily(self, servers: list[str] | None = None, tz_offset_min: int = 0, days: int = 7) -> list[dict]:
+    def bandwidth_daily(self, servers: list[int] | None = None, tz_offset_min: int = 0, days: int = 7) -> list[dict]:
         """Peak total bandwidth (all servers, per minute) for each of the last `days` days in the
         viewer's time zone, today included, oldest first. Days with no history have no peak."""
         off = tz_offset_min * 60
@@ -346,8 +392,8 @@ class Store:
         q = "SELECT ts, SUM(bandwidth_mbps) AS v FROM samples WHERE ts >= ?"
         args: list = [first * 86400 - off]
         if servers:
-            q += f" AND server IN ({','.join('?' * len(servers))})"
-            args += servers
+            q += f" AND server_id IN ({','.join('?' * len(servers))})"
+            args += [int(x) for x in servers]
         best: dict[int, tuple[float, int]] = {}
         for r in self.db.execute(q + " GROUP BY ts", args):
             d, v = (r["ts"] + off) // 86400, float(r["v"] or 0)
@@ -373,10 +419,10 @@ class Store:
             grid[key] = max(grid[key], int(r["n"] or 0))
         return [{"day": d, "hour": h, "streams": grid[(d, h)]} for d in days for h in range(24)]
 
-    def hot_minutes(self, server: str, threshold: float) -> int:
+    def hot_minutes(self, server_id: int, threshold: float) -> int:
         """Consecutive most-recent minutes at or above the CPU threshold."""
         n = 0
-        for r in self.db.execute("SELECT cpu_pct FROM samples WHERE server = ? ORDER BY ts DESC LIMIT 240", (server,)):
+        for r in self.db.execute("SELECT cpu_pct FROM samples WHERE server_id = ? ORDER BY ts DESC LIMIT 240", (int(server_id),)):
             if r["cpu_pct"] is None or r["cpu_pct"] < threshold:
                 break
             n += 1

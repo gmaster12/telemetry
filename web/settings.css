@@ -42,6 +42,8 @@
 .st-tag--ok { background: var(--lime); color: var(--on-fill); }
 .st-details summary { cursor: pointer; font-size: 13px; font-weight: 500; }
 .st-details[open] summary { margin-bottom: var(--space-3); }
+.st-item--row { flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; padding: 10px 14px; }
+.st-pre { margin: 0; padding: 12px 14px; border-radius: 14px; background: var(--surface-raised); font-family: var(--font-mono); font-size: 12px; line-height: 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .st-code { display: inline-block; padding: 2px 8px; border-radius: 8px; background: var(--surface-raised); font-family: var(--font-mono); font-size: 18px; letter-spacing: 0.1em; }
 @media (max-width: 560px) {
   .st-form { grid-template-columns: minmax(0, 1fr); }

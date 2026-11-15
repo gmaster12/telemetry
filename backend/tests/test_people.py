@@ -16,7 +16,7 @@ def env(tmp_path, monkeypatch):
 
 
 def row(**kw):
-    base = {"server": "Atlas", "session_key": "42", "rating_key": "123", "user_id": "2001", "user": "sable", "user_thumb": None,
+    base = {"server": "Atlas", "server_id": 1, "session_key": "42", "rating_key": "123", "user_id": "2001", "user": "sable", "user_thumb": None,
             "title": "Snowfall", "subtitle": "S6 · E4", "kind": "Episode", "device": "LG TV", "player": "Plex for LG", "platform": "webOS",
             "location": "LAN", "method": "Direct play", "resolution": "4K", "state": "Playing", "progress_pct": 10, "duration_min": 46,
             "_art_path": "/library/metadata/100/thumb/1"}
@@ -30,17 +30,17 @@ def test_track_plays_opens_extends_and_closes(env, monkeypatch):
     p = P.Poller(store)
     clock = [1_000_000]
     monkeypatch.setattr(P.time, "time", lambda: clock[0])
-    p.track_plays([row()], {"Atlas"})
+    p.track_plays([row()], {1})
     clock[0] += 10
-    p.track_plays([row(progress_pct=12)], {"Atlas"})
+    p.track_plays([row(progress_pct=12)], {1})
     clock[0] += 10
-    p.track_plays([row(state="Paused")], {"Atlas"})  # paused time does not count
+    p.track_plays([row(state="Paused")], {1})  # paused time does not count
     h = d.history("2001")
     assert len(h) == 1 and h[0]["stopped_at"] is None and h[0]["watched_sec"] == 10
     clock[0] += 10
     p.track_plays([], set())  # server did not answer: keep the play open
     assert d.history("2001")[0]["stopped_at"] is None
-    p.track_plays([], {"Atlas"})  # server answered without it: closed
+    p.track_plays([], {1})  # server answered without it: closed
     assert d.history("2001")[0]["stopped_at"] is not None
     assert d.get_user("2001")["title"] == "sable"
 
@@ -49,8 +49,8 @@ def test_new_item_in_same_session_starts_new_play(env, monkeypatch):
     store, d = env
     from app import poller as P
     p = P.Poller(store)
-    p.track_plays([row()], {"Atlas"})
-    p.track_plays([row(rating_key="124", title="Snowfall", subtitle="S6 · E5")], {"Atlas"})
+    p.track_plays([row()], {1})
+    p.track_plays([row(rating_key="124", title="Snowfall", subtitle="S6 · E5")], {1})
     h = d.history("2001")
     assert [x["rating_key"] for x in h if x["stopped_at"] is None] == ["124"]
     assert len(h) == 2
@@ -60,7 +60,7 @@ def test_owner_local_account_maps_to_owner(env):
     store, d = env
     from app.poller import Poller
     d.upsert_user({"id": "9001", "username": "glenn", "title": "Glenn", "email": "cluster@mail.com"}, shared=True, is_owner=True)
-    Poller(store).track_plays([row(user_id="1", user="glenn")], {"Atlas"})
+    Poller(store).track_plays([row(user_id="1", user="glenn")], {1})
     assert len(d.history("9001")) == 1
     assert d.get_user("1") is None
     assert d.get_user("9001")["title"] == "Glenn"  # a stream does not overwrite the Plex display name
@@ -136,7 +136,7 @@ def test_user_servers(env):
 def test_track_plays_records_server(env):
     store, d = env
     from app.poller import Poller
-    Poller(store).track_plays([row(server="Basestar")], {"Basestar"})
+    Poller(store).track_plays([row(server="Basestar", server_id=2)], {2})
     assert json.loads(d.get_user("2001")["servers"]) == ["Basestar"]
 
 
@@ -185,4 +185,5 @@ def test_sync_users_across_owner_accounts(env, monkeypatch):
     assert d.get_user("9002")["is_owner"] == 1
     assert {s["name"]: s["owner_plex_id"] for s in store.list_servers()} == {"Atlas": "9001", "Orion": "9002"}
     # each server's local account 1 is that server's owner
-    assert p.owner_for("Atlas") == "9001" and p.owner_for("Orion") == "9002"
+    ids = {s["name"]: s["id"] for s in store.list_servers()}
+    assert p.owner_for(ids["Atlas"]) == "9001" and p.owner_for(ids["Orion"]) == "9002"

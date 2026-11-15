@@ -144,7 +144,7 @@ def test_new_sessions_ping_once_and_the_ip_never_leaves(app):
     ]
 
     async def fake_poll(s):
-        M.poller.server_state["Atlas"] = {"online": True}
+        M.poller._record(s, True)
         return [dict(r) for r in rounds[0]]
 
     M.poller._poll_server = fake_poll

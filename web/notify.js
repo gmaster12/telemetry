@@ -41,6 +41,7 @@
     card: ['M3 6h18v12H3z', 'M3 10h18', 'M7 15h4'],
     alert: ['M12 9v4', 'M12 17h.01', 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z'],
     server: ['M4 4h16v6H4z', 'M4 14h16v6H4z', 'M8 7h.01', 'M8 17h.01'],
+    disk: ['M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3z', 'M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6', 'M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3'],
     broom: ['M5 7h14', 'M10 7V5h4v2', 'M7 7l1 13h8l1-13'],
     inbox: ['M3 13h5l2 3h4l2-3h5', 'M5 5h14l2 8v6H3v-6z'],
     close: ['M6 6l12 12', 'M18 6 6 18'],
@@ -58,7 +59,7 @@
     return s;
   }
   // What each kind looks like: icon and tint class (the tints are the dashboard's own pastel tokens).
-  var KIND = { billing: ['card', 'ember'], needs: ['alert', 'danger'], server: ['server', 'amber'], cleanup: ['broom', 'sand'],
+  var KIND = { billing: ['card', 'ember'], needs: ['alert', 'danger'], server: ['server', 'amber'], cleanup: ['broom', 'sand'], backup: ['disk', 'danger'],
     requests: ['inbox', 'lilac'], ready: ['check', 'volt'], started: ['down', 'sky'], problem: ['alert', 'danger'] };
   var MEDIA = { movie: ['film', 'rose', 'Movie'], tv: ['tv', 'lilac', 'Show'], comic: ['book', 'sand', 'Comic'],
     ebook: ['book', 'peri', 'Ebook'], audiobook: ['headphones', 'sky', 'Audio'] };

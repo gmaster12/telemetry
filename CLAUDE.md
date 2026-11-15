@@ -69,6 +69,10 @@ files to add servers. Keep it that way.
 - Sign-in limits use the LAST `X-Forwarded-For` entry (`_client_ip`): that is the
   one the site's proxy adds. Never use the first entry; the client writes it.
   Local admin sign-in is also limited per username, and password changes per login.
+- Settings are kept in memory (`Store.get_setting`, Glenn's pick H2A, Nov 15 2026): read once, changed in memory on
+  every `set_setting`, read again after `SETTINGS_TTL` (60 s) for changes made outside this process. Secrets are decrypted
+  once per value. Never write the `settings` table except through `set_setting`. A file request now costs 2 reads
+  (session, person) instead of 6. `tests/test_settings_cache.py`.
 - Every `/api/settings/*` route is admin-only in the middleware; `/api/users*` and
   `/api/status` call `admin()`. `tests/test_security.py` checks viewers get 403.
 
@@ -345,7 +349,8 @@ files to add servers. Keep it that way.
     "Your payment did not go through" (`billing:payment`), pinned until Stripe says it is paid, then "Your payment went
     through". Admins get one "N payments failed" with usernames.
   - Admins (one shared list, `who = 'admins'`, seen marks per admin): the Needs you list, a server not answering (urgent
-    while down, from `poller.since`; once back: "Atlas was down for 14 minutes"), titles due for Unwatched cleanup.
+    while down, from `poller.since`; once back: "Atlas was down for 14 minutes"), titles due for Unwatched cleanup, and a
+    failed nightly database copy (pinned until the next good one).
     "N new requests" since that admin's last visit is counted from `request_log` when the list is read, not stored.
   - Transitions only: `notify_state` remembers each request's last state; a state is announced once and only forward
     (or to failed). The first run only records (`notify_seeded`), so turning it on does not flood anyone.
@@ -519,8 +524,22 @@ server_id)` maps old names (seeded once: Orion 14, Beta 13, Atlas 9, Red 12, Gal
 exist) and `machine:<id>` keys to server ids; `Store.link_plays` fills a missing `server_id` at start and
 after adding a server. `art_for(server_id, rating_key)` finds covers by id; `api_poster` asks Plex for the
 item's current cover when the saved path fails, and the page keeps the play icon until a cover loads.
+The minute history (`samples`) carries `server_id` too: the bandwidth chart, peaks by day and "hot for" read by id,
+so renaming a server no longer splits its chart; rows saved before are linked by name at start (`link_plays`).
 Removing a server asks where its history goes (`DELETE /api/settings/servers/{id}?move_to=`); without a
 target, re-adding the same Plex machine relinks it. For an IP change, edit the address in place.
+
+## Backups (app/backup.py; Glenn's pick K2A, Nov 15 2026)
+
+- Every night at 4 AM Central (`BACKUP_HOUR`, after cleanup's 3 AM run; zone from `cleanup_tz`) the database is copied with
+  SQLite's own backup while the app's writes wait (`store.lock`), checked (`PRAGMA quick_check`) and gzipped to
+  `data/backups/telemetry-YYYY-MM-DD-HHMM.db.gz` (mode 600; `BACKUP_DIR` overrides). The last 14 are kept (`KEEP`). A copy
+  is also made shortly after start when the newest is over 26 hours old. `Backups.loop` checks every 10 minutes.
+- Settings, Servers and data, Backups (`renderBackups`): newest copy, how many, total size, Make a copy now
+  (`POST /api/settings/backups/run`), the list, and how to restore (stop, `gunzip -c ... > data/telemetry.db`, start; the
+  same SECRET_KEY is needed for the saved tokens). A failed copy is in "Needs a look" and pins an admin notification
+  ("The nightly database copy failed", `backup:failed`) until the next good one. `tests/test_backup.py`.
+- The copies are on the same disk: they cover a bad change or a damaged file, not a lost server.
 
 ## Polling (backend/app/poller.py)
 
@@ -528,7 +547,11 @@ target, re-adding the same Plex machine relinks it. For an IP change, edit the a
 show within seconds of a restart. One slow answer is not an outage (Glenn's pick 2A, Nov 15 2026): a server that
 misses a poll keeps its last streams, marked `stale` (dimmed on cards and rows, `is-stale`), and shows "Not answering"
 in the Servers card (`answering: false` in `/api/servers`) until it has missed `MISSES` (3) polls in a row, the same
-rule as `since` and the down notice; only then is it Offline and its streams end. Stale rows never extend or end a play. Netdata runs in `_telemetry_loop` (CPU and
+rule as `since` and the down notice; only then is it Offline and its streams end. Stale rows never extend or end a play.
+Each server has ONE health record, kept by server id (`Poller.health`, `health_of`, `_record`; Glenn's pick O3A, Nov 15
+2026): online, answering, misses, since, error, ok_at. The Servers card (`servers_view`), Settings (servers list and the
+home), `/api/status`, "Your servers" (`/api/me/servers`) and the notifier (`since`, derived from it) all read it, so they
+never disagree. Netdata figures (`telemetry`), open plays (`active_plays`) and server owners (`owner_for`) are by id too. Netdata runs in `_telemetry_loop` (CPU and
 network queries in parallel). The slow account syncs run in `_upkeep_loop`
 (`upkeep`: plex.tv users every 6 hours, Stripe every 15 minutes); their last
 run times are saved in settings (`users_synced_at`, `billing_synced_at`) so a
