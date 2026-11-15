@@ -336,10 +336,11 @@ files to add servers. Keep it that way.
 - `app/notify.py` (`Notifier`, tables `notifications`, `notify_seen`, `notify_state`, `notify_readers`) keeps each
   person's notifications so nothing is lost while they are away. `Notifier.loop` runs `tick` every 2 minutes:
   - Movies and shows: Seerr's full list as its admin (`all_requests`); the requester is found through `seerr_links`
-    (Seerr id to Plex id). "started downloading" (Radarr/Sonarr queue, `STARTED_STAGES`), "is ready" (Seerr available;
-    a show when every requested season is), "could not be downloaded" (Seerr failed). Requests older than 45 days are
+    (Seerr id to Plex id). "started downloading" (Radarr/Sonarr queue), "is ready" (Seerr available, or Plex itself has
+    it; a show when every requested season is), "could not be downloaded" (Seerr failed), all decided by
+    `RequestStatus.check` in `app/request_state.py`. Requests older than 45 days are
     not followed.
-  - Comics, ebooks and audiobooks: the media site's signed admin feed (`Media.admin_log`, `book_state`), same three.
+  - Comics, ebooks and audiobooks: the media site's signed admin feed (`Media.admin_log`, `request_state.from_shared`), same three.
   - Billing (Stripe, read-only copy): a member whose subscription is past due, unpaid or incomplete gets an URGENT
     "Your payment did not go through" (`billing:payment`), pinned until Stripe says it is paid, then "Your payment went
     through". Admins get one "N payments failed" with usernames.
@@ -724,8 +725,8 @@ design system). The dashboard adds its own patterns:
   `gsServerSeg`): all up is a quiet "Your servers ● ATLAS ● ORION-3 All up"; any down turns it red with
   "ORION-3 is down for 2 h 14 min, since 8:45 AM". On phones the bar takes its own full-width row and
   says "ATLAS up" / "ORION-3 down 2 h 14 min". The old Your servers card is gone (`gsServersCard` returns null).
-- The account menu opens from the circle at the top right (`renderUser`): My playback history, My subscription
-  (viewers), Sign out.
+- The account menu opens from the circle at the top right (`renderUser`): Settings (phones only), My playback history,
+  My subscription (viewers), Sign out.
 - Viewer home (`web/home.js`, `web/home.css`; Glenn's pick): Plex sign-ins that are not the admin land on a
   home in the layout chosen in Settings, Display, "Home layout" (`vhome`, saved per browser, kept in `KEEP`):
   `doors` Four big doors (DEFAULT: Watching now, Request something with a search box, My history, My
