@@ -27,6 +27,10 @@
   var known = null;          // ids already shown to this tab (null until the first load)
   var open = false, auto = false, detach = null, opener = null, timer = null, started = false;
   var bell = document.getElementById('bell');
+  if (!bell) {   // a page without the button in its markup (the dashboard preview): put it before the gear
+    var gear = document.getElementById('gear');
+    if (gear) { bell = el('button', { type: 'button', class: 'sd-gear sd-bell', id: 'bell', 'aria-label': 'Notifications', 'aria-haspopup': 'dialog', 'aria-expanded': 'false', hidden: true }); gear.parentNode.insertBefore(bell, gear); }
+  }
   var root = null, panel = null;
 
   var svgNS = 'http://www.w3.org/2000/svg';
@@ -59,9 +63,11 @@
   var MEDIA = { movie: ['film', 'rose', 'Movie'], tv: ['tv', 'lilac', 'Show'], comic: ['book', 'sand', 'Comic'],
     ebook: ['book', 'peri', 'Ebook'], audiobook: ['headphones', 'sky', 'Audio'] };
 
-  function can() { return !!(window.dash && window.dash.me && window.dash.me()); }
+  // window.gsNotifyMe: the dashboard preview's stand-in for /api/me (notify-sample.js there).
+  function who() { return (window.dash && window.dash.me && window.dash.me()) || (window.gsNotifyMe && window.gsNotifyMe()) || null; }
+  function can() { return !!who(); }
   function firstName() {
-    var me = window.dash && window.dash.me && window.dash.me();
+    var me = who();
     var n = (me && me.name) || '';
     return n.split(/[\s@]/)[0] || '';
   }
