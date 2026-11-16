@@ -88,6 +88,7 @@ WELCOME_GAP = 6 * 3600   # a visit after this long counts as coming back
 PAY_PROBLEM = ("past_due", "unpaid", "incomplete")
 # a request's states in order; a state is announced only when it moves forward (or to failed)
 RANK = {"waiting": 0, "started": 1, "ready": 2, "failed": 3}
+ISSUE_TYPES = {1: "Video", 2: "Audio", 3: "Subtitle", 4: "Other"}
 MEDIA_WORD = {"movie": "Movie", "tv": "Show", "comic": "Comic", "ebook": "Ebook", "audiobook": "Audiobook"}
 
 
@@ -321,6 +322,7 @@ class Notifier:
         await self.books_tick(seeding, now)
         self.billing_tick(now)
         self.admin_tick(now)
+        await self.issues_tick(now)
         if seeding:
             self.store.set_setting("notify_seeded", str(now))
         self.prune(now)
@@ -539,6 +541,44 @@ class Notifier:
         else:
             for old in self.open_keys(ADMINS, "cleanup:"):   # cleanup turned off: nothing is due any more
                 self.resolve(ADMINS, old)
+
+    async def issues_tick(self, now: int) -> None:
+        """Reported issues (Glenn, Nov 16 2026: "those are important and should be in the list"). Every open Seerr
+        issue is pinned in the admins' list until it is resolved, then it says so. Unlike requests there is no silent
+        first run: an open issue is still work to do, so the ones already open when this started are shown too."""
+        if not (self.seerr and self.seerr.configured()):
+            return
+        try:
+            res = await self.seerr.client().call("GET", "/issue", params={"take": 100, "skip": 0, "sort": "added", "filter": "open"})
+        except SeerrError as e:
+            log.info("Notifications: Seerr issues not answering: %s", e.message)
+            return   # never close notices because Seerr did not answer
+        rows = [i for i in (res or {}).get("results") or [] if i.get("status") in (None, 1)]
+        live = set()
+        for i in rows:
+            key = f"issue:{i['id']}"
+            live.add(key)
+            m = i.get("media") or {}
+            kind = m.get("mediaType") or "movie"
+            tmdb = m.get("tmdbId")
+            info = await self.seerr.title_of(kind, int(tmdb)) if tmdb else {}
+            what = info.get("title") or "A title"
+            s, e = i.get("problemSeason") or 0, i.get("problemEpisode") or 0
+            what += f", season {s} episode {e}" if s and e else f", season {s}" if s else ""
+            sort = ISSUE_TYPES.get(i.get("issueType"), "other").lower()
+            sort = "" if sort == "other" else sort + " "
+            by = (i.get("createdBy") or {}).get("displayName") or "Someone"
+            said = next((c.get("message") for c in i.get("comments") or [] if c.get("message")), "") or ""
+            said = said.strip()
+            self.post(ADMINS, key, "issue", f"{by} reported a{'n' if sort[:1] in ('a', 'e', 'i', 'o', 'u') else ''} {sort}problem with {what}",
+                      (f"\u201c{said[:200]}\u201d" if said else "No details given."), "Open issues", "#/requests/issues",
+                      urgent=True, media=kind, poster=info.get("poster"), now=now)
+        for old in self.open_keys(ADMINS, "issue:"):
+            if old in live:
+                continue
+            row = self.db.execute("SELECT title FROM notifications WHERE who = ? AND key = ?", (ADMINS, old)).fetchone()
+            what = (row["title"].split(" problem with ", 1)[-1] if row else "a title")
+            self.resolve(ADMINS, old, f"Issue resolved: {what}", "It was marked resolved.", now)
 
 
 def poster_url(path: str | None) -> str | None:

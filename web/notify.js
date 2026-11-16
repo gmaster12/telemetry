@@ -60,7 +60,8 @@
   }
   // What each kind looks like: icon and tint class (the tints are the dashboard's own pastel tokens).
   var KIND = { billing: ['card', 'ember'], needs: ['alert', 'danger'], server: ['server', 'amber'], cleanup: ['broom', 'sand'], backup: ['disk', 'danger'],
-    requests: ['inbox', 'lilac'], ready: ['check', 'volt'], started: ['down', 'sky'], problem: ['alert', 'danger'] };
+    requests: ['inbox', 'lilac'], ready: ['check', 'volt'], started: ['down', 'sky'], problem: ['alert', 'danger'],
+    issue: ['alert', 'amber'] };
   var MEDIA = { movie: ['film', 'rose', 'Movie'], tv: ['tv', 'lilac', 'Show'], comic: ['book', 'sand', 'Comic'],
     ebook: ['book', 'peri', 'Ebook'], audiobook: ['headphones', 'sky', 'Audio'] };
 

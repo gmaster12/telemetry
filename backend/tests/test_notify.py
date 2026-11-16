@@ -186,3 +186,30 @@ def test_removing_the_stripe_key_takes_back_payment_notices(env):
     n.billing_tick(int(time.time()) + 60)
     assert n.items_for(principal("2001"))["items"] == []
     assert [x for x in n.items_for(principal("cluster", role="admin"))["items"] if x["kind"] == "billing"] == []
+
+
+def test_reported_issues_are_pinned_for_admins_until_resolved(env):
+    from app.notify import ADMINS
+    store, d, svc = env
+    M.state["issues"].append({"id": 23, "type": 1, "message": "It keeps giving an error that it is only in 4K", "mediaId": 27205, "by": 5})
+    n = notifier(env)
+    tick(n)                                              # first run: an issue already open is still shown
+    boss, member = principal("cluster", role="admin"), principal("2001")
+    got = [x for x in n.items_for(boss)["items"] if x["kind"] == "issue"]
+    assert len(got) == 1 and got[0]["pinned"] and got[0]["href"] == "#/requests/issues"
+    assert got[0]["title"] == "sable reported a video problem with Inception" and "only in 4K" in got[0]["body"]
+    assert all(x["kind"] != "issue" for x in n.items_for(member)["items"])   # admins only
+    tick(n)
+    assert len([x for x in n.items_for(boss)["items"] if x["kind"] == "issue"]) == 1   # not repeated
+    M.state["issues"].clear()                            # resolved in Seerr
+    svc.clear_cache()
+    tick(n)
+    done = [x for x in n.items_for(boss)["items"] if x["kind"] == "issue"]
+    assert done[0]["title"] == "Issue resolved: Inception" and not done[0]["pinned"] and done[0]["resolved"]
+    assert n.open_keys(ADMINS, "issue:") == []
+    M.state["issues"].append({"id": 24, "type": 4, "message": "Unable to load content", "mediaId": 27205, "by": 5})
+    M.state["issues"].append({"id": 25, "type": 2, "message": "", "mediaId": 27205, "by": 5})
+    svc.clear_cache()
+    tick(n)
+    t = {x["title"] for x in n.items_for(boss)["items"] if x["kind"] == "issue" and x["pinned"]}
+    assert t == {"sable reported a problem with Inception", "sable reported an audio problem with Inception"}
