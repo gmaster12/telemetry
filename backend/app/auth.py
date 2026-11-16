@@ -2,8 +2,8 @@
 
 - Plex accounts: anyone you share a server with (or who has streamed from one)
   can sign in with Plex. They see only the sections you grant.
-- The Plex account whose email matches ADMIN_PLEX_EMAIL is the only Plex
-  administrator.
+- The Plex accounts whose emails are in ADMIN_PLEX_EMAIL (comma-separated) are the only Plex
+  administrators.
 - Local admin logins (username and password, not Plex accounts) are always
   administrators. Create the first one with `python -m app.tools.admin create`.
 """
@@ -40,16 +40,22 @@ SECTION_KEYS = [s["key"] for s in SECTIONS]
 DEFAULT_SECTIONS = ["mystreams", "history", "requests", "books"]
 
 
+def admin_plex_emails() -> list[str]:
+    """ADMIN_PLEX_EMAIL may list several Plex accounts, separated by commas (Glenn, Nov 16 2026: Darth Bacon too)."""
+    v = env("ADMIN_PLEX_EMAIL") or ""
+    return [x.strip().lower() for x in v.split(",") if x.strip()]
+
+
 def admin_plex_email() -> str | None:
-    v = env("ADMIN_PLEX_EMAIL")
-    return v.strip().lower() if v else None
+    """The administrators' Plex emails as one line for display (None when unset)."""
+    return ", ".join(admin_plex_emails()) or None
 
 
 def is_admin_email(email: str | None) -> bool:
     """The one check for "is this the Plex administrator": ADMIN_PLEX_EMAIL, compared without case or spaces
     (Plex may report Cluster@mail.com). Every caller uses this (Glenn's pick 6A, Nov 15 2026)."""
-    want = admin_plex_email()
-    return bool(want and email and email.strip().lower() == want)
+    want = admin_plex_emails()
+    return bool(want and email and email.strip().lower() in want)
 
 
 # ---------- passwords ----------

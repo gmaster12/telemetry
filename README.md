@@ -16,8 +16,8 @@ hour and a week-by-hour viewing heatmap.
   grouped by the Plex server they are on, or open their history from their
   name on a live stream card.
 - **Sign in with Plex** for everyone you share a server with. Viewers see only
-  the sections you allow. The Plex account in `ADMIN_PLEX_EMAIL` is the only
-  Plex administrator; you can also add username and password admin logins
+  the sections you allow. The Plex accounts in `ADMIN_PLEX_EMAIL` are the only
+  Plex administrators; you can also add username and password admin logins
   that are not Plex accounts.
 
 ## Install on the Linux server (Docker)
@@ -35,7 +35,8 @@ Edit `.env`:
    docker run --rm python:3.12-slim sh -c "pip -q install cryptography && python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
    ```
 2. `ADMIN_PLEX_EMAIL`: the Plex account (by email) that administers the
-   dashboard. Already set to `cluster@mail.com` in the example.
+   dashboard. Already set to `cluster@mail.com` in the example. List more
+   than one, separated by commas, to make several Plex administrators.
 3. `COOKIE_SECURE=true` as long as the site is served over HTTPS.
 
 Lock the file down and start it:
@@ -88,7 +89,7 @@ Then open **Settings** (the sliders button in the top bar):
 
 | Who | How they sign in | What they see |
 |---|---|---|
-| The Plex account in `ADMIN_PLEX_EMAIL` | Sign in with Plex | Everything, plus Settings |
+| The Plex accounts in `ADMIN_PLEX_EMAIL` | Sign in with Plex | Everything, plus Settings |
 | Admin logins | Administrator sign-in (username and password) | Everything, plus Settings |
 | Anyone you share a Plex server with, or who has streamed | Sign in with Plex | Only the sections allowed in Access (default: their own history) |
 | Any other Plex account | Refused | Nothing |
