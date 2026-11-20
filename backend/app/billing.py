@@ -65,7 +65,21 @@ CREATE TABLE IF NOT EXISTS billing_links (
   plex_id TEXT NOT NULL,
   created INTEGER NOT NULL
 );
+-- "Marked as paid by hand": an admin gave this person a paid-up period (a free
+-- month, a payment taken outside Stripe). Until `until` passes, nothing treats
+-- them as behind on payment: no payment reminder, and the access-hold watcher
+-- (stripe_plex_entitlement.py, which reads this table) leaves them alone.
+CREATE TABLE IF NOT EXISTS billing_manual_paid (
+  plex_id TEXT PRIMARY KEY,
+  until INTEGER NOT NULL,
+  note TEXT,
+  set_by TEXT,
+  created INTEGER NOT NULL
+);
 """
+
+# Longest period an admin can mark as paid in one go (just over a year).
+MANUAL_PAID_MAX_DAYS = 400
 
 # Which subscription to show first when someone has several.
 STATUS_ORDER = ["active", "trialing", "past_due", "unpaid", "incomplete", "paused", "canceled", "incomplete_expired"]
@@ -214,6 +228,37 @@ class Billing:
             self.db.execute("DELETE FROM billing_links WHERE email = ?", (_lower(email),))
             self.db.commit()
 
+    # ---------- marked as paid by hand (free month, cash, goodwill) ----------
+    def manual_paid(self, plex_id: str, now: int | None = None) -> dict | None:
+        """This person's live hand-set paid period, or None. Expired rows read as None."""
+        at = int(now if now is not None else time.time())
+        with self.lock:
+            r = self.db.execute("SELECT plex_id, until, note, set_by, created FROM billing_manual_paid WHERE plex_id = ?",
+                                (plex_id,)).fetchone()
+        return dict(r) if r and r["until"] > at else None
+
+    def manual_paid_map(self, now: int | None = None) -> dict[str, dict]:
+        """plex_id -> live hand-set paid period, for everyone who has one."""
+        at = int(now if now is not None else time.time())
+        with self.lock:
+            rows = self.db.execute("SELECT plex_id, until, note, set_by, created FROM billing_manual_paid WHERE until > ?",
+                                   (at,)).fetchall()
+        return {r["plex_id"]: dict(r) for r in rows}
+
+    def set_manual_paid(self, plex_id: str, until: int, note: str | None = None, set_by: str | None = None) -> dict:
+        row = (plex_id, int(until), (note or "").strip() or None, set_by, int(time.time()))
+        with self.lock:
+            self.db.execute("INSERT INTO billing_manual_paid (plex_id, until, note, set_by, created) VALUES (?,?,?,?,?) "
+                            "ON CONFLICT(plex_id) DO UPDATE SET until = excluded.until, note = excluded.note, "
+                            "set_by = excluded.set_by, created = excluded.created", row)
+            self.db.commit()
+        return {"plex_id": row[0], "until": row[1], "note": row[2], "set_by": row[3], "created": row[4]}
+
+    def clear_manual_paid(self, plex_id: str) -> None:
+        with self.lock:
+            self.db.execute("DELETE FROM billing_manual_paid WHERE plex_id = ?", (plex_id,))
+            self.db.commit()
+
     # ---------- matching ----------
     def owner_by_email(self) -> dict[str, tuple[str, str]]:
         """Stripe email -> (plex_id, 'link' | 'email'). Manual links win over matching Plex emails."""
@@ -242,8 +287,10 @@ class Billing:
     def summary(self, plex_id: str) -> dict:
         """Everything the subscription card shows for one person."""
         emails, has_link = self._emails_for(plex_id)
+        manual = self.manual_paid(plex_id)
         if not emails:
-            return {"status": "none", "subscriptions": [], "last_payment": None, "emails": [], "linked": False}
+            return {"status": "none", "subscriptions": [], "last_payment": None, "emails": [], "linked": False,
+                    "manual_paid": manual, "next_payment": None}
         q = ",".join("?" * len(emails))
         custs = [r["id"] for r in self.db.execute(f"SELECT id FROM stripe_customers WHERE email IN ({q})", list(emails))]
         subs = []
@@ -262,7 +309,10 @@ class Billing:
             last = {"amount": p["amount"], "amount_refunded": p["amount_refunded"], "currency": p["currency"], "created": p["created"],
                     "status": "refunded" if p["refunded"] else p["status"]}
         return {"status": shown[0]["status"] if shown else "none", "subscriptions": [self._sub_public(s) for s in shown],
-                "last_payment": last, "emails": sorted(emails), "linked": has_link, "customers": len(custs)}
+                "last_payment": last, "emails": sorted(emails), "linked": has_link, "customers": len(custs),
+                "manual_paid": manual,
+                # The date the next payment is due: what "paid up to" defaults to when an admin grants a free period.
+                "next_payment": (shown[0].get("current_period_end") if shown else None)}
 
     def status_map(self) -> dict[str, str]:
         """plex_id -> status of the subscription shown first (for flags in the Users search)."""

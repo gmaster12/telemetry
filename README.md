@@ -85,6 +85,15 @@ Then open **Settings** (the sliders button in the top bar):
    to a Plex user"; those links are permanent. Everyone then sees a "Your
    subscription" card when they sign in. PayPal comes later.
 
+   **Paid by hand (a free month):** open a person from **Users**, and on their
+   Subscription card set the date under **Paid by hand**. It defaults to their
+   next payment date. Until that date nothing treats them as behind: they get
+   no "your payment did not go through" notice, they are not on the admin's
+   failed-payments list, and the access-hold watcher skips them, so their
+   Movies and TV Shows are never paused for an unpaid bill (anything already
+   paused is handed back on its next run, with no payment email to them).
+   **Remove** on the same card puts them back under the normal checks at once.
+
 ## Sign-in and roles
 
 | Who | How they sign in | What they see |

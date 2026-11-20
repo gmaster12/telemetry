@@ -448,7 +448,10 @@ class Notifier:
                 self.withdraw(r["who"], r["key"])
             return
         status = self.billing.status_map()
-        bad = {pid: st for pid, st in status.items() if st in PAY_PROBLEM}
+        # Marked as paid by hand (a free month, or money taken outside Stripe): not behind on payment, so no
+        # reminder to them and not on the admin's failed list until that period ends.
+        manual = self.billing.manual_paid_map(now)
+        bad = {pid: st for pid, st in status.items() if st in PAY_PROBLEM and pid not in manual}
         for pid, st in bad.items():
             last = (self.billing.summary(pid) or {}).get("last_payment") or {}
             when = f" on {self._day(last['created'])}" if last.get("status") == "failed" and last.get("created") else ""

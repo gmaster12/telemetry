@@ -840,7 +840,7 @@
       accServers = r.servers || [];
       if (accPicker) accPicker.setData({ servers: accServers, people: accUsers.map(function (u) {
         return { key: u.id, name: u.name || u.username || 'Plex user', username: u.username, email: u.email, servers: u.servers || [],
-          plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner, billing: u.billing_status };
+          plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner, billing: u.billing_status, manualPaid: u.manual_paid_until };
       }) });
       if (!quiet) render();
     }).catch(function (e) { setMsg('acc-users', 'error', e.message); });
@@ -1088,7 +1088,7 @@
   function peopleForPicker() {
     return (accUsers || []).map(function (u) {
       return { key: u.id, name: u.name || u.username || 'Plex user', username: u.username, email: u.email, servers: u.servers || [],
-        plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner, billing: u.billing_status };
+        plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner, billing: u.billing_status, manualPaid: u.manual_paid_until };
     });
   }
 

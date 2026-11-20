@@ -96,7 +96,8 @@
             h('span', { class: 'gu-opt__side' },
               p.admin ? h('span', { class: 'gp-tag gp-tag--admin', text: 'Admin' }) : null,
               p.disabled && !p.admin ? h('span', { class: 'gp-tag gp-tag--off', text: 'Access off' }) : null,
-              LAPSED[p.billing] ? h('span', { class: 'gp-tag gp-tag--warn', text: LAPSED[p.billing] }) : null,
+              p.manualPaid ? h('span', { class: 'gp-tag gp-tag--ok', text: 'Paid by hand' })
+                : LAPSED[p.billing] ? h('span', { class: 'gp-tag gp-tag--warn', text: LAPSED[p.billing] }) : null,
               h('span', { class: 'gu-opt__num', text: (p.plays_30d || 0) + (p.plays_30d === 1 ? ' play' : ' plays') + ', 30 d' })));
           options.push({ el: opt, person: p });
           grp.appendChild(opt);

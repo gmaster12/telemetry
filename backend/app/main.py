@@ -24,7 +24,7 @@ from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, add_books_
                    set_cookie, throttled, user_sections)
 from .config import DB_PATH, WEB_DIR, ServerCfg, env
 from .arr import Arr, ArrError
-from .billing import StripeClient
+from .billing import MANUAL_PAID_MAX_DAYS, StripeClient
 from .cleanup import Cleanup
 from .globe import SAMPLE_SERVERS, GeoDB, Globe, SampleGlobe
 from .netdata import NetdataClient
@@ -1079,8 +1079,10 @@ def api_users(request: Request, q: str = "", server: str = "", limit: int = 50):
     admin(request)
     rows = directory.search_users(q[:100], max(1, min(limit, 5000)) if not server else 5000)
     billing = poller.billing.status_map()
+    manual = poller.billing.manual_paid_map()
     out = [{**_user_public(u), "plays": u["plays"], "plays_30d": u["plays_30d"], "last_play": u["last_play"],
-            "billing_status": billing.get(u["plex_id"], "none")} for u in rows]
+            "billing_status": billing.get(u["plex_id"], "none"),
+            "manual_paid_until": (manual.get(u["plex_id"]) or {}).get("until")} for u in rows]
     if server:
         out = [u for u in out if server in u["servers"]][: max(1, min(limit, 5000))]
     return {"rows": out, "servers": [s.name for s in poller.cfg.servers]}
@@ -1101,6 +1103,44 @@ def api_user_history(request: Request, plex_id: str, before: int | None = None, 
     if not directory.get_user(plex_id):
         raise HTTPException(404, "No such user.")
     return {"rows": _history_rows(directory.history(plex_id, before, limit))}
+
+
+# ---------- marked as paid by hand (free month) ----------
+class ManualPaidIn(BaseModel):
+    until: int = Field(gt=0)                      # paid up to this moment (unix seconds)
+    note: str = Field("", max_length=200)
+
+
+@app.post("/api/users/{plex_id}/manual-paid")
+def api_set_manual_paid(request: Request, plex_id: str, body: ManualPaidIn):
+    """Mark this person as paid up to a date by hand: a free month, or a payment taken outside Stripe.
+
+    Until that moment nothing treats them as behind: no "your payment did not go through" notice, and the
+    access-hold watcher (stripe_plex_entitlement.py, which reads this straight from the database) skips them,
+    so their libraries are never pulled for that period.
+    """
+    p = admin(request)
+    if not directory.get_user(plex_id):
+        raise HTTPException(404, "No such user.")
+    now = int(time.time())
+    if body.until <= now:
+        raise HTTPException(422, "Pick a date in the future.")
+    if body.until > now + MANUAL_PAID_MAX_DAYS * 86400:
+        raise HTTPException(422, f"That is more than {MANUAL_PAID_MAX_DAYS} days away. Mark a shorter period as paid.")
+    poller.billing.set_manual_paid(plex_id, body.until, body.note, p.email or p.name)
+    # Take back the "your payment did not go through" notice straight away, so they stop seeing it.
+    notifier.withdraw(f"plex:{plex_id}", "billing:payment")
+    return {"ok": True, "billing": poller.billing.summary(plex_id)}
+
+
+@app.delete("/api/users/{plex_id}/manual-paid")
+def api_clear_manual_paid(request: Request, plex_id: str):
+    """Undo it: payment checks and access holds apply to this person again from now on."""
+    admin(request)
+    if not directory.get_user(plex_id):
+        raise HTTPException(404, "No such user.")
+    poller.billing.clear_manual_paid(plex_id)
+    return {"ok": True, "billing": poller.billing.summary(plex_id)}
 
 
 @app.get("/api/me/servers")

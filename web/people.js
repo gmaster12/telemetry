@@ -251,8 +251,84 @@
     return el('p', { class: 'gp-sub__pay' + (p.status === 'failed' ? ' is-failed' : '') },
       el('span', { class: 'gp-label', text: 'Last payment' }), ' ' + money(p.amount, p.currency) + ' on ' + day(p.created) + ' · ', el('b', { text: what }));
   }
+  // ---------- marked as paid by hand (admin: "I gave them a free month") ----------
+  var DAYS30 = 30 * 86400;
+  function dateValue(ts) {
+    var d = new Date(ts * 1000);
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  }
+  function endOfDay(value) {      // the whole chosen day counts as paid, in the admin's own time
+    var p = String(value || '').split('-');
+    if (p.length !== 3) return 0;
+    return Math.floor(new Date(+p[0], +p[1] - 1, +p[2], 23, 59, 59).getTime() / 1000);
+  }
+  // Defaults to the next payment date when Stripe knows one, else a month out.
+  function defaultUntil(summary) {
+    var mp = summary && summary.manual_paid;
+    if (mp && mp.until) return mp.until;
+    var next = summary && summary.next_payment;
+    var now = Date.now() / 1000;
+    return next && next > now ? next : now + DAYS30;
+  }
+  // The admin control on a person's card. ctx: { id, onChange }.
+  function manualPaidBlock(summary, ctx) {
+    var mp = summary && summary.manual_paid;
+    var box = el('div', { class: 'gp-paid' + (mp ? ' is-on' : '') });
+    var msg = el('p', { class: 'gp-paid__msg', hidden: true, role: 'status' });
+    var date = el('input', { class: 'st-input gp-paid__date', type: 'date', value: dateValue(defaultUntil(summary)),
+      'aria-label': 'Paid up to' });
+    var note = el('input', { class: 'st-input gp-paid__note', type: 'text', maxlength: '200', autocomplete: 'off',
+      value: (mp && mp.note) || '', placeholder: 'Why (optional), e.g. free month', 'aria-label': 'Why' });
+    var save = el('button', { type: 'button', class: 'st-btn st-btn--primary', text: mp ? 'Change date' : 'Mark as paid' });
+    var clear = mp ? el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Remove' }) : null;
+    function busy(on, what) {
+      save.disabled = on; if (clear) clear.disabled = on;
+      save.textContent = on && what === 'save' ? 'Saving…' : mp ? 'Change date' : 'Mark as paid';
+      if (clear) clear.textContent = on && what === 'clear' ? 'Removing…' : 'Remove';
+    }
+    function fail(e) {
+      busy(false); msg.hidden = false; msg.className = 'gp-paid__msg st-msg st-msg--error'; msg.textContent = e.message;
+    }
+    save.addEventListener('click', function () {
+      var until = endOfDay(date.value);
+      if (!until) { fail(new Error('Pick a date first.')); return; }
+      busy(true, 'save');
+      api('POST', '/api/users/' + encodeURIComponent(ctx.id) + '/manual-paid', { until: until, note: note.value.trim() })
+        .then(function (r) {
+          if (window.gsUI.toast) window.gsUI.toast('Marked as paid until ' + day(until) + '.');
+          ctx.onChange(r.billing);
+        }).catch(fail);
+    });
+    if (clear) clear.addEventListener('click', function () {
+      busy(true, 'clear');
+      api('DELETE', '/api/users/' + encodeURIComponent(ctx.id) + '/manual-paid').then(function (r) {
+        if (window.gsUI.toast) window.gsUI.toast('Payment checks apply again.');
+        ctx.onChange(r.billing);
+      }).catch(fail);
+    });
+    box.append(
+      el('p', { class: 'gp-paid__eyebrow', text: 'Paid by hand' }),
+      mp ? el('p', { class: 'gp-paid__state' },
+        el('b', { text: 'Paid up to ' + day(mp.until) + '.' }),
+        ' Nothing will chase this payment or pause their libraries until then.' + (mp.note ? ' (' + mp.note + ')' : ''))
+        : el('p', { class: 'gp-paid__state', text: 'Giving them a free month? Set the date they are paid up to. '
+          + 'Until then nothing asks them for payment and their libraries are never paused for an unpaid bill.' }),
+      el('div', { class: 'gp-paid__row' }, el('label', { class: 'gp-paid__lbl', text: 'Paid up to' }), date, note, save, clear),
+      msg);
+    return box;
+  }
+  // The person's own card: tell them they are covered, with no admin controls.
+  function manualPaidNote(summary) {
+    var mp = summary && summary.manual_paid;
+    if (!mp) return null;
+    return el('p', { class: 'gp-sub__note', text: 'Your account is paid up to ' + day(mp.until)
+      + '. Nothing is due before then, whatever the payment status above says.' });
+  }
+
   // summary: from /api/me/subscription or /api/users/{id}. who: 'self' or 'admin'.
-  function subscriptionCard(summary, who) {
+  // ctx (admin only): { id, onChange } for the "mark as paid by hand" control.
+  function subscriptionCard(summary, who, ctx) {
     var self = who === 'self';
     var card = el('div', { class: 'gp-sub' + (self ? '' : ' gp-sub--light') });
     card.appendChild(el('p', { class: 'gp-eyebrow gp-sub__eyebrow', text: self ? 'Your subscription' : 'Subscription' }));
@@ -264,6 +340,8 @@
           : 'No Stripe customer matched ' + ((summary && summary.emails && summary.emails.join(', ')) || 'this person (no email on file)') + '. Link their Stripe email in Settings, Billing.' }));
       var pay0 = paymentLine(summary && summary.last_payment);
       if (pay0) card.appendChild(pay0);
+      if (self) { var n0 = manualPaidNote(summary); if (n0) card.appendChild(n0); }
+      if (ctx) card.appendChild(manualPaidBlock(summary, ctx));
       return card;
     }
     var main = subs[0];
@@ -278,8 +356,19 @@
     if (pay) card.appendChild(pay);
     if (!self) {
       card.appendChild(el('p', { class: 'gp-sub__note', text: (summary.linked ? 'Linked by hand to ' : 'Matched by email ') + (summary.emails || []).join(', ') }));
+    } else {
+      var note = manualPaidNote(summary);
+      if (note) card.appendChild(note);
     }
+    if (ctx) card.appendChild(manualPaidBlock(summary, ctx));
     return card;
+  }
+  // Admin view of someone's subscription: redraws itself after the paid-by-hand control is used.
+  function adminSubscriptionCard(summary, userId) {
+    var wrap = el('div', { class: 'gp-subwrap' });
+    function paint(s) { wrap.replaceChildren(subscriptionCard(s, 'admin', { id: userId, onChange: paint })); }
+    paint(summary);
+    return wrap;
   }
   var mySub = null;
   function loadMySubscription() {
@@ -453,8 +542,8 @@
       if (tags.childNodes.length) who.appendChild(tags);
       var s = statsBlock(r.stats);
       if (s) body.appendChild(s);
-      if (!isSelf && me.role === 'admin' && r.billing && (r.billing.status !== 'none' || r.billing.emails.length)) {
-        body.appendChild(subscriptionCard(r.billing, 'admin'));
+      if (!isSelf && me.role === 'admin' && r.billing) {
+        body.appendChild(adminSubscriptionCard(r.billing, u.id));
       }
       if (!isSelf && me.role === 'admin' && !u.admin) {
         var access = (u.sections || []).map(function (k) { return SECTION_LABEL[k] || k; });
@@ -539,7 +628,7 @@
         servers: r.servers || [],
         people: (r.rows || []).map(function (u) {
           return { key: u.id, name: u.name || u.username || 'Plex user', username: u.username, email: u.email, servers: u.servers || [],
-            plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner, billing: u.billing_status };
+            plays_30d: u.plays_30d, admin: u.admin, disabled: u.disabled, owner: u.owner, billing: u.billing_status, manualPaid: u.manual_paid_until };
         })
       });
       var sub = document.getElementById('people-sub');

@@ -116,3 +116,45 @@ def test_canceled_only_customers_are_not_listed_but_new_signups_are(env):
     # canceled only: hidden; no subscription yet: shown; canceled once but active again: shown
     assert {r["email"] for r in b.unmatched()} == {"new@example.com", "back@example.com"}
     assert b.counts()["unmatched"] == 2 and b.counts()["unmatched_ended"] == 1
+
+
+def test_marked_paid_by_hand_is_live_until_its_date(env):
+    _, _, b = env
+    assert b.summary("2002")["manual_paid"] is None
+    assert b.summary("2002")["next_payment"] == NOW + 86400   # what the date box defaults to
+    row = b.set_manual_paid("2002", NOW + 86400 * 30, " free month ", "glenn2k@gmail.com")
+    assert row["until"] == NOW + 86400 * 30 and row["note"] == "free month"
+    s = b.summary("2002")
+    assert s["status"] == "past_due"                          # Stripe is untouched; nothing is faked
+    assert s["manual_paid"]["until"] == NOW + 86400 * 30 and s["manual_paid"]["set_by"] == "glenn2k@gmail.com"
+    assert b.manual_paid_map() == {"2002": s["manual_paid"]}
+    # The period ends by itself: no row is deleted, it just stops counting.
+    assert b.manual_paid("2002", now=NOW + 86400 * 31) is None
+    assert b.manual_paid_map(NOW + 86400 * 31) == {}
+    # Changing it overwrites, and removing it brings payment checks straight back.
+    b.set_manual_paid("2002", NOW + 86400 * 7, None, "glenn2k@gmail.com")
+    assert b.summary("2002")["manual_paid"]["until"] == NOW + 86400 * 7
+    b.clear_manual_paid("2002")
+    assert b.summary("2002")["manual_paid"] is None and b.manual_paid_map() == {}
+
+
+def test_marked_paid_by_hand_without_any_stripe_customer(env):
+    _, _, b = env
+    b.set_manual_paid("2003", NOW + 86400 * 30, "cash", "glenn2k@gmail.com")
+    s = b.summary("2003")      # wren has a Plex email but no matching Stripe customer
+    assert s["status"] == "none" and s["manual_paid"]["note"] == "cash"
+
+
+def test_entitlement_watcher_sees_both_the_plex_email_and_a_linked_one(env):
+    """The access-hold watcher (stripe_plex_entitlement.py) runs this exact query against the live file."""
+    store, _, b = env
+    b.link("wren.pays@gmail.com", "2003")
+    b.set_manual_paid("2003", NOW + 86400 * 30, "free month", "glenn2k@gmail.com")
+    b.set_manual_paid("2001", NOW - 10, "expired", "glenn2k@gmail.com")
+    rows = store.db.execute(
+        "SELECT lower(u.email) AS e FROM billing_manual_paid m JOIN users u ON u.plex_id = m.plex_id "
+        " WHERE m.until > ? AND u.email IS NOT NULL AND u.email != ''"
+        " UNION "
+        "SELECT lower(l.email) AS e FROM billing_manual_paid m JOIN billing_links l ON l.plex_id = m.plex_id "
+        " WHERE m.until > ? AND l.email IS NOT NULL AND l.email != ''", (NOW, NOW)).fetchall()
+    assert {r["e"] for r in rows} == {"wren@plex-only.org", "wren.pays@gmail.com"}
