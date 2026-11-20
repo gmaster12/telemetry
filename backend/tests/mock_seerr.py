@@ -302,7 +302,7 @@ def tv(request: Request, tmdb: int):
     r = result("tv", tmdb)
     return {**r, "seasons": [{"seasonNumber": 0, "name": "Specials", "episodeCount": 3}] +
             [{"seasonNumber": n, "name": f"Season {n}", "episodeCount": 10, "airDate": s.get("air", {}).get(n, f"{2010 + n}-04-01"), "posterPath": f"/s{n}.jpg"} for n in range(1, s["seasons"] + 1)],
-            "genres": [{"id": 18, "name": "Drama"}], "networks": [{"id": 49, "name": "HBO"}], "externalIds": {"tvdbId": 121361},
+            "genres": [{"id": 18, "name": "Drama"}], "networks": [{"id": 49, "name": "HBO"}], "externalIds": {"tvdbId": s.get("tvdb", 121361)},
             "credits": {"cast": [{"id": 22970, "name": "Peter Dinklage", "character": "Tyrion", "profilePath": "/pd.jpg"}], "crew": []},
             "contentRatings": {"results": [{"iso_3166_1": "US", "rating": "TV-MA"}]}, "status": "Ended", "episodeRunTime": [60],
             "nextEpisodeToAir": s.get("next")}

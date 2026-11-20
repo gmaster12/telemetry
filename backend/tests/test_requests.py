@@ -179,3 +179,24 @@ def test_a_season_seerr_will_not_take_is_not_reported_as_requested(env):
     import asyncio
     rows, _ = asyncio.run(request_log.build(svc, d))
     assert len([r for r in rows if r["tmdb"] == 1399]) == 1  # only the request Seerr really made is logged
+
+
+def test_a_show_without_a_tvdb_id_says_to_submit_an_issue(env):
+    """Seerr takes a request for a show TheTVDB does not know (Sonarr cannot add it) and makes nothing. The person
+    used to be told it was already on Plex or requested; tell them to submit an issue instead, and never ask Seerr."""
+    store, d, svc = env
+    M.SHOWS[341891] = {"name": "Chris Harrison's the Vow", "firstAirDate": "2026-11-10", "posterPath": "/v.jpg",
+                       "backdropPath": "/vb.jpg", "seasons": 1, "have": {}, "tvdb": None}
+    try:
+        d.upsert_user({"id": "2002", "username": "sam", "email": "sam@x.com"}, shared=True)
+        c = app_for(svc, d, principal("2002", "sam@x.com", "sam"))
+        assert c.get("/api/requests/tv/341891").json()["tvdbId"] is None
+        before = len(M.state.get("bodies", []))
+        r = c.post("/api/requests/request", json={"mediaType": "tv", "mediaId": 341891, "seasons": [1]})
+        assert r.status_code == 409
+        assert "can't be requested automatically" in r.json()["detail"] and "submit an issue" in r.json()["detail"]
+        assert len(M.state.get("bodies", [])) == before  # nothing was sent to Seerr
+        # a normal show still goes through
+        assert c.post("/api/requests/request", json={"mediaType": "tv", "mediaId": 1396, "seasons": [1]}).json()["ok"]
+    finally:
+        M.SHOWS.pop(341891, None)

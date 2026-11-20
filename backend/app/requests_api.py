@@ -64,6 +64,10 @@ class RequestIn(BaseModel):
     agreeRemoval: bool = False  # the "removed if not watched within 14 days" box (Unwatched cleanup)
 
 
+NO_AUTO_REQUEST = ("This show can't be requested automatically yet. Please submit an issue in our Discord support tickets "
+                   "and an admin will add it for you.")
+
+
 class IssueIn(BaseModel):
     issueType: int = Field(ge=1, le=4)
     message: str = Field(min_length=1, max_length=2000)
@@ -550,6 +554,11 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             b.pop("seasons", None)
         elif not b.get("seasons"):
             raise HTTPException(422, "Pick at least one season.")
+        if b["mediaType"] == "tv":
+            # Without a TheTVDB id Sonarr cannot add the show: Seerr answers 201 and makes nothing. Tell them what to do.
+            d = await run(svc.get(f"/tv/{b['mediaId']}", user=uid, ttl=FAST))
+            if not (d.get("externalIds") or {}).get("tvdbId"):
+                raise HTTPException(409, NO_AUTO_REQUEST)
         res = await run(svc.send("POST", "/request", user=uid, body=b))
         if not isinstance(res, dict) or res.get("id") is None:
             # Seerr answers 202 "No seasons available to request" (and makes nothing) when every season picked is
