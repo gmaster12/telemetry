@@ -859,6 +859,22 @@ design system). The dashboard adds its own patterns:
 - Report issue floats on Requests lists only; title pages and Reported issues have their own.
 - Verify desktop changes at 1024 x 768, 1280 x 800, 1440 x 900 and 2560 x 1440, light and dark, viewer and admin.
 
+## Activity log (admins only; Glenn's pick "Sign-in sessions" + daily activity card, Nov 22 2026)
+
+- `app/activity.py`, `web/activity.js`, `web/activity.css`; address `#/activity` (nav "Activity log", under More
+  on a phone). One card per visit (sign-in to last thing done), newest first, grouped by day; a daily activity
+  bar chart since the site went live (tap a day to start the list there); person search; a "Worth a look" box
+  (sign-ins from a new device in 14 days, denied sign-ins in 30 days).
+- Everything is read under `/api/settings/activity*`, so the blanket admin gate covers it; viewers get 403 and
+  never see the nav item (`tests/test_activity.py`). `POST /api/activity/page` is the only call viewers make:
+  their own page telling the server which page was opened.
+- Table `activity_log`: `login`, `logout`, `denied`, `page`, `search`, `request`, `admin`. Requests are read from
+  `request_log` when the log is shown, never stored twice.
+- History: sign-ins still in `auth_sessions` were copied in once (`source = 'recovered'`, from Oct 28 2026);
+  earlier sign-ins expired and are gone. Pages, searches, changes, IPs and devices exist from Nov 22 2026 only.
+  The page says so under the chart; do not fill gaps with guesses.
+- A background tab sends no page beacon (`visibilityState === 'hidden'`), so headless checks record nothing.
+
 ## Running tests
 
 ```bash

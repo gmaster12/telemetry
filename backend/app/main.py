@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import sample
+from .activity import Activity
 from .auth import (SECTION_KEYS, SECTIONS, SESSION_COOKIE, Principal, add_books_section, add_mystreams_section, add_requests_section, admin_plex_email, check_password, default_sections,
                    is_admin_email,
                    end_session, hash_password, new_session, password_problem, plex_principal, principal_for, record_failure,
@@ -55,6 +56,8 @@ onplex = OnPlex(store, seerr, poller)
 # Where a request stands, asked of Radarr/Sonarr and Plex the same way everywhere (app/request_state.py)
 status = RequestStatus(seerr, arr, onplex)
 cleanup = Cleanup(store, seerr, arr, poller, status=status)
+# Activity log (admins only): sign-ins and what people did while signed in (app/activity.py).
+activity = Activity(store, directory, lambda request: _client_ip(request), is_admin_email)
 # Live streams globe (admin card): stream starts by city. The location database sits next to the SQLite file.
 geo = GeoDB(Path(DB_PATH).parent / "geo", poller.http)
 globe = Globe(geo, directory.starts_since)
@@ -140,6 +143,8 @@ async def session_auth(request: Request, call_next):
     if path.startswith("/api/settings") and not (p and p.is_admin):
         return JSONResponse({"detail": "Administrators only."}, status_code=403)
     resp = await call_next(request)
+    if p is not None and path.startswith("/api/"):
+        activity.after(request, p, resp.status_code)
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "same-origin")
     resp.headers.setdefault("X-Frame-Options", "DENY")
@@ -854,6 +859,7 @@ async def auth_plex_check(pin_id: int, request: Request):
     known = directory.get_user(info["id"]) or (directory.find_user_by_email(info["email"]) if info.get("email") else None)
     if not is_admin and not known:
         record_failure("plex:" + _client_ip(request))
+        activity.denied(request, "plex", info.get("id"), info.get("username") or info.get("title"), "Plex account not shared on any server")
         raise HTTPException(403, "This Plex account does not have access to any Greystar server. Ask the administrator to share a library with you.")
     if known and known["plex_id"] != info["id"]:
         info["id"] = known["plex_id"]
@@ -864,9 +870,11 @@ async def auth_plex_check(pin_id: int, request: Request):
         poller.kick()
     user = directory.get_user(info["id"])
     if user and user.get("disabled"):
+        activity.denied(request, "plex", info["id"], user.get("title") or user.get("username"), "Access to the dashboard is turned off")
         raise HTTPException(403, "Your access to this dashboard has been turned off.")
     _pins.pop(request.cookies.get(PIN_COOKIE, ""), None)
     session = new_session(directory, "plex", info["id"])
+    activity.signed_in(request, "plex", info["id"], (user or {}).get("title") or (user or {}).get("username") or info.get("username"), session, is_admin)
     resp = JSONResponse({"ok": True, "role": "admin" if is_admin else "viewer"})
     set_cookie(resp, request, session)
     resp.delete_cookie(PIN_COOKIE, path="/api/auth/")
@@ -884,8 +892,11 @@ def auth_local(body: LocalLogin, request: Request):
     if not a or not check_password(body.password, a["pw_hash"]):
         record_failure(key)
         record_failure(ukey)
+        # Only a real admin username is kept: an unknown one may be a password typed in the wrong box.
+        activity.denied(request, "local", str(a["id"]) if a else None, a["username"] if a else None, "Wrong username or password")
         raise HTTPException(401, "Wrong username or password.")
     session = new_session(directory, "local", str(a["id"]))
+    activity.signed_in(request, "local", str(a["id"]), a["username"], session, True)
     resp = JSONResponse({"ok": True, "role": "admin"})
     set_cookie(resp, request, session)
     return resp
@@ -893,6 +904,8 @@ def auth_local(body: LocalLogin, request: Request):
 
 @app.post("/api/auth/logout")
 def auth_logout(request: Request):
+    if request.state.principal is not None:
+        activity.record(request, request.state.principal, "logout", "Signed out")
     end_session(directory, request.cookies.get(SESSION_COOKIE))
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(SESSION_COOKIE, path="/")
@@ -1425,6 +1438,38 @@ def requests_links():
 def requests_unlink(plex_id: str):
     seerr.drop_link(plex_id)
     return {"ok": True}
+
+
+# ---------- activity log (admins only; app/activity.py) ----------
+class PageIn(BaseModel):
+    path: str = Field(max_length=300)
+    title: str | None = Field(default=None, max_length=300)
+
+
+@app.post("/api/activity/page")
+def api_activity_page(body: PageIn, request: Request):
+    """The page says which page it opened (the server cannot see the part of the address after #)."""
+    p = me(request)
+    return {"ok": activity.page(request, p, body.path, body.title)}
+
+
+@app.get("/api/settings/activity")
+def api_activity(request: Request, q: str = "", who: str | None = None, before: int | None = None, limit: int = 20):
+    admin(request)
+    return activity.visits(q[:80], who, before, limit)
+
+
+@app.get("/api/settings/activity/summary")
+def api_activity_summary(request: Request, q: str = "", who: str | None = None, tz: int = 0):
+    """tz: the admin's offset from UTC in minutes (JavaScript's -getTimezoneOffset())."""
+    admin(request)
+    return activity.summary(q[:80], who, max(-840, min(840, tz)))
+
+
+@app.get("/api/settings/activity/people")
+def api_activity_people(request: Request, q: str = ""):
+    admin(request)
+    return {"people": activity.people(q[:80])}
 
 
 @app.get("/api/settings/requests/log")

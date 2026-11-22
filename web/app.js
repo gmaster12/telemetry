@@ -198,14 +198,14 @@
   const CARD_OF = { servers: 'servers-card', streams: 'streams-card', alerts: 'servers-card', people: 'people-card', bandwidth: 'bandwidth-card', subscription: 'sub-card' };
   function hashFor(r) {
     if (r === 'people') return isAdmin() ? '#/users' : '#/history';
-    if (r === 'requests' || r === 'books' || r === 'cleanup') return '#/' + r;
+    if (r === 'requests' || r === 'books' || r === 'cleanup' || r === 'activity') return '#/' + r;
     return '#/' + (ROUTE_OF[r] ? r : 'home');
   }
   /** The dashboard place in the address bar, or null when Requests, Books & comics or Unwatched cleanup own it. */
   function dashRoute() {
     const h = location.hash.replace(/^#\/?/, '').split('?')[0];
     if (!h) return 'home';
-    if (/^(requests|books|cleanup)(\/|$)/.test(h)) return null;
+    if (/^(requests|books|cleanup|activity)(\/|$)/.test(h)) return null;
     return LEGACY[h] || ROUTE_OF[h] || 'home';
   }
   // Scroll to a part of the dashboard (desktop), or open its tab (phone).
@@ -237,11 +237,13 @@
     { route: 'requests', nav: 'Requests', tab: 'Requests', icon: 'film', navOk: () => can('requests'), tabOk: () => can('requests') },
     { route: 'books', nav: 'Books', tab: 'Books', icon: 'book', navOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()), tabOk: () => can('books') && !!(window.gsBooks && window.gsBooks.available()) },
     // Unwatched cleanup (cleanup.js): admins only; on a phone it sits under More.
-    { route: 'cleanup', nav: 'Cleanup', tab: 'Cleanup', icon: 'trash', more: true, navOk: () => isAdmin(), tabOk: () => isAdmin() }
+    { route: 'cleanup', nav: 'Cleanup', tab: 'Cleanup', icon: 'trash', more: true, navOk: () => isAdmin(), tabOk: () => isAdmin() },
+    // Activity log (activity.js): who signed in and what they did; admins only, under More on a phone.
+    { route: 'activity', nav: 'Activity log', tab: 'Activity', icon: 'history', more: true, navOk: () => isAdmin(), tabOk: () => isAdmin() }
   ];
   let navActive = 'home';
   // Requests, Books & comics and Unwatched cleanup are their own pages, shown by their own scripts when the address is theirs.
-  const PAGES = { requests: 1, books: 1, cleanup: 1 };
+  const PAGES = { requests: 1, books: 1, cleanup: 1, activity: 1 };
   function renderNav() {
     const nav = document.getElementById('nav');
     nav.replaceChildren();
