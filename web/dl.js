@@ -228,12 +228,65 @@
     return box;
   }
 
+  // ---------- a season not out yet (Glenn's pick, Nov 23 2026): the dates card instead of "Not out yet" episodes ----------
+  // Episode air times are real moments (Sonarr's airDateUtc), so they are read in the viewer's own time zone.
+  function tsDate(t) { return t ? new Date(t > 1e11 ? t : t * 1000) : null; }
+  function tsDays(t) { var d = tsDate(t); if (!d) return null; return Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - today0()) / 864e5); }
+  function tsText(t, how) {
+    var d = tsDate(t);
+    if (!d) return '';
+    var o = how === 'long' ? { weekday: 'long', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' };
+    if (how === 'year' || d.getFullYear() !== new Date().getFullYear()) o.year = 'numeric';
+    return d.toLocaleDateString(undefined, o);
+  }
+  // "Premieres tomorrow", "Premieres Feb 4", "Coming soon": the hero's badge and button for a show not out yet.
+  function premiereWord(sh) {
+    var up = ((sh && sh.seasons) || []).filter(function (s) { return s.upcoming; });
+    var ts = up.map(function (s) { return s.premiere; }).filter(Boolean).sort()[0];
+    var n = tsDays(ts);
+    if (!ts || n == null || n < 0) return 'Coming soon';
+    return n === 0 ? 'Premieres today' : n === 1 ? 'Premieres tomorrow' : 'Premieres ' + tsText(ts);
+  }
+  function seasonCard(s) {
+    var n = tsDays(s.premiere), eps = (s.episodes || []).length;
+    var box = el('div', { class: 'dl-movie dl-rel', role: 'group', 'aria-label': 'Season ' + s.number + ' release' });
+    box.appendChild(el('div', { class: 'dl-movie__head' }, pill('Not out yet', 'grey', 'ring'),
+      el('span', { class: 'dl-movie__eta', text: s.premiere ? 'Premieres ' + tsText(s.premiere, 'year') : '' })));
+    var tile, lead, more;
+    if (s.premiere && n != null && n >= 0) {
+      var d = tsDate(s.premiere);
+      tile = el('div', { class: 'dl-cal', 'aria-hidden': 'true' }, el('small', { text: d.toLocaleDateString(undefined, { month: 'short' }).toUpperCase() }), el('b', { text: String(d.getDate()) }));
+      lead = 'Season ' + s.number + (n === 0 ? ' premieres today.' : n === 1 ? ' premieres tomorrow, ' + tsText(s.premiere, 'long') + '.' : ' premieres ' + tsText(s.premiere, 'long') + '.');
+      more = 'New episodes download automatically as they air. You\u2019ll get an alert when they\u2019re ready to watch.';
+    } else {
+      tile = el('div', { class: 'dl-cal dl-cal--tba', 'aria-hidden': 'true' }, el('small', { text: 'TBA' }), el('b', { text: '?' }));
+      lead = 'Season ' + s.number + ' has no premiere date yet.';
+      more = 'We\u2019ll download episodes automatically as they air, and you\u2019ll get an alert when they\u2019re ready.';
+    }
+    box.appendChild(el('div', { class: 'dl-rel__body' }, tile, el('p', null, el('b', { text: lead }), el('br'), document.createTextNode(more))));
+    var cells = [['Premiere', s.premiere ? tsText(s.premiere, 'year') : null, n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : null],
+      ['Episodes', eps ? String(eps) + (eps === 1 ? ' episode' : ' episodes') : null, null],
+      ['Finale', s.finale ? tsText(s.finale, 'year') : null, null]];
+    box.appendChild(el('div', { class: 'dl-dates' }, cells.map(function (c, i) {
+      return el('div', { class: 'dl-date' + (i === 0 && c[1] ? ' is-next' : '') }, el('span', { text: c[0] }),
+        c[1] ? el('b', { text: c[1] }) : el('b', { class: 'is-none', text: 'Not announced' }), c[2] ? el('em', { text: c[2] }) : null);
+    })));
+    return box;
+  }
+
   // ---------- a show's episodes ----------
   // keep: an object kept across refreshes, so the picked season survives the 15-second update.
   function showPanel(x, keep) {
     keep = keep || {};
     var sh = x && x.show;
     if (!sh || !sh.seasons || !sh.seasons.length) return null;
+    // Nothing of the requested seasons has aired: the dates card for each, no episode bar or list.
+    if (sh.seasons.every(function (z) { return z.upcoming; })) {
+      var nums = sh.seasons.map(function (z) { return z.number; });
+      return el('section', { class: 'rq-panel dl-show', 'aria-label': 'Coming seasons' },
+        el('div', { class: 'dl-show__head' }, el('h2', { class: 'rq-h2', text: nums.length === 1 ? 'Season ' + nums[0] + ' is coming' : 'Seasons ' + nums.join(', ') + ' are coming' })),
+        sh.seasons.map(seasonCard));
+    }
     var c = sh.counts || {};
     var done = c.onplex || 0;
     // Episode stages, their words and tints come from the server (app/request_state.py, `episodes`).
@@ -252,9 +305,11 @@
       sh.seasons.forEach(function (s) {
         var have = s.episodes.filter(function (e) { return e.stage === 'onplex' || e.stage === 'imported'; }).length;
         tabs.appendChild(el('button', { type: 'button', class: 'rq-chip', role: 'tab', 'aria-selected': s.number === cur ? 'true' : 'false', 'aria-pressed': s.number === cur ? 'true' : 'false',
-          onclick: function () { cur = keep.season = s.number; paint(); } }, 'Season ' + s.number, el('em', { text: ' ' + have + ' of ' + s.episodes.length })));
+          onclick: function () { cur = keep.season = s.number; paint(); } }, 'Season ' + s.number,
+          el('em', { text: s.upcoming ? (s.premiere ? ' \u00b7 ' + tsText(s.premiere) : ' \u00b7 coming') : ' ' + have + ' of ' + s.episodes.length })));
       });
       var s = sh.seasons.filter(function (z) { return z.number === cur; })[0];
+      if (s.upcoming) { list.replaceChildren(el('li', { class: 'dl-eps__card' }, seasonCard(s))); return; }
       list.replaceChildren.apply(list, s.episodes.map(function (e) {
         var sub = e.stage === 'downloading' ? [e.size ? fmtBytes(e.done) + ' of ' + fmtBytes(e.size) : null, fmtMin(e.minutes)].filter(Boolean).join(' · ')
           : e.stage === 'release' ? (e.release ? 'Airs ' + day(e.release, true) : 'Not aired yet')
@@ -304,6 +359,6 @@
     return line;
   }
 
-  window.gsDl = { comingWord: comingWord, pill: pill, shape: shape, clockPill: clockPill, clockNote: clockNote, agreeBox: agreeBox, movieBlock: movieBlock,
+  window.gsDl = { comingWord: comingWord, premiereWord: premiereWord, pill: pill, shape: shape, clockPill: clockPill, clockNote: clockNote, agreeBox: agreeBox, movieBlock: movieBlock,
     showPanel: showPanel, rowLine: rowLine, fmtBytes: fmtBytes, fmtMin: fmtMin, day: day, clock: clock };
 })();

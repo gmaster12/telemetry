@@ -370,7 +370,19 @@ class Arr:
             counts["onplex" if st in ("onplex", "imported") else st if st in counts else "queued" if st in ("paused", "retry") else "searching"] += 1
             out_seasons.setdefault(sn, []).append(row)
         mins = [r.get("minutes") for rows in out_seasons.values() for r in rows if r.get("minutes") is not None]
-        return {"seasons": [{"number": n, "episodes": rows} for n, rows in sorted(out_seasons.items())], "counts": counts,
+        for n in want:   # a requested season Sonarr lists no episodes for yet: still say it is coming
+            out_seasons.setdefault(n, [])
+
+        def season(n: int, rows: list) -> dict:
+            """A season, plus what the not-out-yet card needs: premiere and finale moments (air times, read in the
+            viewer's time zone) and whether nothing of it has aired yet."""
+            upcoming = all(r.get("stage") == "release" for r in rows)
+            first, last = (rows[0], rows[-1]) if rows else ({}, {})
+            dated = all(r.get("release") for r in rows)
+            return {"number": n, "episodes": rows, "upcoming": upcoming,
+                    "premiere": first.get("release") if upcoming else None,            # episode 1's air time, if known
+                    "finale": last.get("release") if upcoming and dated and len(rows) > 1 else None}
+        return {"seasons": [season(n, rows) for n, rows in sorted(out_seasons.items())], "counts": counts,
                 "total": sum(counts.values()), "minutes": max(mins) if mins else None}
 
     # ---------- removing (Unwatched cleanup) ----------

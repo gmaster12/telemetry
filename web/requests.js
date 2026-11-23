@@ -632,8 +632,19 @@
       var btnSet = false;
       keys.forEach(function (k) {
         var p = it[k];
-        if (!p || p.onPlex || p.error || kind !== 'movie') return;
-        var four = /:4k$/.test(k), w = stageWord(p);
+        if (!p || p.onPlex || p.error) return;
+        var four = /:4k$/.test(k), w;
+        if (kind === 'movie') w = stageWord(p);
+        else {
+          var sh = p.show, c = (sh && sh.counts) || {};
+          if (!sh || !(sh.seasons || []).length) return;
+          if (sh.seasons.every(function (z) { return z.upcoming; })) w = [D.premiereWord ? D.premiereWord(sh) : 'Coming soon', 'neutral'];
+          else if (c.downloading || c.queued) w = ['Downloading', 'info'];
+          else if (c.importing) w = ['Adding to Plex', 'info'];
+          else if (c.searching) w = ['Searching', 'info'];
+          else if (c.release) w = ['Airing', 'info'];
+          else return;
+        }
         var old = badges.querySelector('[data-copy="' + (four ? '4k' : 'std') + '"]');
         if (old) { var nb = badge(w[1], (four ? '4K \u00b7 ' : '') + w[0]); nb.setAttribute('data-copy', four ? '4k' : 'std'); old.replaceWith(nb); }
         var btn = hero && hero.querySelector('[data-statebtn]');

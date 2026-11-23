@@ -355,3 +355,22 @@ def test_searching_says_when_it_came_out_and_copy_found_only_once_true(cx):
     item = client(cx).get("/api/requests/progress?ids=movie:27205").json()["items"]["movie:27205"]
     found = [s for s in item["steps"] if s["key"] == "found"][0]
     assert found["label"] == "Copy found" and found["state"] == "done"
+
+
+
+def test_a_season_not_out_yet_gets_its_dates(cx):
+    """Glenn, Nov 23 2026: a season (or show) not out yet gets the simple dates card: premiere, episodes, finale."""
+    store, d, svc, arr, cl, _ = cx
+    seerr_req(1, "tv", 1396, seasons=[1, 2, 3], tvdbId=81189)
+    A.state["series"].append({"id": 3, "tvdbId": 81189, "seasons": [{"seasonNumber": n, "monitored": True} for n in (1, 2, 3)]})
+    past = "2020-01-01T00:00:00Z"
+    A.state["episodes"] += [
+        {"id": 1, "seriesId": 3, "seasonNumber": 1, "episodeNumber": 1, "title": "Pilot", "hasFile": True, "airDateUtc": past},
+        {"id": 2, "seriesId": 3, "seasonNumber": 2, "episodeNumber": 1, "title": "A", "hasFile": False, "airDateUtc": "2099-02-05T02:00:00Z"},
+        {"id": 3, "seriesId": 3, "seasonNumber": 2, "episodeNumber": 2, "title": "B", "hasFile": False, "airDateUtc": "2099-02-12T02:00:00Z"}]
+    seasons = {s["number"]: s for s in client(cx).get("/api/requests/progress?ids=tv:1396").json()["items"]["tv:1396"]["show"]["seasons"]}
+    assert seasons[1]["upcoming"] is False and seasons[1]["premiere"] is None
+    s2 = seasons[2]
+    assert s2["upcoming"] is True and time.strftime("%Y-%m-%d %H:%M", time.gmtime(s2["premiere"])) == "2099-02-05 02:00"
+    assert time.strftime("%Y-%m-%d", time.gmtime(s2["finale"])) == "2099-02-12"
+    assert seasons[3] == {"number": 3, "episodes": [], "upcoming": True, "premiere": None, "finale": None}   # asked for, nothing listed yet

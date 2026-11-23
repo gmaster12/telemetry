@@ -155,3 +155,6 @@
 @media (max-width: 560px) { .dl-dates { grid-template-columns: 1fr; } }
 .dl-step.is-now .dl-step__name { white-space: normal; overflow: visible; align-items: flex-start; }   /* "Looking for a copy" wraps */
 .dl-step.is-now .dl-step__name .dl-shape { margin-top: 3px; flex: none; }
+.dl-eps__card { list-style: none; }
+.dl-show > .dl-rel + .dl-rel { margin-top: 4px; }
+.dl-show .dl-rel { box-shadow: inset 0 0 0 1px var(--border-strong, rgba(127, 127, 127, 0.28)); }
