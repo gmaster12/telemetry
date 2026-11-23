@@ -322,3 +322,36 @@ def test_copy_from_seerr_fills_radarr_and_sonarr(cx):
     assert [(x["slot"], x["ok"]) for x in done] == [("radarr", True), ("sonarr", True)]
     assert store.get_setting("radarr_url") == "http://arr.test:80/radarr"
     assert "key" not in json.dumps(arr.settings()).replace("has_key", "")
+
+
+
+def test_a_movie_not_out_yet_sends_plain_release_days(cx):
+    """Glenn, Nov 23 2026: the title page said "Out on Nov 23" for a Nov 24 release (midnight UTC read in Central time),
+    and "Copy found" while nothing had been found. Release days go out as calendar days; step 3 says what is happening."""
+    store, d, svc, arr, cl, _ = cx
+    seerr_req(1, "movie", 1765072, media_status=3)
+    A.state["movies"].append({"id": 9, "tmdbId": 1765072, "hasFile": False, "isAvailable": False, "inCinemas": "2026-10-16T00:00:00Z",
+                              "digitalRelease": "2099-11-24T00:00:00Z", "physicalRelease": None})
+    item = client(cx).get("/api/requests/progress?ids=movie:1765072").json()["items"]["movie:1765072"]
+    assert item["stage"] == "release"
+    assert item["dates"] == {"cinema": "2026-10-16", "digital": "2099-11-24", "physical": None, "home": "2099-11-24"}
+    assert time.strftime("%Y-%m-%d", time.gmtime(item["release"])) == "2099-11-24"   # noon UTC: the same day everywhere
+    labels = {s["key"]: (s["label"], s["state"]) for s in item["steps"]}
+    assert labels["found"] == ("Looking for a copy", "now")
+
+
+def test_searching_says_when_it_came_out_and_copy_found_only_once_true(cx):
+    store, d, svc, arr, cl, _ = cx
+    seerr_req(1, "movie", 27205, media_status=3)
+    A.state["movies"].append({"id": 7, "tmdbId": 27205, "hasFile": False, "isAvailable": True, "inCinemas": "2010-07-16T00:00:00Z",
+                              "digitalRelease": "2010-12-07T00:00:00Z", "physicalRelease": "2010-12-07T00:00:00Z", "lastSearchTime": "2026-11-23T09:58:00Z"})
+    item = client(cx).get("/api/requests/progress?ids=movie:27205").json()["items"]["movie:27205"]
+    assert item["stage"] == "searching" and item["outDay"] == "2010-12-07"
+    found = [s for s in item["steps"] if s["key"] == "found"][0]
+    assert found["label"] == "Looking for a copy" and found["state"] == "now" and found["at"]
+    A.state["queue"]["radarr"].append({"id": 1, "movieId": 7, "size": 1000, "sizeleft": 500, "status": "downloading",
+                                       "trackedDownloadState": "downloading", "timeleft": "00:10:00"})
+    arr._cache.clear()
+    item = client(cx).get("/api/requests/progress?ids=movie:27205").json()["items"]["movie:27205"]
+    found = [s for s in item["steps"] if s["key"] == "found"][0]
+    assert found["label"] == "Copy found" and found["state"] == "done"

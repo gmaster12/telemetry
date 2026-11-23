@@ -132,3 +132,26 @@
 .rq-ev-prog:empty { display: none; }
 .rq-ev-row .dl-cnote--row { margin-top: 4px; }
 .rq-ev-row.has-progress .rq-ev-note, .rq-ev-row.has-progress .rq-ev-badge { display: none; }
+
+/* a movie that is not out yet: dates instead of steps (dl.js releaseCard; Glenn's pick, Nov 23 2026) */
+.dl-rel__body { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 14px; align-items: center; }
+.dl-rel__body p { margin: 0; font-size: 14px; line-height: 20px; color: var(--ink); }
+.dl-rel__body p b { font-weight: 600; }
+.dl-rel__same { margin: 0; font-size: 13px; color: var(--ink-muted); }
+.dl-cal { width: 62px; height: 66px; border-radius: 14px; background: var(--ink); color: var(--surface-card); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; line-height: 1; }
+.dl-cal small { margin-bottom: 4px; font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: var(--danger); }
+.dl-cal b { font-size: 26px; font-weight: 700; }
+.dl-cal--tba { background: var(--surface-sunken); color: var(--ink); }
+.dl-cal--tba small { color: var(--ink-muted); }
+.dl-cal--tba b { font-size: 20px; }
+.dl-dates { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.dl-date { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border-radius: var(--radius-sm, 14px); background: var(--surface-sunken); min-width: 0; }
+.dl-date span { font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-muted); }
+.dl-date b { font-size: 14.5px; font-weight: 600; }
+.dl-date b.is-none { font-weight: 500; color: var(--ink-muted); }
+.dl-date em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--ink); }
+.dl-date.is-next { box-shadow: inset 0 0 0 2px var(--volt); }
+@media (max-width: 560px) { .dl-dates { grid-template-columns: 1fr; } }
+.dl-step.is-now .dl-step__name { white-space: normal; overflow: visible; align-items: flex-start; }   /* "Looking for a copy" wraps */
+.dl-step.is-now .dl-step__name .dl-shape { margin-top: 3px; flex: none; }

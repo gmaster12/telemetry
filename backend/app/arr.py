@@ -133,6 +133,30 @@ def progress_word(rec: dict, now: float, speeds: dict) -> dict:
     return {**out, "stage": "downloading", "word": f"Downloading {pct}%"}
 
 
+def _day(v: Any) -> str | None:
+    """A release date as a plain calendar day, "2026-11-24". Radarr sends release dates as midnight UTC; turning that
+    into a moment and back showed the evening before in American time zones ("Out on Nov 23" for Nov 24)."""
+    s = str(v or "")[:10]
+    try:
+        dt.date.fromisoformat(s)
+    except ValueError:
+        return None
+    return s
+
+
+def release_dates(m: dict) -> dict:
+    """{cinema, digital, physical, home}: a movie's release days (home: the first at-home one)."""
+    d = {"cinema": _day(m.get("inCinemas")), "digital": _day(m.get("digitalRelease")), "physical": _day(m.get("physicalRelease"))}
+    homes = [x for x in (d["digital"], d["physical"]) if x]
+    d["home"] = min(homes) if homes else None
+    return d
+
+
+def _noon(day: str | None) -> float | None:
+    """A calendar day as noon UTC, for older callers that want a moment: the same day everywhere from Hawaii to Japan."""
+    return dt.datetime.fromisoformat(day + "T12:00:00+00:00").timestamp() if day else None
+
+
 def _when(v: Any) -> float | None:
     if not v:
         return None
@@ -290,10 +314,15 @@ class Arr:
             return progress_word(max(recs, key=lambda r: float(r.get("size") or 0)), now, self._speeds)
         if m.get("hasFile"):
             return {"stage": "imported", "word": "On Plex soon", "size": float((m.get("movieFile") or {}).get("size") or m.get("sizeOnDisk") or 0)}
+        dates = release_dates(m)
         if m.get("isAvailable") is False:
-            rel = min([t for t in (_when(m.get("digitalRelease")), _when(m.get("physicalRelease"))) if t] or [0]) or None
-            return {"stage": "release", "word": "Not out yet", "release": rel}
-        return {"stage": "searching", "word": "Looking for a copy", "lastSearch": _when(m.get("lastSearchTime"))}
+            return {"stage": "release", "word": "Not out yet", "release": _noon(dates["home"]), "dates": dates}
+        # When it came out, as far as looking for a copy goes: the at-home day if that has passed, else the cinema day.
+        today = dt.datetime.now(dt.timezone.utc).date().isoformat()
+        passed = [x for x in (dates["digital"], dates["physical"]) if x and x <= today]
+        out = max(passed) if passed else None
+        return {"stage": "searching", "word": "Looking for a copy", "lastSearch": _when(m.get("lastSearchTime")), "dates": dates,
+                "outDay": out or (dates["cinema"] if dates["cinema"] and dates["cinema"] <= today else None)}
 
     async def imported_file(self, tmdb_id: int, is4k: bool = False) -> tuple[int | None, str | None, str | None]:
         """(bytes, file name, title) of the copy Radarr imported, from the record already fetched for

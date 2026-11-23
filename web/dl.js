@@ -31,6 +31,32 @@
     var d = new Date(typeof t === 'number' ? (t > 1e11 ? t : t * 1000) : t);
     return isNaN(d) ? '' : d.toLocaleDateString(undefined, withYear ? { month: 'short', day: 'numeric', year: 'numeric' } : { weekday: 'short', month: 'short', day: 'numeric' });
   }
+  // A release day as Radarr gives it ("2026-11-24"): read as that calendar day here, never shifted by time zone.
+  function cal(s) { var p = /^(\d{4})-(\d{2})-(\d{2})/.exec(s || ''); return p ? new Date(+p[1], +p[2] - 1, +p[3]) : null; }
+  function today0() { var n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); }
+  function daysFrom(s) { var d = cal(s); return d ? Math.round((d - today0()) / 864e5) : null; }   // 0 today, 1 tomorrow, -2 two days ago
+  function calText(s, how) {
+    var d = cal(s);
+    if (!d) return '';
+    var other = d.getFullYear() !== new Date().getFullYear();   // another year: always say which
+    var o = how === 'long' ? { weekday: 'long', month: 'short', day: 'numeric' } : how === 'year' ? { month: 'short', day: 'numeric', year: 'numeric' } : { month: 'short', day: 'numeric' };
+    if (other) o.year = 'numeric';
+    return d.toLocaleDateString(undefined, o);
+  }
+  // "Coming tomorrow", "Coming Nov 24", "Coming soon": one short word for a title that is not out yet (badges, buttons).
+  function comingWord(x) {
+    var home = x && x.dates && x.dates.home, n = daysFrom(home);
+    if (!home || n == null || n < 0) return 'Coming soon';
+    return n === 0 ? 'Out today' : n === 1 ? 'Coming tomorrow' : 'Coming ' + calText(home);
+  }
+  // When a step happened or started: the time if today, else the day.
+  function when(t) {
+    if (!t) return '';
+    var d = new Date(typeof t === 'number' ? (t > 1e11 ? t : t * 1000) : t);
+    if (isNaN(d)) return '';
+    return d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+      : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  }
   function clock(t) {
     if (!t) return '';
     var d = new Date(typeof t === 'number' ? (t > 1e11 ? t : t * 1000) : t);
@@ -115,7 +141,7 @@
       return el('li', { class: 'dl-step is-' + s.state, 'aria-current': s.state === 'now' ? 'step' : null },
         el('i', { class: 'dl-step__bar', 'aria-hidden': 'true' }),
         el('span', { class: 'dl-step__name' }, shape(s.state === 'done' ? 'circle' : s.state === 'now' ? 'triangle' : 'ring'), s.label),
-        el('span', { class: 'dl-step__at', text: s.state === 'done' ? (clock(s.at) || 'Done') : s.state === 'now' ? 'Now' : '' }));
+        el('span', { class: 'dl-step__at', text: s.state === 'done' ? (when(s.at) || 'Done') : s.state === 'now' ? (s.at ? 'since ' + when(s.at) : '') : '' }));
     }));
   }
   function problemBox(x, opts) {
@@ -127,9 +153,58 @@
     return el('div', { class: 'dl-problem', role: 'status' }, el('b', { text: 'It could not be added to Plex on its own.' }),
       el('span', { text: (x.problem || '') + ' The admin will sort it out.' }), b);
   }
+  // Not out yet: a simple card with the dates instead of the steps (Glenn's pick, Nov 23 2026). opts.sameAs: the 4K copy
+  // whose dates match the standard copy's, said in one line.
+  function releaseCard(x, opts) {
+    var d = x.dates || {}, home = d.home, n = daysFrom(home);
+    var box = el('div', { class: 'dl-movie dl-rel', role: 'group', 'aria-label': 'Release' });
+    var right = home ? 'At home ' + calText(home, 'year') : d.cinema && daysFrom(d.cinema) > 0 ? 'In cinemas ' + calText(d.cinema, 'year') : '';
+    box.appendChild(el('div', { class: 'dl-movie__head' }, pill('Not out yet', 'grey', 'ring'), el('span', { class: 'dl-movie__eta', text: right })));
+    if (opts && opts.sameAs) {
+      box.appendChild(el('p', { class: 'dl-rel__same', text: 'Same dates as the standard copy. We will look for a 4K copy on release day too.' }));
+      return box;
+    }
+    var tile, lead, more;
+    if (home && n != null && n >= 0) {
+      var c = cal(home);
+      tile = el('div', { class: 'dl-cal', 'aria-hidden': 'true' }, el('small', { text: c.toLocaleDateString(undefined, { month: 'short' }).toUpperCase() }), el('b', { text: String(c.getDate()) }));
+      lead = n === 0 ? 'Out to watch at home today.' : n === 1 ? 'Coming to watch at home tomorrow, ' + calText(home, 'long') + '.' : 'Coming to watch at home ' + calText(home, 'long') + '.';
+      more = 'We\u2019ll start looking for a copy automatically on release day. You\u2019ll get an alert when it\u2019s ready to watch.';
+    } else {
+      tile = el('div', { class: 'dl-cal dl-cal--tba', 'aria-hidden': 'true' }, el('small', { text: 'TBA' }), el('b', { text: '?' }));
+      var cin = d.cinema ? daysFrom(d.cinema) : null;
+      lead = home ? 'Waiting to be released.' : d.cinema ? 'No at-home date announced yet.' : 'No release date yet.';
+      more = d.cinema && cin != null
+        ? (cin > 0 ? 'It opens in cinemas ' + calText(d.cinema, 'long') + '. ' : 'It has been in cinemas since ' + calText(d.cinema) + '. ')
+          + 'Films usually reach streaming 1 to 3 months later. We\u2019ll start looking automatically as soon as it\u2019s out, and you\u2019ll get an alert when it\u2019s ready.'
+        : 'We\u2019ll look for it as soon as it\u2019s out, and you\u2019ll get an alert when it\u2019s ready.';
+    }
+    box.appendChild(el('div', { class: 'dl-rel__body' }, tile, el('p', null, el('b', { text: lead }), el('br'), document.createTextNode(more))));
+    var cells = [['In cinemas', d.cinema], ['Digital (stream / buy)', d.digital], ['Blu-ray / DVD', d.physical]];
+    if (d.cinema || d.digital || d.physical) {
+      var next = [d.digital, d.physical].filter(function (z) { return z && daysFrom(z) >= 0; }).sort()[0];
+      box.appendChild(el('div', { class: 'dl-dates' }, cells.map(function (c) {
+        var k = daysFrom(c[1]);
+        var tag = !c[1] ? null : c[0] === 'In cinemas' ? (k <= 0 ? 'In cinemas now' : null) : k === 0 ? 'Today' : k === 1 ? 'Tomorrow' : k < 0 ? 'Out' : null;
+        return el('div', { class: 'dl-date' + (c[1] && c[1] === next ? ' is-next' : '') },
+          el('span', { text: c[0] }), c[1] ? el('b', { text: calText(c[1], 'year') }) : el('b', { class: 'is-none', text: 'Not announced' }),
+          tag ? el('em', { text: tag }) : null);
+      })));
+    }
+    return box;
+  }
+  // Released and approved, nothing grabbed yet: what to expect, by how long it has been out.
+  function searchNote(x) {
+    var n = x.outDay ? daysFrom(x.outDay) : null;
+    var last = x.lastSearch ? ' Last checked ' + when(x.lastSearch) + '.' : '';
+    if (n === 0) return 'It came out today. Copies usually show up within a day or two; we\u2019ll grab one as soon as it does.' + last;
+    if (n != null && n >= -3) return 'It came out ' + calText(x.outDay) + '. Copies usually show up within a day or two; we\u2019ll grab one as soon as it does.' + last;
+    return 'We\u2019re still looking for a good copy. This can take a while for new or hard-to-find titles.' + last;
+  }
   function movieBlock(x, opts) {
     if (!x || x.error) return null;
     if (x.onPlex) return null;
+    if (x.stage === 'release') return releaseCard(x, opts);
     var box = el('div', { class: 'dl-movie', role: 'group', 'aria-label': 'Download' });
     if (['downloading', 'queued', 'paused', 'retry', 'importing', 'problem'].indexOf(x.stage) >= 0) {
       var pct = x.stage === 'importing' || x.stage === 'problem' ? 100 : (x.pct || 0);
@@ -141,12 +216,15 @@
           el('i', { style: 'width:' + pct + '%' })),
         el('div', { class: 'dl-movie__facts' }, facts(x)));
     } else {
-      box.append(el('div', { class: 'dl-movie__head' }, stagePill(x),
-        el('span', { class: 'dl-movie__eta', text: x.stage === 'release' && x.release ? 'Out on ' + day(x.release, true) : x.lastSearch ? 'Last looked ' + clock(x.lastSearch) + ', ' + day(x.lastSearch) : x.stage === 'imported' ? 'On Plex in a moment' : '' })));
+      var outN = x.outDay ? daysFrom(x.outDay) : null;
+      box.append(el('div', { class: 'dl-movie__head' }, x.stage === 'searching' ? pill('Searching', 'sky', 'square') : stagePill(x),
+        el('span', { class: 'dl-movie__eta', text: x.stage === 'searching' ? (outN === 0 ? 'Out today \u00b7 ' + calText(x.outDay) : x.outDay ? 'Out since ' + calText(x.outDay, 'year') : '')
+          : x.stage === 'imported' ? 'On Plex in a moment' : '' })));
     }
     box.appendChild(steps(x.steps));
     if (x.stage === 'problem') box.appendChild(problemBox(x, opts));
-    box.appendChild(el('p', { class: 'dl-movie__note', text: 'Updated ' + clock(Date.now()) + '. Checks again every 15 seconds while this page is open.' }));
+    box.appendChild(el('p', { class: 'dl-movie__note', text: x.stage === 'searching' ? searchNote(x)
+      : 'Updated ' + clock(Date.now()) + '. Checks again every 15 seconds while this page is open.' }));
     return box;
   }
 
@@ -216,7 +294,7 @@
     }
     if (x.onPlex) return null;
     var pct = x.stage === 'importing' || x.stage === 'problem' ? 100 : x.pct || 0;
-    var right = x.stage === 'downloading' ? fmtMin(x.minutes) : x.stage === 'importing' ? 'adding to Plex' : x.stage === 'release' && x.release ? 'out ' + day(x.release, true)
+    var right = x.stage === 'downloading' ? fmtMin(x.minutes) : x.stage === 'importing' ? 'adding to Plex' : x.stage === 'release' ? (x.dates && x.dates.home ? 'out ' + calText(x.dates.home, 'year') : x.release ? 'out ' + day(x.release, true) : '')
       : x.stage === 'searching' && x.lastSearch ? 'looked ' + clock(x.lastSearch) : '';
     var line = el('span', { class: 'dl-row' },
       el('span', { class: 'dl-row__top' }, stagePill(x), right ? el('span', { class: 'dl-row__right', text: right }) : null),
@@ -226,6 +304,6 @@
     return line;
   }
 
-  window.gsDl = { pill: pill, shape: shape, clockPill: clockPill, clockNote: clockNote, agreeBox: agreeBox, movieBlock: movieBlock,
+  window.gsDl = { comingWord: comingWord, pill: pill, shape: shape, clockPill: clockPill, clockNote: clockNote, agreeBox: agreeBox, movieBlock: movieBlock,
     showPanel: showPanel, rowLine: rowLine, fmtBytes: fmtBytes, fmtMin: fmtMin, day: day, clock: clock };
 })();

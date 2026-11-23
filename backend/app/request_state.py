@@ -68,7 +68,7 @@ LOG_GROUPS = [("all", "All"), ("waiting", "Waiting for approval"), ("approved", 
 # Seerr's own request and media statuses, for the request rows (approvals, title pages, the Seerr-only list).
 REQUEST_BADGES = {"pending": ("warning", "Pending approval"), "approved": ("info", "Approved"), "declined": ("danger", "Declined"),
                   "failed": ("danger", "Failed"), "completed": ("success", "Available")}
-MEDIA_BADGES = {"available": ("success", "Available"), "partial": ("info", "Partly available"), "processing": ("info", "Processing"),
+MEDIA_BADGES = {"available": ("success", "Available"), "partial": ("info", "Partly available"), "processing": ("info", "In progress"),
                 "pending": ("warning", "Requested"), "blocklisted": ("danger", "Blocked"), "deleted": ("neutral", "Removed")}
 SEERR_FILTERS = [("all", "All"), ("pending", "Pending"), ("approved", "Approved"), ("processing", "Processing"),
                  ("available", "Available"), ("failed", "Failed")]

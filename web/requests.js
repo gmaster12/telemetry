@@ -522,7 +522,9 @@
       var meta = [d.year, d.certification, kind === 'movie' ? (d.runtime ? Math.floor(d.runtime / 60) + 'h ' + (d.runtime % 60) + 'm' : null)
         : (d.seasons ? plural(d.seasons.filter(function (s) { return s.number > 0; }).length, 'season', 'seasons') : null),
         (d.genres || []).map(function (g) { return g.name; }).join(', ')].filter(Boolean).join(' · ');
-      var badges = el('div', { class: 'rq-hero__badges' }, mediaBadge(d.media.status), me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] ? mediaBadge(d.media.status4k, true) : null);
+      var tagCopy = function (b, which) { if (b) b.setAttribute('data-copy', which); return b; };
+      var badges = el('div', { class: 'rq-hero__badges' }, tagCopy(mediaBadge(d.media.status), 'std'),
+        me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] ? tagCopy(mediaBadge(d.media.status4k, true), '4k') : null);
       var live = el('div', { class: 'rq-hero__live' });         // download progress and the removal countdown (dl.js)
       var tvSlot = el('div', { class: 'rq-tvslot', hidden: true }); // a show's episodes on the way
       hero.append(
@@ -612,6 +614,32 @@
     if (me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] && busy(d.media.status4k)) keys.push(key + ':4k');
     if (!keys.length) return;
     var notified = {}, keep = {};
+    // The hero's badges and status button say where each copy really is (not Seerr's "Processing").
+    function stageWord(p) {
+      var s = p.stage;
+      if (s === 'release') return [D.comingWord ? D.comingWord(p) : 'Not out yet', 'neutral'];
+      if (s === 'downloading') return ['Downloading ' + (p.pct || 0) + '%', 'info'];
+      if (s === 'importing') return ['Adding to Plex', 'info'];
+      if (s === 'imported') return ['On Plex soon', 'success'];
+      if (s === 'problem') return ['Needs a look', 'danger'];
+      if (s === 'queued') return ['Queued', 'info'];
+      if (s === 'paused') return ['Paused', 'warning'];
+      if (s === 'retry') return ['Looking for another copy', 'info'];
+      return ['Searching', 'info'];
+    }
+    function paintHead(it) {
+      var hero = live.closest('.rq-hero');
+      var btnSet = false;
+      keys.forEach(function (k) {
+        var p = it[k];
+        if (!p || p.onPlex || p.error || kind !== 'movie') return;
+        var four = /:4k$/.test(k), w = stageWord(p);
+        var old = badges.querySelector('[data-copy="' + (four ? '4k' : 'std') + '"]');
+        if (old) { var nb = badge(w[1], (four ? '4K \u00b7 ' : '') + w[0]); nb.setAttribute('data-copy', four ? '4k' : 'std'); old.replaceWith(nb); }
+        var btn = hero && hero.querySelector('[data-statebtn]');
+        if (btn && !btnSet) { btn.replaceChildren(icon('clock', 18), w[0]); btnSet = true; }
+      });
+    }
     function load() {
       if (!live.isConnected) return;
       if (document.hidden) { setTimeout(load, 15000); return; }
@@ -628,6 +656,10 @@
           } } : null;
           var label = keys.length > 1 ? el('span', { class: 'rq-eyebrow' + (kind === 'movie' ? ' rq-eyebrow--light' : ''), text: four ? '4K copy' : 'Standard copy' }) : null;
           if (kind === 'movie') {
+            var std = it[key];
+            if (four && std && std.stage === 'release' && p.stage === 'release' && JSON.stringify(std.dates || {}) === JSON.stringify(p.dates || {})) {
+              opts = Object.assign({}, opts || {}, { sameAs: true });
+            }
             var b = D.movieBlock(p, opts);
             if (b) mov.push(label, b);
           } else {
@@ -636,6 +668,7 @@
           }
         });
         progBox.replaceChildren.apply(progBox, mov.filter(Boolean));
+        paintHead(it);
         tvSlot.replaceChildren.apply(tvSlot, tv);
         tvSlot.hidden = !tv.length;
         setTimeout(load, 15000);
@@ -727,7 +760,7 @@
     var may4k = !noAuto && me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] && can4k && open(d.media.status4k) && (kind === 'movie' || tvLeft(true));
     if (noAuto && canKind && open(d.media.status)) box.appendChild(el('p', { class: 'rq-note', 'data-no-auto': '1', text: NO_AUTO_REQUEST }));
     if (canKind && mayStd) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--accent', 'data-more': d.media.status === 'partial' ? '1' : null, onclick: function () { requestDialog(kind, d, false); } }, icon('plus', 18), d.media.status === 'partial' ? (kind === 'tv' ? 'Request more seasons' : 'Request more') : 'Request'));
-    else if (['pending', 'processing'].indexOf(d.media.status) >= 0) box.appendChild(el('span', { class: 'rq-btn rq-btn--ghost', 'aria-disabled': 'true' }, icon('clock', 18), d.media.status === 'pending' ? 'Requested' : 'Downloading'));
+    else if (['pending', 'processing'].indexOf(d.media.status) >= 0) box.appendChild(el('span', { class: 'rq-btn rq-btn--ghost', 'aria-disabled': 'true', 'data-statebtn': d.media.status === 'processing' ? '1' : null }, icon('clock', 18), d.media.status === 'pending' ? 'Requested' : 'In progress'));
     var follow = followBox(d);
     if (follow) box.appendChild(follow);
     if (may4k) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--ink', onclick: function () { requestDialog(kind, d, true); } }, icon('plus', 18), 'Request in 4K'));

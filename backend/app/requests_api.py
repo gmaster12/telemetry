@@ -854,6 +854,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         st = REQUEST_STATUS.get((q or {}).get("status"), "approved")
         stage = (prog or {}).get("stage")
         on_plex = MEDIA_STATUS.get(m.get("status")) == "available" or stage == "onplex"
+        # Step 3 says what is really happening: "Looking for a copy" until one is grabbed, then "Copy found".
         names = [("requested", "Requested"), ("approved", "Approved"), ("found", "Copy found"), ("downloading", "Downloading"),
                  ("importing", "Importing"), ("onplex", "On Plex")]
         if on_plex:
@@ -866,8 +867,12 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             cur = 3
         else:
             cur = 2
+        if cur == 2:
+            names[2] = ("found", "Looking for a copy")
         at = {"requested": (q or {}).get("createdAt"), "approved": (q or {}).get("updatedAt") if st != "pending" else None,
-              "found": (prog or {}).get("added"),
+              # Looking since it was approved, or since it came out if that was later (the page says "since ...").
+              "found": (prog or {}).get("added") if cur > 2 else max([x for x in ((q or {}).get("updatedAt") if st != "pending" else None,
+                                                                                   ((prog or {}).get("outDay") or "") + "T00:00:00" if (prog or {}).get("outDay") else None) if x] or [None]),
               # Plex's own time when it got there first: Seerr's mediaAddedAt is the request's, until its scan runs
               "onplex": iso(plex_at) if plex_at else m.get("mediaAddedAt")}
         return [{"key": k, "label": label, "state": "done" if i < cur else "now" if i == cur else "next", "at": at.get(k) if i <= cur else None}
