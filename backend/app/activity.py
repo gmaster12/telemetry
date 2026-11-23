@@ -166,7 +166,7 @@ class Activity:
 
     def signed_in(self, request, kind: str, subject: str, name: str | None, token: str, admin: bool) -> None:
         w = self._where(request, token)
-        label = "Signed in with Plex" if kind == "plex" else "Signed in with an admin login"
+        label = {"plex": "Signed in with Plex", "emby": "Signed in with Emby"}.get(kind, "Signed in with an admin login")
         self._insert(time.time(), (kind, subject, name), w["session"], "login", label, "Admin" if admin else "Viewer", w["ip"], w["device"])
 
     def denied(self, request, kind: str, subject: str | None, name: str | None, reason: str) -> None:

@@ -170,7 +170,7 @@ class Notifier:
 
     def audiences(self, p) -> list[str]:
         out = []
-        if p.kind == "plex":
+        if p.member:  # Plex and Emby members share the member-id audience
             out.append(f"plex:{p.subject}")
         if p.is_admin:
             out.append(ADMINS)

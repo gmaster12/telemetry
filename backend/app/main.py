@@ -35,6 +35,7 @@ from .plex import PlexAccount, PlexClient
 from .poller import Poller
 from . import request_log
 from .media import Media
+from .emby import EmbyAuth, EmbyError, member_id as emby_member_id
 from .backup import Backups
 from .request_state import LOG_GROUPS, RequestStatus
 from .requests_api import IMAGES, make_router
@@ -51,6 +52,7 @@ directory = Directory(store)
 poller = Poller(store)
 seerr = Requests(store, poller.http)
 media = Media(store, poller.http)
+emby = EmbyAuth(env("EMBY_URL"), env("EMBY_API_KEY"), poller.http)
 arr = Arr(store, poller.http)
 onplex = OnPlex(store, seerr, poller)
 # Where a request stands, asked of Radarr/Sonarr and Plex the same way everywhere (app/request_state.py)
@@ -208,7 +210,7 @@ def public_health(server_id: int) -> dict:
 
 def own_streams(p: Principal, rows: list[dict]) -> list[dict]:
     """Streams on this person's own Plex account. Plex reports a server's owner as local account 1."""
-    if p.kind != "plex":
+    if not p.member:
         return []
     me_id = str(p.subject)
     return [r for r in rows if str(r.get("user_id") or "") == me_id
@@ -902,6 +904,47 @@ def auth_local(body: LocalLogin, request: Request):
     return resp
 
 
+class EmbyLogin(BaseModel):
+    username: str = Field(min_length=1, max_length=254)
+    password: str = Field(min_length=1, max_length=256)
+
+
+@app.get("/api/auth/options")
+def auth_options():
+    """Which sign-in buttons the sign-in page shows."""
+    return {"emby": emby.enabled()}
+
+
+@app.post("/api/auth/emby")
+async def auth_emby(body: EmbyLogin, request: Request):
+    """Emby members (emby.py): Emby Connect, or a local Emby password. Always a viewer, never an admin."""
+    if not emby.enabled():
+        raise HTTPException(404, "Emby sign-in is not set up.")
+    key = "emby:" + _client_ip(request)
+    ukey = "emby-user:" + body.username.strip().lower()
+    if throttled(key) or throttled(ukey, limit=20, window=900):
+        raise HTTPException(429, "Too many failed sign-ins. Wait a few minutes.")
+    try:
+        who = await emby.authenticate(body.username, body.password)
+    except EmbyError as e:
+        if e.status in (401, 403):
+            record_failure(key)
+            record_failure(ukey)
+            activity.denied(request, "emby", None, body.username.strip()[:80], e.message)
+        raise HTTPException(e.status, e.message)
+    member = emby_member_id(who["emby_id"])
+    directory.upsert_emby_user(member, who["emby_id"], who["name"], who["email"])
+    user = directory.get_user(member)
+    if not user or user.get("disabled"):
+        activity.denied(request, "emby", member, who["name"], "Access to the dashboard is turned off")
+        raise HTTPException(403, "Your access to this dashboard has been turned off.")
+    session = new_session(directory, "emby", member)
+    activity.signed_in(request, "emby", member, who["name"], session, False)
+    resp = JSONResponse({"ok": True, "role": "viewer"})
+    set_cookie(resp, request, session)
+    return resp
+
+
 @app.post("/api/auth/logout")
 def auth_logout(request: Request):
     if request.state.principal is not None:
@@ -981,15 +1024,15 @@ def _user_public(u: dict, with_email: bool = True) -> dict:
         "email": u.get("email") if with_email else None, "thumb": u.get("thumb"), "shared": bool(u.get("shared")),
         "owner": bool(u.get("is_owner")), "disabled": bool(u.get("disabled")), "last_seen": u.get("last_seen"),
         "last_login": u.get("last_login"), "custom_sections": json.loads(u["sections"]) if u.get("sections") else None,
-        "sections": user_sections(store, u), "admin": is_admin_email(u.get("email")),
-        "servers": json.loads(u["servers"]) if u.get("servers") else [],
+        "sections": user_sections(store, u), "admin": u.get("source") != "emby" and is_admin_email(u.get("email")),
+        "servers": json.loads(u["servers"]) if u.get("servers") else [], "emby": u.get("source") == "emby",
     }
 
 
 @app.get("/api/me/history")
 def api_my_history(request: Request, before: int | None = None, limit: int = 50):
     p = need(request, "history")
-    if p.kind != "plex":
+    if not p.member:
         return {"user": {"name": p.name}, "stats": None, "rows": []}
     u = directory.get_user(p.subject)
     return {"user": _user_public(u, with_email=True), "stats": directory.user_stats(p.subject),
@@ -1079,7 +1122,7 @@ def recap_for(plex_id: str, period: str, tz_min: int, now: float | None = None) 
 def api_my_recap(request: Request, period: str = "month", tz: int = 0):
     """This person's own viewing for the week, month or year (My month home layout). tz: minutes east of UTC."""
     p = need(request, "history")
-    if p.kind != "plex":
+    if not p.member:
         return {"period": period, "plays": 0}
     if period not in ("week", "month", "year"):
         raise HTTPException(400, "period is week, month or year.")
@@ -1179,7 +1222,7 @@ def api_my_servers(request: Request):
 def api_my_subscription(request: Request):
     """The signed-in person's own Stripe subscription. Everyone may see their own."""
     p = me(request)
-    if p.kind != "plex":
+    if not p.member:
         return {"status": "none", "subscriptions": [], "last_payment": None, "configured": bool(store.get_setting("stripe_key"))}
     return {**poller.billing.summary(p.subject), "configured": bool(store.get_setting("stripe_key"))}
 
@@ -1547,7 +1590,7 @@ def requests_misses(days: int = 7):
 def books_config(request: Request):
     p = need(request, "books")
     return {"enabled": media.enabled(), "origin": media.url() if media.enabled() else None,
-            "plex": p.kind == "plex"}
+            "plex": p.member}  # a member sign-in (Plex or Emby) the media site can know
 
 
 @app.get("/api/books/link")
@@ -1556,11 +1599,11 @@ def books_link(request: Request, next: str = "/"):
     p = need(request, "books")
     if not media.enabled():
         raise HTTPException(409, "Books & comics is not set up yet.")
-    if p.kind != "plex":
-        raise HTTPException(409, "Books & comics signs you in with your Plex account. Sign in to this site with Plex to use it.")
+    if not p.member:
+        raise HTTPException(409, "Books & comics signs you in with your Plex or Emby account. Sign in to this site with Plex or Emby to use it.")
     user = directory.get_user(p.subject)
     if not user:
-        raise HTTPException(404, "Your Plex account is not known here yet. Sign out and sign in again.")
+        raise HTTPException(404, "Your account is not known here yet. Sign out and sign in again.")
     return {"url": media.sign_in_url(user, next), "origin": media.url()}
 
 

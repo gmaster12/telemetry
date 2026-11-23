@@ -130,6 +130,10 @@ class Store:
         if "servers" not in cols:  # added after the first users release
             self.db.execute("ALTER TABLE users ADD COLUMN servers TEXT")
             self.db.commit()
+        for col in ("source", "emby_id"):  # Emby members (emby.py): source "emby", NULL means Plex
+            if col not in cols:
+                self.db.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+                self.db.commit()
         cols = {r["name"] for r in self.db.execute("PRAGMA table_info(servers)")}
         if "owner_plex_id" not in cols:  # one Plex account per server
             self.db.execute("ALTER TABLE servers ADD COLUMN owner_plex_id TEXT")
@@ -470,6 +474,18 @@ class Directory:
                     sets.append("servers = ?"); vals.append(json.dumps(sorted(set(u["servers"]))))
                 if sets:
                     self.db.execute(f"UPDATE users SET {', '.join(sets)} WHERE plex_id = ?", vals + [u["id"]])
+            self.db.commit()
+
+    def upsert_emby_user(self, member: str, emby_id: str, name: str | None, email: str | None) -> None:
+        """An Emby member (emby.py), kept under their member id. Name and email follow Emby on every sign-in."""
+        now = int(time.time())
+        with self.lock:
+            self.db.execute(
+                "INSERT INTO users (plex_id, username, title, email, shared, is_owner, first_seen, servers, source, emby_id) "
+                "VALUES (?,?,?,?,0,0,?,?, 'emby', ?) ON CONFLICT(plex_id) DO UPDATE SET username = excluded.username, "
+                "title = excluded.title, email = COALESCE(excluded.email, users.email), source = 'emby', emby_id = excluded.emby_id",
+                (member, name, name, email, now, "[]", emby_id),
+            )
             self.db.commit()
 
     def saw_user(self, plex_id: str, name: str | None, thumb: str | None) -> None:

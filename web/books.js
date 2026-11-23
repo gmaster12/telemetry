@@ -115,7 +115,7 @@
     if (frame) return;
     page.replaceChildren();
     if (!cfg || !cfg.enabled) { page.appendChild(note('Books & comics is not set up yet', 'An administrator connects the Greystar media site in Settings, Books & comics.')); return; }
-    if (!cfg.plex) { page.appendChild(note('Sign in with Plex to use Books & comics', 'Books & comics signs you in to the media site with your Plex account. This login is not a Plex account.')); return; }
+    if (!cfg.plex) { page.appendChild(note('Sign in with Plex or Emby to use Books & comics', 'Books & comics signs you in to the media site with your Plex or Emby account. This login is neither.')); return; }
     loading = el('div', { class: 'bk-loading', role: 'status' }, el('span', { class: 'rq-spin', 'aria-hidden': 'true' }), el('span', { text: 'Opening Books & comics' }));
     frame = el('iframe', { class: 'bk-frame', title: 'Books & comics', allow: 'autoplay; fullscreen; clipboard-write', referrerpolicy: 'no-referrer' });
     frame.addEventListener('load', function () { setLoading(false); });

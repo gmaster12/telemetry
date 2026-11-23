@@ -85,8 +85,8 @@ def password_problem(pw: str) -> str | None:
 # ---------- principals ----------
 @dataclass
 class Principal:
-    kind: str  # "plex" or "local"
-    subject: str  # plex id or local admin id
+    kind: str  # "plex", "emby" (emby.py) or "local"
+    subject: str  # member id (users.plex_id) or local admin id
     name: str
     role: str  # "admin" or "viewer"
     sections: list[str] = field(default_factory=list)
@@ -96,6 +96,11 @@ class Principal:
     @property
     def is_admin(self) -> bool:
         return self.role == "admin"
+
+    @property
+    def member(self) -> bool:
+        """A person in the users table (Plex or Emby), not a local admin login."""
+        return self.kind in ("plex", "emby")
 
     def can(self, section: str) -> bool:
         return self.is_admin or section in self.sections
@@ -166,8 +171,10 @@ def plex_principal(store: Store, user: dict) -> Principal | None:
     if user.get("disabled"):
         return None
     email = (user.get("email") or "").lower() or None
-    is_admin = is_admin_email(email)
-    return Principal(kind="plex", subject=user["plex_id"], name=user.get("title") or user.get("username") or "Plex user",
+    emby = user.get("source") == "emby"
+    is_admin = not emby and is_admin_email(email)  # an Emby sign-in is never an admin
+    return Principal(kind="emby" if emby else "plex", subject=user["plex_id"],
+                     name=user.get("title") or user.get("username") or ("Emby user" if emby else "Plex user"),
                      role="admin" if is_admin else "viewer", sections=[] if is_admin else user_sections(store, user),
                      email=email, thumb=user.get("thumb"))
 

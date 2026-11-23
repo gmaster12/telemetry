@@ -47,7 +47,7 @@
   function shortDate(iso) { return iso ? new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''; }
 
   // ---------- which layout, which view ----------
-  function active() { var m = me(); return !!m && m.role !== 'admin' && m.kind === 'plex'; }
+  function active() { var m = me(); return !!m && m.role !== 'admin' && m.kind !== 'local'; }
   function layout() {
     var v = window.dash.params().vhome;
     if (LAYOUTS.indexOf(v) < 0) v = 'doors';

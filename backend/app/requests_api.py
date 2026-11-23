@@ -581,7 +581,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 cleanup.track(request_id=int(res["id"]), kind=b["mediaType"], tmdb_id=int(b["mediaId"]), is4k=bool(b.get("is4k")),
                               seasons=seasons or (b.get("seasons") if isinstance(b.get("seasons"), list) else None),
                               info={"title": info.get("title"), "year": info.get("year"), "poster": info.get("poster")},
-                              plex_id=p.subject if p.kind == "plex" else None, name=p.name)
+                              plex_id=p.subject if p.member else None, name=p.name)
             except Exception:  # noqa: BLE001
                 log.exception("Could not start tracking a request for Unwatched cleanup")
         return {"ok": True, "status": status, "id": (res or {}).get("id")}
@@ -701,7 +701,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         p = need(request, "requests")
         if kind not in BOOK_KINDS or action not in BOOK_ACTIONS or item_id < 1:
             raise HTTPException(404, "No such action.")
-        if not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+        if not (media and p.member and p.can("books") and media.enabled()):
             raise HTTPException(409, "Books & comics is not available for this sign-in.")
         try:
             await media.call("POST", f"/api/telemetry/requests/{kind}/{item_id}/{action}?sub={quote(str(p.subject), safe='')}")
@@ -767,7 +767,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 return [], False
 
         async def books_part() -> tuple[list[dict], bool]:
-            if not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+            if not (media and p.member and p.can("books") and media.enabled()):
                 sources["books"] = "off"
                 return [], False
             try:
@@ -1045,7 +1045,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             return [x for x in got if isinstance(x, dict)]
 
         async def books_part() -> list[dict]:
-            if not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+            if not (media and p.member and p.can("books") and media.enabled()):
                 sources["books"] = "off"
                 return []
             try:
@@ -1130,7 +1130,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             return out
 
         async def books_part() -> list[dict]:
-            if not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+            if not (media and p.member and p.can("books") and media.enabled()):
                 sources["books"] = "off"
                 return []
             try:
@@ -1176,7 +1176,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
         """A comic, ebook or audiobook request's cover, fetched from the media site (signed) and served from here, so
         this site's CSP stays images-from-itself-and-TMDB. 404 when there is none: the page keeps the letter tile."""
         p = need(request, "requests")
-        if kind not in BOOK_KINDS or item_id < 1 or not (media and p.kind == "plex" and p.can("books") and media.enabled()):
+        if kind not in BOOK_KINDS or item_id < 1 or not (media and p.member and p.can("books") and media.enabled()):
             raise HTTPException(404, "No cover.")
         body = await media.cover(kind, item_id)
         if not body:

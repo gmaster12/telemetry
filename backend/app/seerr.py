@@ -419,7 +419,7 @@ class Requests:
 
     async def seerr_user(self, principal, directory) -> int | None:
         """The Seerr user id to act as. None means Seerr's own administrator (user 1): local admin logins."""
-        if principal.kind != "plex":
+        if not principal.member:
             return None
         pid = str(principal.subject)
         known = self.link_for(pid)
@@ -435,8 +435,8 @@ class Requests:
             username = u.get("username") or None
             sid = await self._find(email, username)
             how = "matched"
-            if not sid:
-                # Same as Seerr's "Import Plex users", for this one person.
+            if not sid and principal.kind == "plex":
+                # Same as Seerr's "Import Plex users", for this one person (an Emby member has no Plex id).
                 try:
                     await self.client().call("POST", "/user/import-from-plex", body={"plexIds": [pid]})
                 except SeerrError as e:
@@ -445,7 +445,7 @@ class Requests:
                 how = "imported"
             if not sid:
                 if not email:
-                    raise SeerrError(409, "Your Plex account has no email address, so a Seerr account cannot be made for you. Ask the admin to add you in Seerr.")
+                    raise SeerrError(409, "Your account has no email address, so a Seerr account cannot be made for you. Ask the admin to add you in Seerr.")
                 # Seerr's Plex check only sees servers its own Plex account shares. Make the account by email:
                 # signing in to Seerr with Plex later finds it by the same email.
                 made = await self.client().call("POST", "/user", body={"email": email, "username": username or email.split("@")[0],

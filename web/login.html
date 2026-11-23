@@ -27,6 +27,9 @@
   .lg__btn--plex { background: #b8f265; color: #0f1720; }
   .lg__btn--plex:hover { background: #c6f77f; }
   .lg__btn--dark { background: #f9fafb; color: #0f1720; }
+  .lg__btn--emby { background: #52b54b; color: #0f1720; }
+  .lg__btn--emby:hover { background: #63c55c; }
+  .lg__btn[hidden] { display: none; }
   .lg__btn--quiet { height: 40px; padding: 0 12px; background: transparent; color: #9daaa9; font-weight: 500; }
   .lg__btn:disabled { opacity: 0.55; cursor: default; }
   .lg__btn:focus-visible, .lg__input:focus-visible, .lg__link:focus-visible { outline: 2px solid #b8f265; outline-offset: 3px; }
@@ -58,8 +61,14 @@
   <div class="lg__label">Telemetry</div>
   <section class="lg__card" aria-labelledby="lg-title">
     <h1 class="lg__title" id="lg-title">Sign in</h1>
-    <p class="lg__sub">Use the Plex account you watch Greystar servers with.</p>
+    <p class="lg__sub">Use the Plex or Emby account you watch Greystar servers with.</p>
     <button type="button" class="lg__btn lg__btn--plex" id="plex">Sign in with Plex</button>
+    <button type="button" class="lg__btn lg__btn--emby" id="show-emby" aria-expanded="false" aria-controls="emby" hidden>Sign in with Emby</button>
+    <form class="lg__form" id="emby" hidden>
+      <label class="lg__field">Emby Connect email or Emby name<input class="lg__input" id="eu" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required></label>
+      <label class="lg__field">Password<input class="lg__input" id="ep" name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="lg__btn lg__btn--dark" id="emby-go">Sign in with Emby</button>
+    </form>
     <p class="lg__msg lg__msg--wait" id="wait" role="status" hidden></p>
     <p class="lg__msg lg__msg--error" id="err" role="alert" hidden></p>
     <div class="lg__or">or</div>
@@ -70,7 +79,7 @@
       <button type="submit" class="lg__btn lg__btn--dark" id="local-go">Sign in</button>
     </form>
   </section>
-  <p class="lg__foot">Plex shows Greystar Telemetry as asking to sign in. The dashboard only reads your name and email; it never sees your Plex password.</p>
+  <p class="lg__foot">Plex shows Greystar Telemetry as asking to sign in. The dashboard only reads your name and email; it never sees your Plex password. An Emby password is checked by Emby and never kept.</p>
 </main>
 <script src="login.js"></script>
 </body>

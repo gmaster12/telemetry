@@ -1,5 +1,5 @@
-/* Greystar Telemetry sign-in: Plex PIN flow for viewers and the Plex admin,
-   username and password for local admin logins. */
+/* Greystar Telemetry sign-in: Plex PIN flow for viewers and the Plex admin, Emby (Connect or local
+   password) for Emby members, username and password for local admin logins. */
 (function () {
   'use strict';
   var HEADERS = { 'Content-Type': 'application/json', 'X-Requested-With': 'greystar' };
@@ -91,6 +91,27 @@
     form.hidden = !form.hidden;
     showLocal.setAttribute('aria-expanded', form.hidden ? 'false' : 'true');
     if (!form.hidden) document.getElementById('u').focus();
+  });
+
+  // Emby members: shown only when the server has Emby sign-in set up.
+  var embyForm = document.getElementById('emby');
+  var showEmby = document.getElementById('show-emby');
+  fetch('/api/auth/options', { credentials: 'same-origin', cache: 'no-store' }).then(read)
+    .then(function (o) { showEmby.hidden = !(o && o.emby); }).catch(function () {});
+  showEmby.addEventListener('click', function () {
+    embyForm.hidden = !embyForm.hidden;
+    showEmby.setAttribute('aria-expanded', embyForm.hidden ? 'false' : 'true');
+    if (!embyForm.hidden) document.getElementById('eu').focus();
+  });
+  embyForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    showError('');
+    var go = document.getElementById('emby-go');
+    go.disabled = true; go.textContent = 'Signing in…';
+    post('/api/auth/emby', { username: document.getElementById('eu').value.trim(), password: document.getElementById('ep').value })
+      .then(done)
+      .catch(function (x) { showError(x.message); document.getElementById('ep').value = ''; document.getElementById('ep').focus(); })
+      .finally(function () { go.disabled = false; go.textContent = 'Sign in with Emby'; });
   });
 
   form.addEventListener('submit', function (e) {

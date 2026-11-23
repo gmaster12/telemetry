@@ -84,7 +84,7 @@
     if (me.kind === 'plex' && (me.role === 'admin' || window.dash.can('history'))) {
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(true); openHistory('me', me.name); } }, icon('history', 18), 'My playback history'));
     }
-    if (me.role !== 'admin' && me.kind === 'plex' && mySub && mySub.configured && window.gsHome) {
+    if (me.role !== 'admin' && me.kind !== 'local' && mySub && mySub.configured && window.gsHome) {
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); window.gsHome.show('subscription'); } }, icon('bookmark', 18), 'My subscription'));
     }
     // Phones: Settings is here instead of the gear in the top bar (Glenn's pick 3A), which leaves room for the bell.
@@ -373,7 +373,7 @@
   var mySub = null;
   function loadMySubscription() {
     startServers();
-    if (!me || me.kind !== 'plex') return;
+    if (!me || me.kind === 'local') return;
     api('GET', '/api/me/subscription').then(function (r) { mySub = r; renderMySub(); if (window.gsHome) window.gsHome.refresh(); }).catch(function () {});
   }
   // For the viewer home (home.js): the subscription door reuses these.
@@ -538,6 +538,7 @@
       if (u.admin) tags.appendChild(el('span', { class: 'gp-tag gp-tag--admin', text: 'Administrator' }));
       if (u.owner) tags.appendChild(el('span', { class: 'gp-tag', text: 'Server owner' }));
       if (u.shared && !u.owner) tags.appendChild(el('span', { class: 'gp-tag', text: 'Shared user' }));
+      if (u.emby) tags.appendChild(el('span', { class: 'gp-tag', text: 'Emby member' }));
       if (u.disabled) tags.appendChild(el('span', { class: 'gp-tag gp-tag--off', text: 'Access off' }));
       if (tags.childNodes.length) who.appendChild(tags);
       var s = statsBlock(r.stats);
