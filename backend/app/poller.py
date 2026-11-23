@@ -51,6 +51,7 @@ class Poller:
         self.clips = Clips(os.environ.get("CLIPS_DIR") or Path(getattr(store, "path", "data/x.db")).parent / "clips")
         self.directory = Directory(store)
         self.active_plays: dict[tuple[int, str], dict] = {}   # (server id, session key) -> open play
+        self.emby_plays = None  # emby_plays.EmbyPlays when Emby is set up (main.py): Emby watch history
         # Remembered across restarts, so a restart does not redo a full plex.tv and Stripe copy.
         self.users_synced_at: float = self._saved_time("users_synced_at")
         self.users_sync_error: str | None = None
@@ -433,6 +434,7 @@ class Poller:
         self.clips.prune()
         side = [asyncio.create_task(self._telemetry_loop()), asyncio.create_task(self._upkeep_loop()),
                 asyncio.create_task(self.clips.worker(self._clip_source))]
+        emby_import = False  # the first Emby backfill runs once, after the first live round set emby_live_since
         try:
             while True:
                 try:
@@ -441,6 +443,15 @@ class Poller:
                         self.record_minute()
                 except Exception:
                     log.exception("poll cycle failed")
+                if self.emby_plays is not None:
+                    try:
+                        await self.emby_plays.poll()
+                    except Exception:
+                        log.exception("Emby history tracking failed")
+                    if not emby_import:
+                        emby_import = True
+                        if not self.store.get_setting("emby_history_imported_at"):
+                            side.append(asyncio.create_task(self._emby_import()))
                 self._wake.clear()
                 try:
                     await asyncio.wait_for(self._wake.wait(), timeout=self.cfg.poll_seconds)
@@ -449,6 +460,12 @@ class Poller:
         finally:
             for t in side:
                 t.cancel()
+
+    async def _emby_import(self) -> None:
+        try:
+            await self.emby_plays.import_history()
+        except Exception:
+            log.exception("Emby history import failed")
 
     async def _telemetry_loop(self) -> None:
         while True:

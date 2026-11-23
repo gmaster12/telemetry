@@ -50,6 +50,7 @@
   function shortDay(t) { return new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); }
   function dayKey(t) { var d = new Date(t * 1000); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
   function fromKey(k) { var p = k.split('-'); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function stamp(t) { return shortDay(t) + ' · ' + clock(t); }  // every line carries its date and time
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   var TINTS = ['rose', 'sand', 'lilac', 'sky'];
   function avatar(name, big) {
@@ -284,7 +285,7 @@
   function step(e) {
     return el('li', { class: 'al-step al-step--' + e.type },
       el('span', { class: 'al-step__dot', 'aria-hidden': 'true' }),
-      el('span', { class: 'al-step__time', text: clock(e.at) }),
+      el('span', { class: 'al-step__time', text: stamp(e.at) }),
       el('span', { class: 'al-step__label', text: e.label }),
       el('span', { class: 'al-step__detail', text: e.detail || '' }),
       el('span', { class: 'al-sr', text: ' (' + (TYPE[e.type] || e.type) + ')' }));
@@ -305,14 +306,8 @@
         el('div', { class: 'al-card__meta' }, meta.join(' · '), v.ip ? el('span', { class: 'al-ip', text: ' · ' + v.ip }) : null,
           how ? el('span', { text: ' · ' + how }) : null)),
       el('div', { class: 'al-card__dur' }, v.how === 'denied' ? null : el('div', { class: 'al-card__mins' }, String(v.minutes), el('small', { text: ' min' })), endWords(v)));
-    var evs = v.events;
-    var open = !!state.open[v.id];
-    var SHOW = 6;
-    var shown = open ? evs : evs.slice(0, SHOW);
-    var list = el('ol', { class: 'al-steps' + (open ? ' is-open' : '') }, shown.map(step));
-    var more = evs.length > SHOW ? el('button', { type: 'button', class: 'al-link al-card__more', 'aria-expanded': open ? 'true' : 'false',
-      onclick: function () { state.open[v.id] = !open; paintList(); },
-      text: open ? 'Show less' : 'Show all ' + evs.length + ' (+' + (evs.length - SHOW) + ' more)' }) : null;
-    return el('article', { class: 'al-card' + (v.how === 'denied' ? ' al-card--denied' : '') }, head, list, more);
+    // Every step, top down, oldest first (Glenn's ask, Nov 23 2026): no folded strip.
+    var list = el('ol', { class: 'al-steps is-open' }, v.events.map(step));
+    return el('article', { class: 'al-card' + (v.how === 'denied' ? ' al-card--denied' : '') }, head, list);
   }
 })();

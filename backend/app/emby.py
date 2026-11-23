@@ -73,6 +73,15 @@ class EmbyAuth:
         self._users = (time.time(), users)
         return users
 
+    async def image(self, item_id: str) -> tuple[bytes, str] | None:
+        """An item's cover (watch history, emby_plays.py), or None."""
+        try:
+            r = await self._client().get(f"{self.url}/Items/{item_id}/Images/Primary", params={"maxHeight": 450, "quality": 90},
+                                         headers={"X-Emby-Token": self.api_key}, timeout=10)
+        except httpx.HTTPError:
+            return None
+        return (r.content, r.headers.get("content-type", "image/jpeg")) if r.status_code == 200 else None
+
     async def _local(self, user: dict, password: str) -> bool:
         c = self._client()
         try:

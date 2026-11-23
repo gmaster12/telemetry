@@ -108,7 +108,7 @@
 .al-card__more { margin-top: 12px; font-size: 13px; }
 .al-steps.is-open { grid-template-columns: 1fr; gap: 0; }
 .al-steps.is-open::before { left: 7px; right: auto; top: 8px; bottom: 8px; width: 2px; height: auto; }
-.al-steps.is-open .al-step { display: grid; grid-template-columns: 76px minmax(0, auto) minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 0 6px 28px; }
+.al-steps.is-open .al-step { display: grid; grid-template-columns: 136px minmax(0, auto) minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 0 6px 28px; }
 .al-steps.is-open .al-step__dot { top: 8px; }
 .al-steps.is-open .al-step__detail { min-height: 0; }
 .al-more { align-self: center; margin-top: 6px; }
@@ -124,10 +124,10 @@
   .al-stat__n { font-size: 34px; }
   .al-steps, .al-steps:not(.is-open) { grid-template-columns: 1fr; }
   .al-steps::before { left: 7px; right: auto; top: 8px; bottom: 8px; width: 2px; height: auto; }
-  .al-step { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 2px 10px; padding: 6px 0 6px 28px; }
+  .al-step { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 2px 10px; padding: 6px 0 6px 28px; }
   .al-step__dot { top: 8px; }
   .al-step__detail { grid-column: 2; min-height: 0; }
-  .al-steps.is-open .al-step { grid-template-columns: 64px minmax(0, 1fr); }
+  .al-steps.is-open .al-step { grid-template-columns: 120px minmax(0, 1fr); }
   .al-bars { height: 72px; gap: 2px; }
   .al-axis__mid { display: none; }
 }

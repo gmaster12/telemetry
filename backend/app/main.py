@@ -36,6 +36,7 @@ from .poller import Poller
 from . import request_log
 from .media import Media
 from .emby import EmbyAuth, EmbyError, member_id as emby_member_id
+from .emby_plays import SERVER as EMBY_SERVER, EmbyPlays
 from .backup import Backups
 from .request_state import LOG_GROUPS, RequestStatus
 from .requests_api import IMAGES, make_router
@@ -53,6 +54,8 @@ poller = Poller(store)
 seerr = Requests(store, poller.http)
 media = Media(store, poller.http)
 emby = EmbyAuth(env("EMBY_URL"), env("EMBY_API_KEY"), poller.http)
+if emby.enabled():
+    poller.emby_plays = EmbyPlays(emby, directory, store)
 arr = Arr(store, poller.http)
 onplex = OnPlex(store, seerr, poller)
 # Where a request stands, asked of Radarr/Sonarr and Plex the same way everywhere (app/request_state.py)
@@ -316,6 +319,20 @@ def api_clip(request: Request, server_id: int, rating_key: str):
         raise HTTPException(404)
     poller.clips.touch(p)
     return FileResponse(p, media_type="video/mp4", headers={"Cache-Control": "private, max-age=86400"})
+
+
+@app.get("/api/emby/poster/{item_id}")
+async def api_emby_poster(request: Request, item_id: str):
+    """An Emby cover for watch history (emby_plays.py)."""
+    p = me(request)
+    if not (p.can("streams") or p.can("mystreams") or p.can("history")):
+        raise HTTPException(403, "You do not have access to this section.")
+    if not emby.enabled() or not item_id.isalnum() or len(item_id) > 40:
+        raise HTTPException(404)
+    got = await emby.image(item_id)
+    if not got:
+        raise HTTPException(404)
+    return Response(got[0], media_type=got[1], headers={"Cache-Control": "private, max-age=86400"})
 
 
 @app.get("/api/poster/{server_id}/{rating_key}")
@@ -1013,7 +1030,8 @@ def _history_rows(rows: list[dict]) -> list[dict]:
             "resolution": r["resolution"], "started_at": r["started_at"], "stopped_at": r["stopped_at"],
             "watched_min": round((r["watched_sec"] or 0) / 60), "progress_pct": r["progress_pct"], "source": r["source"],
             "live": r["stopped_at"] is None,
-            "poster": f"/api/poster/{sid}/{r['rating_key']}" if sid and r["rating_key"] and r["art"] else None,
+            "poster": (f"/api/emby/poster/{r['art']}" if r["server"] == EMBY_SERVER and r["art"] else
+                       f"/api/poster/{sid}/{r['rating_key']}" if sid and r["rating_key"] and r["art"] else None),
         })
     return out
 
@@ -1413,6 +1431,12 @@ async def import_history():
     except Exception:
         pass
     r = await poller.import_history()
+    if poller.emby_plays is not None:  # Emby's activity log too (emby_plays.py)
+        try:
+            e = await poller.emby_plays.import_history()
+            r = {**r, "added": r.get("added", 0) + e["added"], "already_had": r.get("already_had", 0) + e["skipped"]}
+        except Exception as x:  # noqa: BLE001
+            r = {**r, "errors": list(r.get("errors") or []) + [f"Emby: {x}"]}
     store.set_setting("history_imported_at", str(int(time.time())))
     return r
 

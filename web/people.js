@@ -81,7 +81,7 @@
     box.appendChild(btn);
     if (!menuOpen) return;
     var items = [];
-    if (me.kind === 'plex' && (me.role === 'admin' || window.dash.can('history'))) {
+    if (me.kind !== 'local' && (me.role === 'admin' || window.dash.can('history'))) {
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(true); openHistory('me', me.name); } }, icon('history', 18), 'My playback history'));
     }
     if (me.role !== 'admin' && me.kind !== 'local' && mySub && mySub.configured && window.gsHome) {
@@ -149,6 +149,7 @@
     var tags = el('span', { class: 'gp-play__tags' });
     if (r.live) tags.appendChild(el('span', { class: 'gp-tag gp-tag--live' }, el('i', { 'aria-hidden': 'true' }), 'Live'));
     if (r.source === 'plex') tags.appendChild(el('span', { class: 'gp-tag', text: 'From Plex history' }));
+    if (r.source === 'emby') tags.appendChild(el('span', { class: 'gp-tag', text: 'From Emby history' }));
     if (r.source === 'live' && r.progress_pct != null && !r.live) tags.appendChild(el('span', { class: 'gp-tag', text: Math.round(r.progress_pct) + '% watched' }));
     return el('li', { class: 'gp-play' + (r.live ? ' is-live' : '') }, thumb,
       el('span', { class: 'gp-play__main' },
@@ -591,7 +592,7 @@
     if (!window.dash.can('history')) { card.hidden = true; return; }
     card.hidden = false;
     card.append(el('div', { class: 'sd-sec-head' }, el('h2', { class: 'sd-sec-title', id: 'people-title', text: 'My history' })));
-    if (me.kind !== 'plex') return;
+    if (me.kind === 'local') return;
     api('GET', '/api/me/history?limit=50').then(function (r) {
       var s = statsBlock(r.stats);
       var wrap = el('div', { class: 'gp-mine' });

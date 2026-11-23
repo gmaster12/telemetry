@@ -110,6 +110,11 @@ API Keys) in `.env`, then `docker compose up -d --force-recreate`. Without
 them the button is hidden. A disabled Emby user, or an Emby Connect account not
 linked to a user on that server, is refused. See `backend/app/emby.py`.
 
+With Emby set up, Emby watch history is kept like Plex's (`backend/app/emby_plays.py`):
+Emby's sessions are read every poll, and on first start Emby's activity log is
+imported once (Settings' history import runs it again; nothing is added twice).
+Emby plays show as server "Emby" on My history and People, with Emby covers.
+
 Sections: Live streams, Servers, Bandwidth, When people watch, My history.
 Viewers never see email addresses of other people or any settings.
 

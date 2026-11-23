@@ -476,17 +476,34 @@ class Directory:
                     self.db.execute(f"UPDATE users SET {', '.join(sets)} WHERE plex_id = ?", vals + [u["id"]])
             self.db.commit()
 
-    def upsert_emby_user(self, member: str, emby_id: str, name: str | None, email: str | None) -> None:
-        """An Emby member (emby.py), kept under their member id. Name and email follow Emby on every sign-in."""
+    def upsert_emby_user(self, member: str, emby_id: str, name: str | None, email: str | None, seen: bool = False) -> None:
+        """An Emby member (emby.py), kept under their member id. Name and email follow Emby on every sign-in;
+        seen: they are playing something now (emby_plays.py)."""
         now = int(time.time())
         with self.lock:
             self.db.execute(
-                "INSERT INTO users (plex_id, username, title, email, shared, is_owner, first_seen, servers, source, emby_id) "
-                "VALUES (?,?,?,?,0,0,?,?, 'emby', ?) ON CONFLICT(plex_id) DO UPDATE SET username = excluded.username, "
-                "title = excluded.title, email = COALESCE(excluded.email, users.email), source = 'emby', emby_id = excluded.emby_id",
-                (member, name, name, email, now, "[]", emby_id),
+                "INSERT INTO users (plex_id, username, title, email, shared, is_owner, first_seen, last_seen, servers, source, emby_id) "
+                "VALUES (?,?,?,?,0,0,?,?,?, 'emby', ?) ON CONFLICT(plex_id) DO UPDATE SET username = COALESCE(excluded.username, users.username), "
+                "title = COALESCE(excluded.title, users.title), email = COALESCE(excluded.email, users.email), source = 'emby', "
+                "emby_id = excluded.emby_id, last_seen = COALESCE(excluded.last_seen, users.last_seen)",
+                (member, name, name, email, now, now if seen else None, '["Emby"]', emby_id),
             )
             self.db.commit()
+
+    def import_emby_play(self, rec: dict) -> bool:
+        """A play from Emby's activity log (emby_plays.py). False when it is already here."""
+        with self.lock:
+            cur = self.db.execute(
+                """INSERT OR IGNORE INTO plays (server, session_key, user_id, username, rating_key, art, title, subtitle, kind, device,
+                   resolution, started_at, last_seen, stopped_at, watched_sec, progress_pct, duration_min, parent_key, season, tmdb_id, source)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'emby')""",
+                (rec["server"], rec["session_key"], rec["user_id"], rec.get("username"), rec["rating_key"], rec.get("art"), rec.get("title"),
+                 rec.get("subtitle"), rec.get("kind"), rec.get("device"), rec.get("resolution"), rec["started_at"], rec["stopped_at"],
+                 rec["stopped_at"], rec.get("watched_sec") or 0, rec.get("progress_pct"), rec.get("duration_min"),
+                 rec.get("parent_key") or None, rec.get("season"), rec.get("tmdb_id")),
+            )
+            self.db.commit()
+            return cur.rowcount > 0
 
     def saw_user(self, plex_id: str, name: str | None, thumb: str | None) -> None:
         """Seen streaming: add the user if new, otherwise only fill blanks and update last_seen."""
