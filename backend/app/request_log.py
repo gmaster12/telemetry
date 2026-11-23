@@ -49,17 +49,18 @@ def iso_to_epoch(s: str | None) -> int | None:
         return None
 
 
-def state_of(row: dict, q: dict | None, known: bool) -> str:
+def state_of(row: dict, q: dict | None, known: bool, stage: str | None = None) -> str:
+    """`stage`: the request's stage with Radarr/Sonarr and Plex asked (RequestStatus.check), when known."""
     if row.get("ended"):
         return row["ended"]
     if q is None:
         return "gone" if known and row.get("seerr_request") else "unknown"
-    st = rs.stage_of(q, is4k=bool(row.get("is4k")))
+    st = stage or rs.stage_of(q, is4k=bool(row.get("is4k")))
     return LOG_ID.get(st, st)
 
 
-def shape(row: dict, q: dict | None, known: bool, person: dict | None) -> dict:
-    s = state_of(row, q, known)
+def shape(row: dict, q: dict | None, known: bool, person: dict | None, stage: str | None = None) -> dict:
+    s = state_of(row, q, known, stage)
     label, tone, group = STATES[s]
     decided = None
     if q and REQUEST_STATUS.get(q.get("status")) in ("approved", "declined", "completed") and (q.get("modifiedBy") or {}).get("displayName"):
@@ -140,10 +141,30 @@ async def mark_unreleased(svc: Requests, rows: list[dict], today: str | None = N
     await asyncio.gather(*[one(r) for r in rows if r["kind"] in ("movie", "tv") and r.get("tmdb") and r["state"] in UNRELEASED_CHECK])
 
 
-async def build(svc: Requests, directory, media=None, errors: dict | None = None) -> tuple[list[dict], str | None]:
+LIVE_CHECK = ("approved", "downloading", "partial")  # Seerr's word can lag Radarr/Sonarr and Plex in these
+
+
+async def live_stages(status, pairs: list[tuple[dict, dict]]) -> dict[int, str]:
+    """{log row id: stage} for requests Seerr still calls approved, downloading or partly available, decided the
+    way the title pages decide them (Radarr/Sonarr, then Plex itself), so the log never lags those pages."""
+    gate = asyncio.Semaphore(6)
+    todo = [(row, q) for row, q in pairs if q and not row.get("ended")
+            and rs.stage_of(q, is4k=bool(row.get("is4k"))) in LIVE_CHECK]
+
+    async def one(row: dict, q: dict) -> tuple[int, str | None]:
+        try:
+            return row["id"], (await status.check({**q, "is4k": bool(row.get("is4k"))}, gate)).get("stage")
+        except Exception:  # noqa: BLE001  (a quiet Radarr or Plex leaves the row to Seerr's word)
+            return row["id"], None
+    return {i: st for i, st in await asyncio.gather(*[one(r, q) for r, q in todo]) if st}
+
+
+async def build(svc: Requests, directory, media=None, errors: dict | None = None,
+                status=None) -> tuple[list[dict], str | None]:
     """Every logged request, newest first, with its state now: movies and series from the log and Seerr, comics,
     ebooks and audiobooks from the media site when Books & comics is on. Returns (rows, error). With `errors`, the
-    media site's problem goes in errors["media"] instead of being added to the error."""
+    media site's problem goes in errors["media"] instead of being added to the error. With `status`
+    (request_state.RequestStatus), Radarr/Sonarr and Plex are asked too, as the title pages do."""
     rows = svc.log_rows()
     by_id: dict[int, dict] = {}
     known, error = False, None
@@ -154,14 +175,16 @@ async def build(svc: Requests, directory, media=None, errors: dict | None = None
         except SeerrError as e:
             error = e.message
     people: dict[str, dict | None] = {}
+    pairs = [(r, by_id.get(int(r["seerr_request"])) if r.get("seerr_request") else None) for r in rows]
+    live = await live_stages(status, pairs) if status is not None and known else {}
     out = []
-    for r in rows:
+    for r, q in pairs:
         person = None
         if r["who_kind"] == "plex":
             if r["who_id"] not in people:
                 people[r["who_id"]] = directory.get_user(r["who_id"])
             person = people[r["who_id"]]
-        out.append(shape(r, by_id.get(int(r["seerr_request"])) if r.get("seerr_request") else None, known, person))
+        out.append(shape(r, q, known, person, live.get(r["id"])))
     if known:
         await mark_unreleased(svc, out)
     media_error = None

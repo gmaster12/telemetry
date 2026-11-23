@@ -143,3 +143,41 @@ def test_books_comics_and_audiobooks_are_in_the_log_and_unreleased_titles_are_ma
     # The media site not answering: movies and series still show, with a note
     rows, err = asyncio.run(request_log.build(svc, d, FakeMedia([], fail=True)))
     assert [r["title"] for r in rows] == ["Inception", "Night Harbor"] and "Media site" in err
+
+
+def test_log_asks_radarr_and_plex_like_the_title_page_does(env):
+    """Seerr still says approved, but Plex already has it: the log says Available, as the title page does."""
+    from app import request_log
+    store, d, svc = env
+    d.upsert_user({"id": "2001", "username": "sable", "email": "s@x.com"}, shared=True)
+    c = app_for(svc, d, principal("2001", "s@x.com", "sable"))
+    assert c.post("/api/requests/request", json={"mediaType": "movie", "mediaId": 27205}).json()["ok"]
+    rq = {r["media"]["tmdbId"]: r for r in M.state["requests"]}
+    rq[27205]["status"], rq[27205]["media_status"] = 2, 3   # approved, Seerr says processing
+    svc.clear_cache()
+
+    class Status:
+        def __init__(self, stage, fail=False):
+            self.stage, self.fail, self.asked = stage, fail, 0
+
+        async def check(self, q, gate=None):
+            self.asked += 1
+            if self.fail:
+                raise RuntimeError("Plex is quiet")
+            return {"stage": self.stage, "plex_at": 1.0}
+
+    rows, _ = asyncio.run(request_log.build(svc, d))
+    assert rows[0]["state"] == "approved" and rows[0]["hint"] == "Waiting for a download"
+    st = Status("ready")
+    rows, _ = asyncio.run(request_log.build(svc, d, status=st))
+    assert st.asked == 1 and rows[0]["state"] == "available" and rows[0]["group"] == "available" and rows[0]["hint"] is None
+    rows, _ = asyncio.run(request_log.build(svc, d, status=Status("importing")))
+    assert rows[0]["state"] == "importing"
+    rows, _ = asyncio.run(request_log.build(svc, d, status=Status("ready", fail=True)))
+    assert rows[0]["state"] == "approved"   # a quiet Plex or Radarr leaves it to Seerr
+
+    rq[27205]["media_status"] = 5   # Seerr caught up: nothing left to ask
+    svc.clear_cache()
+    st = Status("approved")
+    rows, _ = asyncio.run(request_log.build(svc, d, status=st))
+    assert st.asked == 0 and rows[0]["state"] == "available"

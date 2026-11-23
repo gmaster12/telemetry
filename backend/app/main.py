@@ -1566,7 +1566,7 @@ async def requests_log(q: str = "", kind: str = "", group: str = "all", page: in
     """Every request made through this site: who, what, when, and where it stands now. Movies and series (Seerr),
     and comics, ebooks and audiobooks (the media site)."""
     errors: dict = {}
-    rows, error = await request_log.build(seerr, directory, media, errors)
+    rows, error = await request_log.build(seerr, directory, media, errors, status=status)
     flags = seerr.help.flags([r["request"] for r in rows if r.get("request")])
     for r in rows:  # the one retry and Notify admin (app/request_help.py)
         f = flags.get(r.get("request") or 0) or {}
@@ -1591,7 +1591,7 @@ async def requests_log_cover(kind: str, item_id: int):
 
 @app.get("/api/settings/requests/log.csv")
 async def requests_log_csv(q: str = "", kind: str = "", group: str = "all", tz: int = 0):
-    rows, _ = await request_log.build(seerr, directory, media)
+    rows, _ = await request_log.build(seerr, directory, media, status=status)
     rows = [r for r in rows if request_log.matches(r, q.strip(), kind, group)]
     tzinfo = dt.timezone(dt.timedelta(minutes=max(-14 * 60, min(14 * 60, tz))))
     name = "requests-" + dt.datetime.now(tzinfo).strftime("%Y-%m-%d") + ".csv"
