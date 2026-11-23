@@ -101,7 +101,14 @@ Then open **Settings** (the sliders button in the top bar):
 | The Plex accounts in `ADMIN_PLEX_EMAIL` | Sign in with Plex | Everything, plus Settings |
 | Admin logins | Administrator sign-in (username and password) | Everything, plus Settings |
 | Anyone you share a Plex server with, or who has streamed | Sign in with Plex | Only the sections allowed in Access (default: their own history) |
+| Users on the Greystar Emby server (linked Emby Connect account, or a local Emby password) | Sign in with Emby | The same as a Plex viewer (default sections); never an admin |
 | Any other Plex account | Refused | Nothing |
+
+Emby sign-in needs `EMBY_URL` (the Emby server, e.g. its ZeroTier address
+`http://172.25.244.168:8096`) and `EMBY_API_KEY` (Emby Dashboard, Advanced,
+API Keys) in `.env`, then `docker compose up -d --force-recreate`. Without
+them the button is hidden. A disabled Emby user, or an Emby Connect account not
+linked to a user on that server, is refused. See `backend/app/emby.py`.
 
 Sections: Live streams, Servers, Bandwidth, When people watch, My history.
 Viewers never see email addresses of other people or any settings.
