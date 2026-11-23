@@ -106,3 +106,36 @@
   .nt-scrim, .nt-sheet, .nt-pop { transition: none; }
   .nt-sheet { transform: none; }
 }
+
+/* ---------- Phone & computer alerts (push.js): the strip in the sheet and its own panel ---------- */
+.nt-push { display: flex; align-items: center; gap: 12px; width: 100%; margin: 0 0 8px; padding: 14px 18px; box-sizing: border-box; border: 0;
+  border-radius: 20px; background: var(--surface-sunken); color: var(--ink); font: inherit; font-size: 14.5px; text-align: left; cursor: pointer; }
+.nt-push:hover { background: color-mix(in srgb, var(--volt) 18%, var(--surface-sunken)); }
+.nt-push.is-on { background: color-mix(in srgb, var(--volt) 22%, var(--surface-card)); }
+.nt-push__t { flex: 1 1 auto; font-weight: 600; }
+.nt-push__go { flex: none; padding: 6px 14px; border-radius: 999px; background: var(--surface-ink, #0f1720); color: #fff; font-size: 13px; font-weight: 600; }
+.pu-sheet { max-width: 640px; }
+.pu-body { display: flex; flex-direction: column; gap: 18px; padding-bottom: 8px; }
+.pu-status { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px; border-radius: 22px; background: var(--surface-sunken); }
+.pu-status.is-on { background: color-mix(in srgb, var(--volt) 22%, var(--surface-card)); }
+.pu-status b { font-size: 17px; font-weight: 600; }
+.pu-status > span { font-size: 14px; line-height: 20px; color: var(--ink-muted); }
+.pu-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+.pu-msg { margin: 8px 0 0; font-size: 14px; }
+.pu-msg--ok { color: var(--ink); font-weight: 600; }
+.pu-msg--error { color: var(--danger); font-weight: 600; }
+.pu-ios { padding: 14px 18px; border-radius: 20px; box-shadow: inset 0 0 0 1px var(--border-strong, rgba(127, 127, 127, .3)); font-size: 14px; line-height: 21px; }
+.pu-ios.is-here { box-shadow: inset 0 0 0 2px var(--volt); }
+.pu-ios summary { cursor: pointer; font-weight: 600; font-size: 15px; }
+.pu-ios ol { margin: 8px 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.pu-key { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: var(--surface-sunken); font-weight: 700; }
+.pu-sec { display: flex; flex-direction: column; gap: 8px; }
+.pu-h { margin: 0; font-size: 15px; font-weight: 600; }
+.pu-choices { display: flex; flex-direction: column; gap: 4px; }
+.pu-choice { display: flex; align-items: center; gap: 12px; padding: 8px 4px; font-size: 14.5px; cursor: pointer; }
+.pu-choice input { width: 20px; height: 20px; accent-color: var(--volt); }
+.pu-muted { margin: 0; font-size: 13px; color: var(--ink-muted); }
+.pu-devs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.pu-devs li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.pu-devs li > span:first-child { flex: 1 1 auto; }
+.pu-tag { padding: 3px 10px; border-radius: 999px; background: var(--volt); color: var(--on-fill); font-size: 12px; font-weight: 600; }

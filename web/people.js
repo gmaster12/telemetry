@@ -87,6 +87,9 @@
     if (me.role !== 'admin' && me.kind !== 'local' && mySub && mySub.configured && window.gsHome) {
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); window.gsHome.show('subscription'); } }, icon('bookmark', 18), 'My subscription'));
     }
+    if (window.gsPush) {   // push.js: turn alerts on for this phone or computer
+      items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); window.gsPush.open(); } }, icon('bookmark', 18), 'Phone & computer alerts'));
+    }
     // Phones: Settings is here instead of the gear in the top bar (Glenn's pick 3A), which leaves room for the bell.
     if (window.gsUI.isPhone() && window.sdOpenSettings) {
       items.push(el('button', { type: 'button', role: 'menuitem', class: 'gp-menu__item', onclick: function () { closeMenu(); window.sdOpenSettings(true, true); } }, icon('sliders', 18), 'Settings'));

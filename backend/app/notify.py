@@ -111,6 +111,7 @@ class Notifier:
         self.db.commit()
         self.last_error: str | None = None
         self.ticked_at: float = 0
+        self.push: Any = None   # push.Push (main.py): new notices also go to people's phones and computers
 
     # ---------- the list ----------
     def post(self, who: str, key: str, kind: str, title: str, body: str | None = None, action: str | None = None,
@@ -126,6 +127,7 @@ class Notifier:
                     "INSERT INTO notifications (who, key, kind, urgent, title, body, action, href, media, poster, created, updated) "
                     "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", (who, key, kind, int(urgent), title, body, action, href, media, poster, now, now))
                 self.db.commit()
+                self._push(who, kind, title, body, href, key)
                 return int(cur.lastrowid)
             nid = int(row["id"])
             if row["title"] != title or (row["body"] or "") != (body or "") or row["resolved_at"]:
@@ -134,7 +136,16 @@ class Notifier:
                                 (kind, int(urgent), title, body, action, href, media, poster, now, nid))
                 self.db.execute("DELETE FROM notify_seen WHERE id = ?", (nid,))
                 self.db.commit()
+                self._push(who, kind, title, body, href, key)
             return nid
+
+    def _push(self, who: str, kind: str, title: str, body: str | None, href: str | None, key: str) -> None:
+        """News (new, or changed so it counts as new again) also goes out as a push (push.py), sent after the check."""
+        if self.push is not None:
+            try:
+                self.push.queue(who, kind, title, body, href, key)
+            except Exception:  # noqa: BLE001  a push is extra; the list is what counts
+                log.exception("Notifications: could not queue a push")
 
     def resolve(self, who: str, key: str, title: str | None = None, body: str | None = None, now: float | None = None) -> bool:
         """Closes an urgent one (paid, back up, handled). With a title it also says what happened, as news."""
@@ -147,6 +158,8 @@ class Notifier:
                 self.db.execute("UPDATE notifications SET title = ?, body = ?, action = NULL, resolved_at = ?, updated = ? WHERE id = ?",
                                 (title, body, now, now, row["id"]))
                 self.db.execute("DELETE FROM notify_seen WHERE id = ?", (row["id"],))
+                k = self.db.execute("SELECT kind, href FROM notifications WHERE id = ?", (row["id"],)).fetchone()
+                self._push(who, k["kind"], title, body, k["href"], key)
             else:
                 self.db.execute("UPDATE notifications SET resolved_at = ? WHERE id = ?", (now, row["id"]))
             self.db.commit()
@@ -323,10 +336,16 @@ class Notifier:
         self.billing_tick(now)
         self.admin_tick(now)
         await self.issues_tick(now)
+        await self.member_issues_tick(now)
         if seeding:
             self.store.set_setting("notify_seeded", str(now))
         self.prune(now)
         self.ticked_at = now
+        if self.push is not None:
+            try:
+                await self.push.flush()
+            except Exception:  # noqa: BLE001
+                log.exception("Notifications: push sending failed")
 
     def _tz(self):
         name = self.store.get_setting("cleanup_tz") or "America/Chicago"
@@ -582,6 +601,61 @@ class Notifier:
             row = self.db.execute("SELECT title FROM notifications WHERE who = ? AND key = ?", (ADMINS, old)).fetchone()
             what = (row["title"].split(" problem with ", 1)[-1] if row else "a title")
             self.resolve(ADMINS, old, f"Issue resolved: {what}", "It was marked resolved.", now)
+
+
+    async def member_issues_tick(self, now: int, take: int = 50) -> None:
+        """Problems a member reported (Seerr issues they made): a reply from someone else, and it being resolved, go to
+        that member. `notify_state` keeps each issue's last change, newest reply id and status, so each is said once.
+        The first run only records where every issue is (`member_issues_seeded`); an issue first seen later that was
+        made before that is recorded silently too."""
+        if not (self.seerr and self.seerr.configured()):
+            return
+        try:
+            res = await self.seerr.client().call("GET", "/issue", params={"take": take, "skip": 0, "sort": "modified", "filter": "all"})
+        except SeerrError as e:
+            log.info("Notifications: Seerr issues not answering: %s", e.message)
+            return
+        seeded = self.store.get_setting("member_issues_seeded")
+        people = self._seerr_people()
+        for i in (res or {}).get("results") or []:
+            creator = (i.get("createdBy") or {}).get("id")
+            if creator is None or int(creator) not in people:
+                continue
+            key = f"missue:{i['id']}"
+            old = self._state(key)
+            if old is not None and old.split("|")[0] == (i.get("updatedAt") or ""):
+                continue
+            try:
+                full = await self.seerr.client().call("GET", f"/issue/{int(i['id'])}")
+            except SeerrError:
+                continue
+            others = [c for c in full.get("comments") or [] if (c.get("user") or {}).get("id") not in (None, creator) and c.get("message")]
+            last = max([int(c["id"]) for c in others] or [0])
+            status = int(full.get("status") or 1)
+            self._set_state(key, f"{i.get('updatedAt') or ''}|{last}|{status}", now)
+            created = _stamp(i.get("createdAt")) or 0
+            if not seeded or (old is None and created < int(seeded)):
+                continue   # where it already stood: not news
+            o_last, o_status = (int(old.split("|")[1]), int(old.split("|")[2])) if old else (0, 1)
+            m = i.get("media") or {}
+            kind = m.get("mediaType") or "movie"
+            tmdb = m.get("tmdbId")
+            info = await self.seerr.title_of(kind, int(tmdb)) if tmdb else {}
+            what = info.get("title") or "a title"
+            s, e = i.get("problemSeason") or 0, i.get("problemEpisode") or 0
+            what += f", season {s} episode {e}" if s and e else f", season {s}" if s else ""
+            href = f"#/requests/{'series' if kind == 'tv' else 'movie'}/{tmdb}" if tmdb else "#/requests/mine"
+            for c in sorted((c for c in others if int(c["id"]) > o_last), key=lambda c: int(c["id"])):
+                said = (c.get("message") or "").strip()
+                for pid in people[int(creator)]:
+                    self.post(f"plex:{pid}", f"{key}:c{c['id']}", "reply", f"Reply about your report on {what}",
+                              f"\u201c{said[:220]}\u201d", "Open", href, media=kind, poster=info.get("poster"), now=now)
+            if status == 2 and o_status != 2:
+                for pid in people[int(creator)]:
+                    self.post(f"plex:{pid}", f"{key}:resolved", "reply", f"Fixed: the problem you reported with {what}",
+                              "It was marked resolved. Thanks for letting us know.", "Open", href, media=kind, poster=info.get("poster"), now=now)
+        if not seeded:
+            self.store.set_setting("member_issues_seeded", str(now))
 
 
 def poster_url(path: str | None) -> str | None:

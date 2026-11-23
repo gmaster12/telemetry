@@ -61,7 +61,7 @@
   // What each kind looks like: icon and tint class (the tints are the dashboard's own pastel tokens).
   var KIND = { billing: ['card', 'ember'], needs: ['alert', 'danger'], server: ['server', 'amber'], cleanup: ['broom', 'sand'], backup: ['disk', 'danger'],
     requests: ['inbox', 'lilac'], ready: ['check', 'volt'], started: ['down', 'sky'], problem: ['alert', 'danger'],
-    issue: ['alert', 'amber'] };
+    issue: ['alert', 'amber'], reply: ['inbox', 'sky'] };
   var MEDIA = { movie: ['film', 'rose', 'Movie'], tv: ['tv', 'lilac', 'Show'], comic: ['book', 'sand', 'Comic'],
     ebook: ['book', 'peri', 'Ebook'], audiobook: ['headphones', 'sky', 'Audio'] };
 
@@ -242,6 +242,7 @@
           : count + (count === 1 ? ' thing to catch up on' : ' things to catch up on') + (s && auto ? ' since ' + s : '') + '.' })),
       close);
     var body = el('div', { class: 'nt-body' },
+      pushStrip(),
       section('Needs action', pinned, 'Stays here until it is sorted out'),
       section('New', fresh),
       section('Earlier', older),
@@ -252,6 +253,22 @@
            el('button', { type: 'button', class: 'nt-btn nt-btn--lg nt-btn--accent', text: 'Mark all as seen', onclick: seeAll })]
         : el('button', { type: 'button', class: 'nt-btn nt-btn--lg', text: 'Close', onclick: function () { hide(false); } }));
     panel.replaceChildren(el('div', { class: 'gs-sheet__grab', 'aria-hidden': 'true' }), head, body, foot);
+  }
+
+  // Phone & computer alerts (push.js): one line at the top of the sheet saying whether this device gets them.
+  var pushState = null;
+  function pushStrip() {
+    if (!window.gsPush) return null;
+    var words = { on: ['Alerts are on for this device', 'Manage'], off: ['Get these on your phone or computer', 'Turn on'],
+      'ios-home': ['Get these on your iPhone or iPad', 'How to'], unsupported: null };
+    var w = words[pushState || 'off'];
+    if (!w) return null;
+    return el('button', { type: 'button', class: 'nt-push' + (pushState === 'on' ? ' is-on' : ''), onclick: function () { hide(true); window.gsPush.open(); } },
+      icon('bell', 18), el('span', { class: 'nt-push__t', text: w[0] }), el('span', { class: 'nt-push__go', text: w[1] }));
+  }
+  function refreshPushState() {
+    if (!window.gsPush) return;
+    window.gsPush.state().then(function (s) { var was = pushState; pushState = s; if (open && was !== s) paint(); }).catch(function () {});
   }
 
   function seeAll() {
@@ -270,6 +287,7 @@
       try { sessionStorage.setItem(SESSION_KEY, '1'); } catch (e) { /* storage blocked */ }
       U.api('POST', '/api/notifications/shown').catch(function () {});
     }
+    refreshPushState();
     if (open) { paint(); return; }
     opener = byItself ? null : document.activeElement;
     open = true;

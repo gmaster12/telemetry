@@ -30,6 +30,7 @@ from .cleanup import Cleanup
 from .globe import SAMPLE_SERVERS, GeoDB, Globe, SampleGlobe
 from .netdata import NetdataClient
 from .notify import Notifier, make_router as notify_router
+from .push import CHOICES as PUSH_CHOICES, Push
 from .onplex import OnPlex
 from .plex import PlexAccount, PlexClient
 from .poller import Poller
@@ -72,6 +73,18 @@ poller.globe = globe
 backups = Backups(store)   # nightly copies of the database in data/backups (Glenn's pick K2A)
 notifier = Notifier(store, seerr=seerr, arr=arr, media=media, billing=poller.billing, directory=directory, poller=poller, cleanup=cleanup,
                     status=status, backups=backups)
+
+
+def _push_admin(kind: str, wid: str) -> bool:
+    """Is this device's owner an admin right now (gets the shared admin notices)."""
+    if kind == "local":
+        return directory.get_admin_by_id(int(wid)) is not None if str(wid).isdigit() else False
+    u = directory.get_user(wid) if kind == "plex" else None
+    return bool(u and not u.get("disabled") and is_admin_email(u.get("email")))
+
+
+push = Push(store, poller.http, _push_admin)   # phones and computers (app/push.py)
+notifier.push = push
 add_requests_section(store)
 add_mystreams_section(store)
 add_books_section(store)
@@ -127,7 +140,7 @@ PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), int
 
 
 # ---------- auth ----------
-PUBLIC_PATHS = {"/healthz", "/login.html", "/login.js", "/system.css", "/manifest.webmanifest", "/favicon.ico"}
+PUBLIC_PATHS = {"/healthz", "/login.html", "/login.js", "/system.css", "/manifest.webmanifest", "/favicon.ico", "/sw.js"}
 PUBLIC_PREFIXES = ("/assets/", "/vendor/", "/api/auth/")
 
 
@@ -1818,6 +1831,96 @@ async def cleanup_delete(item_id: int, request: Request):
 
 app.include_router(make_router(seerr, directory, need, media, cleanup, arr, onplex, status))
 app.include_router(notify_router(notifier, me, lambda: poller.cfg.use_sample))
+
+
+# ---------- phone and computer alerts (Web Push, app/push.py; web/push.js and web/sw.js) ----------
+class PushSubIn(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=1000)
+    p256dh: str = Field(min_length=20, max_length=200)
+    auth: str = Field(min_length=10, max_length=100)
+    device: str | None = Field(default=None, max_length=200)
+
+
+class PushOffIn(BaseModel):
+    endpoint: str = Field(min_length=10, max_length=1000)
+
+
+class PushChoicesIn(BaseModel):
+    choices: dict[str, bool]
+
+
+def _push_who(p: Principal) -> str:
+    return f"{p.kind}:{p.subject}"
+
+
+@app.get("/api/push")
+def push_config(request: Request, endpoint: str = ""):
+    """The key the browser subscribes with, this person's devices and what they get. endpoint: is this device on."""
+    p = me(request)
+    devs = push.devices(p.kind, p.subject)
+    return {"publicKey": push.public_key(), "choices": push.choices(_push_who(p), p.is_admin),
+            "labels": [{"key": c["key"], "label": c["label"]} for c in PUSH_CHOICES if p.is_admin or not c.get("admin")],
+            "devices": [{"id": d["id"], "device": d["device"], "created": d["created"], "last_ok": d["last_ok"],
+                         "this": bool(endpoint) and d["endpoint"] == endpoint} for d in devs],
+            "thisDevice": bool(endpoint) and any(d["endpoint"] == endpoint for d in devs)}
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(body: PushSubIn, request: Request):
+    p = me(request)
+    try:
+        push.subscribe(p.kind, p.subject, body.endpoint, body.p256dh, body.auth, body.device)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    activity.record(request, p, "change", "Turned on phone & computer alerts", body.device)
+    return {"ok": True}
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(body: PushOffIn, request: Request):
+    p = me(request)
+    return {"ok": push.unsubscribe(p.kind, p.subject, body.endpoint)}
+
+
+@app.delete("/api/push/devices/{dev_id}")
+def push_forget(dev_id: int, request: Request):
+    p = me(request)
+    d = next((x for x in push.devices(p.kind, p.subject) if x["id"] == dev_id), None)
+    if not d:
+        raise HTTPException(404, "That device is not on your list.")
+    return {"ok": push.unsubscribe(p.kind, p.subject, d["endpoint"])}
+
+
+@app.put("/api/push/choices")
+def push_choices(body: PushChoicesIn, request: Request):
+    p = me(request)
+    push.set_choices(_push_who(p), body.choices)
+    return {"choices": push.choices(_push_who(p), p.is_admin)}
+
+
+@app.post("/api/push/test")
+async def push_test(request: Request):
+    """A test alert to every device this person turned on. Says how each one went."""
+    p = me(request)
+    if throttled("push-test:" + _push_who(p), limit=6, window=300):
+        raise HTTPException(429, "Wait a few minutes before sending another test.")
+    record_failure("push-test:" + _push_who(p))   # counts every test, so the limit is 6 per 5 minutes
+    devs = [dict(r) for r in store.db.execute("SELECT * FROM push_subs WHERE who_kind = ? AND who_id = ?", (p.kind, str(p.subject)))]
+    if not devs:
+        raise HTTPException(409, "Turn alerts on for this device first.")
+    msg = {"title": "Greystar test alert", "body": "Alerts are working on this device.", "url": "/", "tag": "push-test", "kind": "test"}
+    out = []
+    for d in devs:
+        st = await push.send(d, msg)
+        out.append({"device": d["device"], "ok": 200 <= st < 300, "status": st})
+    return {"results": out}
+
+
+@app.get("/sw.js")
+def service_worker():
+    """The alerts service worker. Served from the root so it covers the whole site; never cached, so updates land."""
+    return FileResponse(Path(WEB_DIR) / "sw.js", media_type="text/javascript",
+                        headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
 
 
 # ---------- static dashboard ----------
