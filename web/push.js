@@ -29,6 +29,42 @@
       : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '';
     return os + (standalone ? ' · Home Screen app' : br ? ' · ' + br : '');
   }
+  // How to allow alerts by hand, for the browser in use. Shown when the browser blocked them, or answered without
+  // asking (Chrome's quieter messaging, or a prompt dismissed a few times: Chrome then stops asking for a while).
+  function allowSteps() {
+    var android = /Android/.test(ua), mac = /Mac OS X/.test(ua) && !isIOS, win = /Windows/.test(ua);
+    var br = /Edg\//.test(ua) ? 'edge' : /Firefox\//.test(ua) ? 'firefox' : /SamsungBrowser/.test(ua) ? 'samsung'
+      : /OPR\//.test(ua) ? 'opera' : /Chrome\//.test(ua) ? 'chrome' : /Safari\//.test(ua) ? 'safari' : 'other';
+    var s;
+    if (android && br !== 'firefox') {
+      s = ['Tap the icon to the left of the web address at the top.', 'Tap Permissions (or Site settings), then Notifications.',
+        'Choose Allow.', 'Come back here and tap Turn on alerts again.'];
+    } else if (br === 'chrome' || br === 'opera') {
+      s = ['Look at the right end of the address bar: if there is a bell with a line through it, click it and choose Allow. Otherwise:',
+        'Click the icon to the left of the web address (two sliders), then Site settings.',
+        'Next to Notifications, choose Allow.', 'Come back to this tab, reload the page, and tap Turn on alerts again.'];
+    } else if (br === 'edge') {
+      s = ['Look at the right end of the address bar: if there is a bell with a line through it, click it and choose Allow. Otherwise:',
+        'Click the lock icon to the left of the web address, then Permissions for this site.',
+        'Next to Notifications, choose Allow.', 'Reload the page and tap Turn on alerts again.'];
+    } else if (br === 'firefox') {
+      s = ['Click the icon to the left of the web address (a lock, or a speech bubble with a line through it).',
+        'Next to Send notifications, remove Blocked (click the \u2715), or choose Allow.', 'Reload the page and tap Turn on alerts again.'];
+    } else if (br === 'safari' && mac) {
+      s = ['In the menu bar choose Safari, then Settings (or Preferences), then Websites.', 'Choose Notifications on the left.',
+        'Find streaming.greystarnetworks.com and set it to Allow.', 'Reload the page and tap Turn on alerts again.'];
+    } else {
+      s = ['Open this browser\u2019s settings for streaming.greystarnetworks.com (often the icon to the left of the web address).',
+        'Set Notifications to Allow.', 'Reload the page and tap Turn on alerts again.'];
+    }
+    var os = win ? 'Still nothing pops up? In Windows, open Settings, System, Notifications, and make sure your browser is turned on (and Do not disturb is off).'
+      : mac ? 'Still nothing pops up? On the Mac, open System Settings, Notifications, choose your browser, and turn on Allow notifications (and check Focus is off).'
+      : android ? 'Still nothing pops up? In Android Settings, Apps, choose your browser, Notifications, and make sure they are on.' : null;
+    var box = el('div', { class: 'pu-help' }, el('ol', null, s.map(function (t) { return el('li', { text: t }); })));
+    if (os) box.appendChild(el('p', { class: 'pu-muted', text: os }));
+    box.appendChild(el('button', { type: 'button', class: 'nt-btn', text: 'Reload the page', onclick: function () { location.reload(); } }));
+    return box;
+  }
   function keyBytes(b64) {
     var s = (b64 + '='.repeat((4 - b64.length % 4) % 4)).replace(/-/g, '+').replace(/_/g, '/');
     var raw = atob(s), out = new Uint8Array(raw.length);
@@ -56,7 +92,7 @@
     busy = true; msg = null; paint();
     // Permission is asked inside the tap (Safari only allows it there).
     Promise.resolve(Notification.permission === 'granted' ? 'granted' : Notification.requestPermission()).then(function (perm) {
-      if (perm !== 'granted') throw new Error(perm === 'denied' ? 'blocked' : 'Alerts were not allowed. Tap Turn on again and choose Allow.');
+      if (perm !== 'granted') throw new Error(perm === 'denied' ? 'blocked' : 'quiet');
       return registration();
     }).then(function (reg) {
       return reg.pushManager.getSubscription().then(function (old) {
@@ -69,7 +105,9 @@
       msg = ['ok', 'Alerts are on for this device. Send a test to check.'];
       return load();
     }).catch(function (e) {
-      msg = ['error', e.message === 'blocked' ? null : (e.message || 'Alerts could not be turned on.')];
+      msg = e.message === 'blocked' ? null
+        : e.message === 'quiet' ? ['help', 'Your browser did not show the Allow question. It may be hiding it, or it stops asking after a few times. Allow alerts by hand:']
+        : ['error', e.message || 'Alerts could not be turned on.'];
       return load();
     }).then(function () { busy = false; paint(); });
   }
@@ -132,7 +170,8 @@
     } else if (!supported) {
       line('This browser cannot show alerts', 'Try Chrome, Edge, Firefox or Safari. Everything still shows under the bell here.');
     } else if (Notification.permission === 'denied') {
-      line('Alerts are blocked for this site', 'Your browser was told not to allow them. Allow notifications in this site\u2019s settings (the lock or info icon next to the address), then come back and tap Turn on.');
+      line('Alerts are blocked for this site', 'This browser was told not to allow alerts from this site. To turn them on:');
+      box.appendChild(allowSteps());
     } else if (on) {
       line('On for this device', 'New things show on this device even when the site is closed.');
       act.append(el('button', { type: 'button', class: 'nt-btn nt-btn--accent', disabled: busy, text: 'Send a test', onclick: test }),
@@ -143,6 +182,7 @@
     }
     if (act.childNodes.length) box.appendChild(act);
     if (msg && msg[1]) box.appendChild(el('p', { class: 'pu-msg pu-msg--' + msg[0], role: 'status', text: msg[1] }));
+    if (msg && msg[0] === 'help') box.appendChild(allowSteps());
     return box;
   }
 

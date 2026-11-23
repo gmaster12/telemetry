@@ -139,3 +139,7 @@
 .pu-devs li { display: flex; align-items: center; gap: 10px; font-size: 14px; }
 .pu-devs li > span:first-child { flex: 1 1 auto; }
 .pu-tag { padding: 3px 10px; border-radius: 999px; background: var(--volt); color: var(--on-fill); font-size: 12px; font-weight: 600; }
+.pu-msg--help { color: var(--ink); font-weight: 600; }
+.pu-help { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; padding: 14px 16px; border-radius: 16px; background: var(--surface-card); font-size: 14px; line-height: 21px; }
+.pu-help ol { margin: 0; padding-left: 22px; display: flex; flex-direction: column; gap: 6px; }
+.pu-help .nt-btn { align-self: flex-start; }
