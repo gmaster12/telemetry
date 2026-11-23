@@ -144,3 +144,56 @@ def test_member_history_shows_emby_plays_with_emby_covers(app):
     assert h["rows"][0]["server"] == "Emby" and h["rows"][0]["poster"] == "/api/emby/poster/17845384"
     assert c.get("/api/emby/poster/17845384").content == b"JPEG"
     assert c.get("/api/emby/poster/..%2Fx").status_code == 404
+
+
+
+def test_live_streams_list_emby_sessions_with_the_plex_card_shape(app):
+    M = app
+    fake = FakeEmby()
+    ep = EmbyPlays(fake.auth(), M.directory, M.store)
+    s = session({**EP, "Container": "mkv", "Bitrate": 4_000_000,
+                 "MediaStreams": [{"Type": "Video", "Codec": "h264", "Height": 720}, {"Type": "Audio", "Codec": "aac", "Channels": 2, "Index": 1}]})
+    fake.sessions = [s]
+    asyncio.run(ep.poll(now=1000))
+    [c] = ep.streams
+    assert c["source"] == "emby" and c["server"] == "Emby" and c["id"] == "Emby-s1" and c["user_id"] == member_id(STEVE)
+    assert (c["title"], c["method"], c["resolution"], c["bitrate_mbps"], c["state"]) == ("Rules of Engagement", "Direct play", "720p", 4.0, "Playing")
+    assert c["source_video"] == "H264 720p" and c["source_audio"] == "AAC 2ch" and c["poster"] == "/api/emby/poster/17845384"
+    # Every key a Plex card has, so no card style breaks.
+    from app.plex import normalize_session
+    from app.config import ServerCfg
+    plex = normalize_session(ServerCfg(id=1, name="P", plex_url="http://p"), {"type": "movie", "title": "X", "Media": [{}]})
+    assert set(plex) - {"_art", "_ip"} <= set(c)
+    # A missed answer keeps the card, marked; three in a row drop it.
+    fake.fail = True
+    asyncio.run(ep.poll(now=1010))
+    assert ep.streams[0]["stale"] is True
+    asyncio.run(ep.poll(now=1020)); asyncio.run(ep.poll(now=1030))
+    assert ep.streams == []
+
+
+def test_emby_streams_appear_in_the_list_and_can_be_stopped(app, monkeypatch):
+    M = app
+    from app.auth import new_session
+    fake = FakeEmby()
+    calls = []
+    orig = fake.handler
+    def handler(req):
+        calls.append((req.method, req.url.path))
+        if req.url.path.startswith("/Sessions/s1/"):
+            return httpx.Response(204)
+        return orig(req)
+    fake.handler = handler
+    M.poller.emby_plays = EmbyPlays(fake.auth(), M.directory, M.store)
+    fake.sessions = [session(EP)]
+    asyncio.run(M.poller.emby_plays.poll(now=1000))
+    M.poller.streams = list(M.poller.emby_plays.streams)
+    monkeypatch.setattr(type(M.poller.cfg), "use_sample", property(lambda self: False))
+    monkeypatch.setenv("ADMIN_PLEX_EMAIL", "boss@x.com")
+    M.directory.upsert_user({"id": "9001", "username": "boss", "email": "boss@x.com"}, shared=True)
+    c = TestClient(M.app)
+    c.cookies.set("gst_session", new_session(M.directory, "plex", "9001"))
+    rows = c.get("/api/streams").json()["rows"]
+    assert [r["source"] for r in rows] == ["emby"]
+    r = c.post("/api/streams/Emby-s1/stop", json={"reason": "bye"}, headers={"X-Requested-With": "greystar"})
+    assert r.status_code == 200 and ("POST", "/Sessions/s1/Playing/Stop") in calls and ("POST", "/Sessions/s1/Message") in calls

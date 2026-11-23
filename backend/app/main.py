@@ -1000,6 +1000,15 @@ async def stop_stream(stream_id: str, body: StopIn, request: Request):
         raise HTTPException(404, "That stream has already ended.")
     if not row.get("session_id"):
         raise HTTPException(409, "Plex did not give a session id for this stream, so it cannot be stopped from here.")
+    if row.get("source") == "emby" and poller.emby_plays is not None:
+        reason = body.reason.strip() or "This stream was stopped by the server admin."
+        try:
+            await poller.emby_plays.stop(row["session_id"], reason)
+        except Exception as e:
+            raise HTTPException(502, f"Emby did not stop the stream: {str(e)[:200]}")
+        log.info("Stream %s on Emby stopped by %s", stream_id, p.name)
+        poller.refresh_now()
+        return {"ok": True}
     s = next((x for x in poller.cfg.servers if x.name == row["server"]), None)
     if not s:
         raise HTTPException(404, "That server is no longer set up.")

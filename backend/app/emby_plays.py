@@ -97,6 +97,8 @@ class EmbyPlays:
         self.directory = directory
         self.store = store
         self.active: dict[str, dict] = {}  # session key -> {id, rating_key, last}
+        self.streams: list[dict] = []      # this round's Live streams cards (stream()); kept when a round fails
+        self.misses = 0
         self.error: str | None = None
 
     def enabled(self) -> bool:
@@ -113,6 +115,56 @@ class EmbyPlays:
         return member
 
     # ---------- live ----------
+    def stream(self, s: dict, r: dict) -> dict:
+        """The Live streams card for one Emby session, in the shape plex.normalize_session gives (`r` is self.row)."""
+        item = s.get("NowPlayingItem") or {}
+        ps = s.get("PlayState") or {}
+        ti = s.get("TranscodingInfo") or {}
+        streams = item.get("MediaStreams") or []
+        vid = next((x for x in streams if x.get("Type") == "Video"), {})
+        aidx = ps.get("AudioStreamIndex")
+        aud = next((x for x in streams if x.get("Type") == "Audio" and (aidx is None or x.get("Index") == aidx)), None) \
+            or next((x for x in streams if x.get("Type") == "Audio"), {})
+        sidx = ps.get("SubtitleStreamIndex")
+        sub = next((x for x in streams if x.get("Type") == "Subtitle" and sidx not in (None, -1) and x.get("Index") == sidx), {})
+        audio_only = item.get("MediaType") == "Audio"
+        src_res = "Audio" if audio_only else (res_label(vid.get("Height") or item.get("Height")) or "")
+        src_v = "None" if audio_only else f"{str(vid.get('Codec') or '').upper()} {src_res}".strip()
+        src_a = " ".join(p for p in (str(aud.get("Codec") or "").upper(), f"{aud['Channels']}ch" if aud.get("Channels") else "") if p)
+        tc = r["method"] == "Transcode"
+        v_direct = not tc or ti.get("IsVideoDirect", True)
+        a_direct = not tc or ti.get("IsAudioDirect", True)
+        out_v = src_v if v_direct else f"{str(ti.get('VideoCodec') or '').upper()} {r['resolution'] or ''}".strip()
+        out_a = src_a if a_direct else " ".join(p for p in (str(ti.get("AudioCodec") or "").upper(), f"{ti['AudioChannels']}ch" if ti.get("AudioChannels") else "") if p)
+        bps = ti.get("Bitrate") or item.get("Bitrate") or 0
+        mbps = round(float(bps) / 1_000_000, 1)
+        runtime = int(item.get("RunTimeTicks") or 0)
+        pos = int(ps.get("PositionTicks") or 0)
+        container = str(item.get("Container") or "").upper()
+        out_container = str(ti.get("Container") or "").upper()
+        hw = ti.get("VideoEncoderIsHardware") or ti.get("VideoDecoderIsHardware")
+        reasons = ", ".join(re.sub(r"(?<!^)(?=[A-Z])", " ", x).lower().capitalize() for x in (ti.get("TranscodeReasons") or []))
+        return {
+            "id": f"Emby-{s.get('Id')}", "session_id": s.get("Id"), "rating_key": r["rating_key"],
+            "parent_key": r.get("parent_key") or "", "season": r.get("season"), "tmdb_id": r.get("tmdb_id"),
+            "user": r.get("user") or "Unknown", "user_id": r["user_id"], "user_thumb": None,
+            "title": r["title"], "subtitle": r["subtitle"], "kind": r["kind"], "device": r.get("device") or "",
+            "platform": r.get("platform") or "", "player": " ".join(p for p in (s.get("Client"), s.get("ApplicationVersion")) if p),
+            "resolution": r.get("resolution") or src_res, "method": r["method"], "bitrate_mbps": mbps,
+            "bitrate_estimated": False, "bitrate_reported_mbps": None, "server": SERVER, "server_id": None,
+            "state": r["state"], "progress_pct": r.get("progress_pct") or 0, "elapsed_min": round(pos / TICKS / 60),
+            "duration_min": round(runtime / TICKS / 60) if runtime else 0, "location": r["location"],
+            "source_video": src_v, "stream_video": out_v, "video_decision": "None" if audio_only else ("Direct play" if v_direct else "Transcode"),
+            "source_audio": src_a, "stream_audio": out_a, "audio_decision": "Direct play" if a_direct else "Transcode",
+            "container": container if not out_container or out_container == container else f"{container} → {out_container}",
+            "subtitles": sub.get("DisplayTitle") or sub.get("Language") or "None",
+            "transcode_reason": reasons or ("None" if not tc else "Unknown"),
+            "hw_accel": ("Hardware" if hw else "None (CPU)") if tc else "None",
+            "transcode_speed": None, "throttled": False,
+            "quality": f"{round(mbps)} Mbps {r.get('resolution') or ''}".strip() if tc else "Original",
+            "poster": f"/api/emby/poster/{r['art']}" if r.get("art") else None, "clip": None, "source": "emby",
+        }
+
     def row(self, s: dict) -> dict | None:
         item = s.get("NowPlayingItem") or {}
         if not item.get("Id") or not s.get("UserId") or item.get("MediaType") not in ("Video", "Audio", None):
@@ -141,12 +193,16 @@ class EmbyPlays:
         except (httpx.HTTPError, ValueError) as e:
             self.error = str(e)
             log.warning("Emby sessions failed: %s", e)
+            self.misses += 1  # a missed answer or two is not an outage: keep the cards, marked; then drop them
+            self.streams = [{**x, "stale": True} for x in self.streams] if self.misses < 3 else []
             return 0
         self.error = None
+        self.misses = 0
         now = now or int(time.time())
         if not self.store.get_setting("emby_live_since"):
             self.store.set_setting("emby_live_since", str(now))
         seen = set()
+        cards = []
         for s in sessions or []:
             r = self.row(s)
             if not r:
@@ -154,6 +210,10 @@ class EmbyPlays:
             key = r["session_key"]
             seen.add(key)
             r["user_id"] = self._person(r.pop("emby_user"), r.get("user"))
+            try:
+                cards.append(self.stream(s, r))
+            except Exception:  # noqa: BLE001  a card is a nice-to-have; history still counts
+                log.exception("Emby stream card failed")
             act = self.active.get(key)
             if act and act["rating_key"] != r["rating_key"]:
                 self.directory.stop_play(act["id"])
@@ -171,7 +231,19 @@ class EmbyPlays:
         for key in list(self.active):
             if key not in seen:
                 self.directory.stop_play(self.active.pop(key)["id"])
+        self.streams = cards
         return len(seen)
+
+    async def stop(self, session_id: str, reason: str) -> None:
+        """Stop one Emby stream (the admin's Stop stream), showing the reason on the person's screen first."""
+        c, h = self.auth._client(), {"X-Emby-Token": self.auth.api_key}
+        try:
+            await c.post(f"{self.auth.url}/Sessions/{session_id}/Message", headers=h, timeout=10,
+                         json={"Header": "Stream stopped", "Text": reason, "TimeoutMs": 10000})
+        except httpx.HTTPError:
+            pass  # the message is a courtesy; stopping is what matters
+        r = await c.post(f"{self.auth.url}/Sessions/{session_id}/Playing/Stop", headers=h, timeout=10)
+        r.raise_for_status()
 
     # ---------- backfill from Emby's activity log ----------
     async def import_history(self, page: int = 5000, max_entries: int = 500_000) -> dict:

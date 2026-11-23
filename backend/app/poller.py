@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import time
+from typing import Any
 from pathlib import Path
 
 import httpx
@@ -51,7 +52,7 @@ class Poller:
         self.clips = Clips(os.environ.get("CLIPS_DIR") or Path(getattr(store, "path", "data/x.db")).parent / "clips")
         self.directory = Directory(store)
         self.active_plays: dict[tuple[int, str], dict] = {}   # (server id, session key) -> open play
-        self.emby_plays = None  # emby_plays.EmbyPlays when Emby is set up (main.py): Emby watch history
+        self.emby_plays: Any = None  # emby_plays.EmbyPlays when Emby is set up (main.py): Emby watch history
         # Remembered across restarts, so a restart does not redo a full plex.tv and Stripe copy.
         self.users_synced_at: float = self._saved_time("users_synced_at")
         self.users_sync_error: str | None = None
@@ -227,7 +228,9 @@ class Poller:
         for r in rows:
             r.pop("_art_path", None)
             r.pop("_ip", None)  # used for the globe's city lookup only; never kept or sent
-        self.streams = rows
+        # Emby streams (emby_plays.py) are listed with Plex ones, marked source "emby"; they are not in the bandwidth
+        # history or the globe, which follow the Plex servers.
+        self.streams = rows + (list(self.emby_plays.streams) if self.emby_plays is not None else [])
         self.last_poll = time.time()
 
     def track_plays(self, rows: list[dict], online_servers: set[int]) -> None:
@@ -437,6 +440,12 @@ class Poller:
         emby_import = False  # the first Emby backfill runs once, after the first live round set emby_live_since
         try:
             while True:
+                # Emby first, so poll_plex publishes Plex and Emby streams together (no flicker between the two).
+                if self.emby_plays is not None:
+                    try:
+                        await self.emby_plays.poll()
+                    except Exception:
+                        log.exception("Emby history tracking failed")
                 try:
                     if not self.cfg.use_sample:
                         await self.poll_plex()
@@ -444,10 +453,6 @@ class Poller:
                 except Exception:
                     log.exception("poll cycle failed")
                 if self.emby_plays is not None:
-                    try:
-                        await self.emby_plays.poll()
-                    except Exception:
-                        log.exception("Emby history tracking failed")
                     if not emby_import:
                         emby_import = True
                         if not self.store.get_setting("emby_history_imported_at"):

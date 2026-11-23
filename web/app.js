@@ -1081,8 +1081,11 @@
       n.animate([{ transform: 'translate(' + dx + 'px, ' + dy + 'px)' }, { transform: 'none' }], { duration: GLIDE_MS, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' });
     });
   }
+  // Emby streams (server "Emby") stand out with an EMBY badge on every view: cards, phone rows and the table.
+  const isEmby = (r) => r.source === 'emby';
+  function embyBadge() { const b = el('span', 'sd-emby', 'EMBY'); b.title = 'Playing on the Greystar Emby server'; return b; }
   function streamCard(r) {
-    const wrap = el('div', 'sd-flip');
+    const wrap = el('div', 'sd-flip' + (isEmby(r) ? ' is-emby' : ''));
     const inner = el('div', 'sd-flip__inner' + (flipped.has(r.id) ? ' is-flipped' : ''));
     // A group with its own Flip button (a button holding other buttons reads as one long button).
     // A mouse can still click anywhere on the card to flip it.
@@ -1090,6 +1093,7 @@
     inner.setAttribute('aria-label', r.user + ', ' + r.title);
     inner.addEventListener('click', (e) => { if (!e.target.closest('button, a, input, select, textarea, label')) toggleFlip(r.id, inner); });
     const front = streamFront(r);
+    if (isEmby(r)) front.appendChild(embyBadge());
     const flip = el('button', 'sd-flipbtn', 'Show playback details');
     flip.type = 'button';
     flip.addEventListener('click', (e) => { e.stopPropagation(); toggleFlip(r.id, inner, true); });
@@ -1218,7 +1222,8 @@
           const bar = el('span', 'sd-prog'); bar.setAttribute('aria-hidden', 'true');
           const fill = el('i'); fill.style.width = Math.min(100, v) + '%'; bar.appendChild(fill);
           td.append(bar, document.createTextNode(n0(v) + '%'));
-        } else td.textContent = v;
+        } else if (c.key === 'server' && isEmby(r)) td.appendChild(embyBadge());
+        else td.textContent = v;
         tr.appendChild(td);
       });
       body.appendChild(tr);
@@ -1234,7 +1239,9 @@
     const th = el('span', 'sd-row__thumb'); th.setAttribute('aria-hidden', 'true');
     th.style.setProperty('--art', 'url(' + artFor(r) + ')');
     const main = el('span', 'sd-row__main');
-    main.append(el('span', 'sd-row__name', r.user), el('span', 'sd-row__meta', r.title + ' \u00b7 ' + r.server));
+    const nm = el('span', 'sd-row__name', r.user);
+    if (isEmby(r)) { nm.appendChild(document.createTextNode(' ')); nm.appendChild(embyBadge()); }
+    main.append(nm, el('span', 'sd-row__meta', r.title + ' \u00b7 ' + r.server));
     const bar = el('span', 'sd-prog'); bar.setAttribute('aria-hidden', 'true');
     const fill = el('i'); fill.style.width = Math.min(100, r.progress_pct) + '%'; bar.appendChild(fill);
     main.appendChild(bar);
