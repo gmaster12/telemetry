@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 """
 
 SECRET_SETTINGS = {"push_vapid_private", "netdata_token", "plex_account_token", "stripe_key", "seerr_key", "media_secret",
-                   "radarr_key", "sonarr_key", "radarr4k_key", "sonarr4k_key"}
+                   "radarr_key", "sonarr_key", "radarr4k_key", "sonarr4k_key", "signup_stripe_key"}
 SERVER_FIELDS = ("name", "plex_url", "max_streams", "capacity_mbps", "netdata_node", "netdata_agent_url", "machine_id", "enabled", "owner_plex_id")
 
 

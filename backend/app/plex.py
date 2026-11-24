@@ -204,6 +204,70 @@ class PlexAccount:
             })
         return out
 
+    # ---------- sharing a server with someone new (sign-up, app/signup.py) ----------
+    # The only calls in this app that change anything on plex.tv: one invite, and the new member accepting it.
+    # Nothing here edits or removes a share that already exists.
+    async def _xml(self, method: str, path: str, token: str, what: str, **kw) -> ET.Element:
+        r = await self.http.request(method, f"{PLEX_TV}{path}", headers={**self.headers, "Accept": "application/xml", "X-Plex-Token": token},
+                                    timeout=20.0, **kw)
+        if r.status_code not in (200, 201, 204):
+            e = PlexError(f"plex.tv {what} failed: HTTP {r.status_code}")
+            e.status = r.status_code   # callers tell "your sign-in ran out" (401) from "plex.tv is having a moment"
+            raise e
+        try:
+            return ET.fromstring(r.text) if r.text.strip() else ET.Element("MediaContainer")
+        except ET.ParseError:
+            return ET.Element("MediaContainer")
+
+    async def server_sections(self, owner_token: str, machine_id: str) -> list[dict]:
+        """A server's libraries as plex.tv knows them. `id` is what a share lists (not the server's own key)."""
+        root = await self._xml("GET", f"/api/servers/{machine_id}", owner_token, "library list")
+        return [{"id": str(s.attrib.get("id")), "key": s.attrib.get("key"), "title": s.attrib.get("title") or "", "type": s.attrib.get("type")}
+                for s in root.iter("Section") if s.attrib.get("id")]
+
+    async def shares(self, owner_token: str, machine_id: str) -> list[dict]:
+        """Everyone who has accepted a share of this server, with the libraries each has. (Each record also carries
+        that person's access token; it is never read.)"""
+        root = await self._xml("GET", f"/api/servers/{machine_id}/shared_servers", owner_token, "share list")
+        return [{"id": s.attrib.get("id"), "user_id": str(s.attrib.get("userID") or ""), "username": s.attrib.get("username"),
+                 "email": (s.attrib.get("email") or "").lower() or None,
+                 "sections": [str(x.attrib.get("id")) for x in s.iter("Section") if x.attrib.get("shared") == "1"]}
+                for s in root.iter("SharedServer")]
+
+    async def sent_invites(self, owner_token: str) -> list[dict]:
+        """Invites this owner sent that nobody has accepted yet. They are not in shares() until accepted."""
+        root = await self._xml("GET", "/api/invites/requested", owner_token, "sent invites")
+        return [{"id": i.attrib.get("id"), "email": (i.attrib.get("email") or "").lower() or None, "username": i.attrib.get("username"),
+                 "servers": [s.attrib.get("name") for s in i.iter("Server") if s.attrib.get("name")]} for i in root.iter("Invite")]
+
+    async def invite(self, owner_token: str, machine_id: str, email: str, section_ids: list[str]) -> None:
+        """Invite one person to these libraries of one server. An empty library list is refused here: plex.tv
+        accepts it without an error and shares nothing."""
+        ids = [int(x) for x in section_ids if str(x).isdigit()]
+        if not ids or not email:
+            raise PlexError("No libraries (or no email) to share.")
+        body = {"server_id": machine_id, "shared_server": {"library_section_ids": ids, "invited_email": email},
+                "sharing_settings": {"allowSync": "0", "allowCameraUpload": "0", "allowChannels": "0",
+                                     "filterMovies": "", "filterTelevision": "", "filterMusic": ""}}
+        r = await self.http.post(f"{PLEX_TV}/api/servers/{machine_id}/shared_servers", json=body,
+                                 headers={**self.headers, "Accept": "application/xml", "X-Plex-Token": owner_token}, timeout=20.0)
+        if r.status_code not in (200, 201):
+            raise PlexError(f"plex.tv refused the invite: HTTP {r.status_code}")
+
+    async def received_invites(self, user_token: str) -> list[dict]:
+        """Invites waiting for this person (asked with their own token)."""
+        root = await self._xml("GET", "/api/invites/requests", user_token, "invite list")
+        return [{"id": i.attrib.get("id"), "email": (i.attrib.get("email") or "").lower() or None, "username": i.attrib.get("username"),
+                 "friend": i.attrib.get("friend") or "0", "home": i.attrib.get("home") or "0", "server": i.attrib.get("server") or "0",
+                 "servers": [s.attrib.get("name") for s in i.iter("Server") if s.attrib.get("name")]} for i in root.iter("Invite")]
+
+    async def accept_invite(self, user_token: str, invite: dict) -> None:
+        """Accept one waiting invite as the invited person."""
+        if not str(invite.get("id") or "").isdigit():
+            raise PlexError("That invite has no id.")
+        params = {k: 1 if str(invite.get(k)) == "1" else 0 for k in ("friend", "home", "server")}
+        await self._xml("PUT", f"/api/invites/requests/{invite['id']}", user_token, "invite accept", params=params)
+
 
 # ---------- normalisation ----------
 

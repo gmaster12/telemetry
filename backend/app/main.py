@@ -43,6 +43,7 @@ from .request_state import LOG_GROUPS, RequestStatus
 from .requests_api import IMAGES, make_router
 from .secrets import SecretBox
 from .seerr import Requests, SeerrError
+from .signup import Signup, make_router as signup_router
 from .store import Directory, Store
 
 logging.basicConfig(level=env("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -85,6 +86,10 @@ def _push_admin(kind: str, wid: str) -> bool:
 
 push = Push(store, poller.http, _push_admin)   # phones and computers (app/push.py)
 notifier.push = push
+# Sign-up (app/signup.py): Plex account, Stripe subscription, then an automatic invite to one server.
+signup = Signup(store, directory, poller.http, lambda: client_id(), billing=poller.billing)
+signup.notifier = notifier
+signup.poller = poller
 add_requests_section(store)
 add_mystreams_section(store)
 add_books_section(store)
@@ -106,7 +111,9 @@ async def lifespan(app: FastAPI):
     geo_task = asyncio.create_task(globe.loop())
     notes = asyncio.create_task(notifier.loop())
     copies = asyncio.create_task(backups.loop())
+    joins = asyncio.create_task(signup.loop())
     yield
+    joins.cancel()
     copies.cancel()
     notes.cancel()
     task.cancel()
@@ -137,11 +144,20 @@ def csp() -> str:
     origin = media.frame_origin()
     return CSP.replace("frame-src 'none'", f"frame-src {origin}") if origin else CSP
 PERMISSIONS = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()"
+# The sign-up page alone shows Stripe's payment form (web/signup.html), so it alone may load Stripe's script and
+# frame, and use the browser's payment feature. Every other page keeps the strict headers above.
+_STRIPE = "https://js.stripe.com https://*.js.stripe.com https://checkout.stripe.com"
+SIGNUP_CSP = (CSP.replace("script-src 'self'", f"script-src 'self' {_STRIPE}")
+              .replace("connect-src 'self'", "connect-src 'self' https://api.stripe.com https://checkout.stripe.com")
+              .replace("frame-src 'none'", f"frame-src {_STRIPE} https://hooks.stripe.com")
+              .replace("img-src 'self'", "img-src 'self' https://*.stripe.com"))
+SIGNUP_PERMISSIONS = PERMISSIONS.replace("payment=()", 'payment=(self "https://js.stripe.com" "https://checkout.stripe.com")')
 
 
 # ---------- auth ----------
-PUBLIC_PATHS = {"/healthz", "/login.html", "/login.js", "/system.css", "/manifest.webmanifest", "/favicon.ico", "/sw.js"}
-PUBLIC_PREFIXES = ("/assets/", "/vendor/", "/api/auth/")
+PUBLIC_PATHS = {"/healthz", "/login.html", "/login.js", "/system.css", "/manifest.webmanifest", "/favicon.ico", "/sw.js",
+                "/signup.html", "/signup.js", "/signup.css"}
+PUBLIC_PREFIXES = ("/assets/", "/vendor/", "/api/auth/", "/api/signup/")
 
 
 @app.middleware("http")
@@ -156,7 +172,7 @@ async def session_auth(request: Request, call_next):
         if path.startswith("/api/"):
             return JSONResponse({"detail": "Sign in required."}, status_code=401)
         return RedirectResponse("/login.html", status_code=302)
-    if p is not None and path == "/login.html":
+    if p is not None and path in ("/login.html", "/signup.html"):
         return RedirectResponse("/", status_code=302)
     if path.startswith("/api/settings") and not (p and p.is_admin):
         return JSONResponse({"detail": "Administrators only."}, status_code=403)
@@ -166,6 +182,9 @@ async def session_auth(request: Request, call_next):
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "same-origin")
     resp.headers.setdefault("X-Frame-Options", "DENY")
+    if path == "/signup.html":
+        resp.headers["Content-Security-Policy"] = SIGNUP_CSP
+        resp.headers["Permissions-Policy"] = SIGNUP_PERMISSIONS
     resp.headers.setdefault("Content-Security-Policy", csp())
     resp.headers.setdefault("Permissions-Policy", PERMISSIONS)
     resp.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")  # the Plex sign-in opens in a popup
@@ -629,6 +648,8 @@ async def settings_summary():
         "arr": {k: {"url": v["url"], "has_key": v["has_key"], "error": v["error"]} for k, v in arr.settings().items()},
         "cleanup": {**cleanup.settings(), "due": cleanup.due_count()},
         "backups": {k: v for k, v in backups.status().items() if k not in ("files", "folder")},
+        "signup": {"enabled": signup.settings()["enabled"], "ready": not signup.problems(), "counts": signup.counts(),
+                   "server": (signup.server() or {}).get("name")},
     }
 
 
@@ -941,8 +962,8 @@ class EmbyLogin(BaseModel):
 
 @app.get("/api/auth/options")
 def auth_options():
-    """Which sign-in buttons the sign-in page shows."""
-    return {"emby": emby.enabled()}
+    """Which sign-in buttons the sign-in page shows, and whether it offers Sign up."""
+    return {"emby": emby.enabled(), "signup": signup.settings()["enabled"] and not signup.problems()}
 
 
 @app.post("/api/auth/emby")
@@ -1831,6 +1852,10 @@ async def cleanup_delete(item_id: int, request: Request):
 
 app.include_router(make_router(seerr, directory, need, media, cleanup, arr, onplex, status))
 app.include_router(notify_router(notifier, me, lambda: poller.cfg.use_sample))
+app.include_router(signup_router(
+    signup, admin, lambda request: _client_ip(request),
+    on_member=lambda request, row, session: activity.signed_in(request, "plex", row["plex_id"], row.get("title") or row.get("username"), session, False),
+    on_change=lambda request, label: activity.record(request, request.state.principal, "change", label)))
 
 
 # ---------- phone and computer alerts (Web Push, app/push.py; web/push.js and web/sw.js) ----------
