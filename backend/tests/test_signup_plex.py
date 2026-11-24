@@ -22,7 +22,7 @@ def test_libraries_and_shares(acct):
     libs = run(acct.server_sections(M.OWNER_TOKEN, M.MACHINE))
     assert [(x["id"], x["title"]) for x in libs] == [("11", "TV Shows"), ("12", "Movies"), ("14", "4k Movies")]
     shares = run(acct.shares(M.OWNER_TOKEN, M.MACHINE))
-    assert shares == [{"id": "500", "user_id": "2001", "username": "sable", "email": "sable@example.com", "sections": ["11", "12"]}]
+    assert shares == [{"id": "500", "user_id": "2001", "username": "sable", "email": "sable@example.com", "accepted": True, "sections": ["11", "12"]}]
     assert "SECRET-ACCESS-TOKEN" not in str(shares)   # each record carries that person's token; it is not read
 
 
@@ -61,3 +61,10 @@ def test_errors_say_what_failed_and_never_the_token(acct):
     assert e.value.status == 401 and "a-token-plex-does-not-know" not in str(e.value)
     with pytest.raises(PlexError):
         run(acct.accept_invite("tok-new", {"id": "../users", "friend": "1"}))
+
+
+def test_an_answer_that_cannot_be_read_is_an_error_not_an_empty_server(acct):
+    from app.plex import PlexError
+    M.state["garbage"] = True
+    with pytest.raises(PlexError):
+        run(acct.shares(M.OWNER_TOKEN, M.MACHINE))

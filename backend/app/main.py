@@ -649,7 +649,7 @@ async def settings_summary():
         "cleanup": {**cleanup.settings(), "due": cleanup.due_count()},
         "backups": {k: v for k, v in backups.status().items() if k not in ("files", "folder")},
         "signup": {"enabled": signup.settings()["enabled"], "ready": not signup.problems(), "counts": signup.counts(),
-                   "server": (signup.server() or {}).get("name")},
+                   "server": (signup.server() or {}).get("name"), "mode": signup.settings()["mode"]},
     }
 
 
@@ -963,7 +963,8 @@ class EmbyLogin(BaseModel):
 @app.get("/api/auth/options")
 def auth_options():
     """Which sign-in buttons the sign-in page shows, and whether it offers Sign up."""
-    return {"emby": emby.enabled(), "signup": signup.settings()["enabled"] and not signup.problems()}
+    su = signup.settings()   # the Sign up button shows only when real payments are on (never with Stripe test keys)
+    return {"emby": emby.enabled(), "signup": su["enabled"] and su["mode"] == "live" and not signup.problems(su)}
 
 
 @app.post("/api/auth/emby")

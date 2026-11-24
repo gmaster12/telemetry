@@ -16,6 +16,8 @@ Rules this file keeps:
 - The new member's Plex token is kept (encrypted) only to accept the invite for them, then erased.
 - Paid but not on the server never fails quietly: after FAIL_ALERT tries the admins are told, and it keeps trying.
 - The key that opens checkouts (`signup_stripe_key`) is separate from Billing's read-only key.
+- With Stripe TEST keys nothing is charged, so only the Plex accounts listed as testers can sign up; everyone else
+  finds sign-up closed. Otherwise a test card would buy real access to the server.
 """
 from __future__ import annotations
 
@@ -35,6 +37,7 @@ from pydantic import BaseModel, Field
 
 from .auth import is_admin_email, new_session, record_failure, set_cookie, throttled
 from .billing import STRIPE_API, STRIPE_VERSION, StripeError
+from .config import env
 from .plex import PlexAccount, PlexError
 
 log = logging.getLogger("telemetry.signup")
@@ -54,6 +57,8 @@ CREATE TABLE IF NOT EXISTS signups (
   sections TEXT,
   checkout_session TEXT,
   checkout_n INTEGER NOT NULL DEFAULT 0,
+  pending INTEGER NOT NULL DEFAULT 0,
+  invites INTEGER NOT NULL DEFAULT 0,
   customer TEXT,
   subscription TEXT,
   attempts INTEGER NOT NULL DEFAULT 0,
@@ -81,6 +86,8 @@ PLEX_LIMIT = 100           # plex.tv will not share one server with more people 
 CHECKOUT_MINUTES = 120     # how long an opened checkout stays payable
 FAIL_ALERT = 3             # failed tries before the admins are told
 INVITE_SETTLE = 180        # plex.tv can take a moment to list a new invite; do not call it gone before this
+MAX_INVITES = 2            # invites one payment may send by itself; after that a person has to look
+PENDING_ALERT = 3600       # a finished checkout whose payment Stripe has not confirmed after this long: tell the admins
 CAPACITY_TTL = 120
 PAYING = ("active", "trialing", "past_due", "unpaid")
 ADMINS = "admins"          # notify.ADMINS (not imported: notify.py pulls in half the app)
@@ -128,6 +135,9 @@ class SignupStripe:
 
     async def get_checkout(self, session_id: str) -> dict:
         return await self._call("GET", f"/v1/checkout/sessions/{session_id}", params={"expand[]": "subscription"})
+
+    async def subscription(self, sub_id: str) -> dict:
+        return await self._call("GET", f"/v1/subscriptions/{sub_id}")
 
     async def expire_checkout(self, session_id: str) -> dict:
         return await self._call("POST", f"/v1/checkout/sessions/{session_id}/expire")
@@ -178,8 +188,13 @@ class Signup:
         self.poller: Any = None     # poller.Poller (main.py): reload the people list after someone joins
         self._locks: dict[str, asyncio.Lock] = {}
         self._capacity: tuple[float, dict] | None = None
+        self._cap_lock = asyncio.Lock()
         with self.lock:
             self.db.executescript(SCHEMA)
+            cols = {r["name"] for r in self.db.execute("PRAGMA table_info(signups)")}
+            for col in ("pending", "invites"):   # added after the first sign-up release
+                if col not in cols:
+                    self.db.execute(f"ALTER TABLE signups ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
             self.db.commit()
 
     # ---------- settings ----------
@@ -198,7 +213,13 @@ class Signup:
         return {"enabled": g("signup_enabled") == "1", "server_id": int(sid) if sid and sid.isdigit() else None, "sections": sections,
                 "price_id": g("signup_price_id"), "publishable_key": g("signup_publishable_key"), "has_key": bool(g("signup_stripe_key")),
                 "mode": key_mode(g("signup_stripe_key")), "cap": max(1, min(int(cap), PLEX_LIMIT)) if cap and cap.isdigit() else PLEX_LIMIT,
-                "support": g("signup_support") or "", "plan": plan}
+                "support": g("signup_support") or "", "plan": plan,
+                "testers": [x for x in (g("signup_testers") or "").lower().replace(";", ",").replace("\n", ",").replace(" ", ",").split(",") if "@" in x]}
+
+    def is_tester(self, email: str | None, s: dict | None = None) -> bool:
+        """With Stripe test keys, only these Plex accounts may sign up (nothing is charged in test mode)."""
+        s = s or self.settings()
+        return s["mode"] == "test" and bool(email) and email.lower() in s["testers"]
 
     def server(self, server_id: int | None = None) -> dict | None:
         sid = server_id if server_id is not None else self.settings()["server_id"]
@@ -256,15 +277,19 @@ class Signup:
             return None
         with self.lock:
             r = self.db.execute("SELECT * FROM signups WHERE token_hash = ?", (_hash(token),)).fetchone()
-        return dict(r) if r else None
+        if not r or time.time() - max(int(r["updated"] or 0), int(r["active_at"] or 0)) > COOKIE_TTL:
+            return None   # the browser's cookie runs out after a week; so does this
+        return dict(r)
 
     def by_plex(self, plex_id: str) -> dict | None:
         with self.lock:
             r = self.db.execute("SELECT * FROM signups WHERE plex_id = ?", (str(plex_id),)).fetchone()
         return dict(r) if r else None
 
-    def _set(self, sid: str, **cols) -> None:
-        cols["updated"] = int(time.time())
+    def _set(self, sid: str, touch: bool = True, **cols) -> None:
+        """touch=False: bookkeeping (when it was last looked at), which must not make the row look newly changed."""
+        if touch:
+            cols["updated"] = int(time.time())
         with self.lock:
             self.db.execute(f"UPDATE signups SET {', '.join(k + ' = ?' for k in cols)} WHERE id = ?", list(cols.values()) + [sid])
             self.db.commit()
@@ -280,10 +305,14 @@ class Signup:
             rs = self.db.execute("SELECT * FROM signups ORDER BY updated DESC LIMIT ?", (int(limit),)).fetchall()
         return [self.admin_row(dict(r)) for r in rs]
 
+    def in_flight(self) -> int:
+        with self.lock:
+            return self.db.execute(f"SELECT COUNT(*) AS n FROM signups WHERE state IN ({','.join('?' * len(IN_FLIGHT))})", IN_FLIGHT).fetchone()["n"]
+
     def counts(self) -> dict:
         with self.lock:
             rs = self.db.execute("SELECT state, COUNT(*) AS n FROM signups GROUP BY state").fetchall()
-            stuck = self.db.execute("SELECT COUNT(*) AS n FROM signups WHERE state IN ('paid', 'invited') AND alerted = 1").fetchone()["n"]
+            stuck = self.db.execute("SELECT COUNT(*) AS n FROM signups WHERE state IN ('checkout_open', 'paid', 'invited') AND alerted = 1").fetchone()["n"]
         return {**{s: 0 for s in STATES}, **{r["state"]: r["n"] for r in rs}, "stuck": stuck}
 
     def admin_row(self, r: dict) -> dict:
@@ -292,44 +321,54 @@ class Signup:
         return {"id": r["id"], "plex_id": r["plex_id"], "name": r.get("title") or r.get("username"), "username": r.get("username"),
                 "email": r.get("email"), "state": r["state"], "server": srv["name"] if srv else None, "customer": r.get("customer"),
                 "subscription": r.get("subscription"), "attempts": r["attempts"], "last_error": r.get("last_error"),
-                "stuck": bool(r["alerted"]) and r["state"] in ("paid", "invited"), "created": r["created"], "updated": r["updated"],
+                "stuck": bool(r["alerted"]) and r["state"] in IN_FLIGHT, "unconfirmed": bool(r["pending"]) and r["state"] == "checkout_open",
+                "created": r["created"], "updated": r["updated"],
                 "paid_at": r.get("paid_at"), "active_at": r.get("active_at")}
 
     # ---------- room on the server ----------
     async def capacity(self, fresh: bool = False) -> dict:
         """How many people the sign-up server has against the cap: accepted shares, invites still waiting, and
-        sign-ups that have paid (or are paying) but are not invited yet. Asked of plex.tv, kept for two minutes."""
+        sign-ups that have paid, or have a payment form open, but are not invited yet. Asked of plex.tv, kept for two
+        minutes (one caller asks at a time; the rest use its answer)."""
         s = self.settings()
-        now = time.monotonic()
-        if not fresh and self._capacity and now - self._capacity[0] < CAPACITY_TTL and self._capacity[1].get("server_id") == s["server_id"]:
-            live = self._capacity[1]
-        else:
+
+        def cached() -> dict | None:
+            c = self._capacity
+            return c[1] if c and time.monotonic() - c[0] < CAPACITY_TTL and c[1].get("server_id") == s["server_id"] else None
+
+        live = None if fresh else cached()
+        if live is None:
             srv = self.server(s["server_id"])
             own = self.owner(srv)
             if not srv or not own:
                 return {"server_id": s["server_id"], "shares": None, "invites": None, "used": None, "cap": s["cap"], "full": False,
                         "error": "The sign-up server is not set up."}
-            try:
-                acct = self.plex()
-                shares, invites = await asyncio.gather(acct.shares(own[1], srv["machine_id"]), acct.sent_invites(own[1]))
-                live = {"server_id": s["server_id"], "shares": len(shares), "invites": len(invites), "error": None}
-            except (PlexError, httpx.HTTPError) as e:
-                live = {"server_id": s["server_id"], "shares": None, "invites": None, "error": str(e) or type(e).__name__}
-            self._capacity = (now - (CAPACITY_TTL - 20 if live["error"] else 0), live)
+            async with self._cap_lock:
+                live = None if fresh else cached()
+                if live is None:
+                    try:
+                        acct = self.plex()
+                        shares, invites = await asyncio.gather(acct.shares(own[1], srv["machine_id"]), acct.sent_invites(own[1]))
+                        live = {"server_id": s["server_id"], "shares": len(shares), "invites": len(invites), "error": None}
+                    except (PlexError, httpx.HTTPError) as e:
+                        live = {"server_id": s["server_id"], "shares": None, "invites": None, "error": str(e) or type(e).__name__}
+                    self._capacity = (time.monotonic() - (CAPACITY_TTL - 20 if live["error"] else 0), live)   # an error is kept 20 s
         with self.lock:
-            held = self.db.execute(
-                "SELECT COUNT(*) AS n FROM signups WHERE server_id = ? AND (state = 'paid' OR (state = 'checkout_open' AND updated > ?))",
-                (s["server_id"], int(time.time()) - 1800)).fetchone()["n"]
+            held = self.db.execute("SELECT COUNT(*) AS n FROM signups WHERE server_id = ? AND state IN ('paid', 'checkout_open')",
+                                   (s["server_id"],)).fetchone()["n"]
         used = None if live["shares"] is None else live["shares"] + live["invites"] + held
         return {**live, "held": held, "used": used, "cap": s["cap"], "full": used is not None and used >= s["cap"]}
 
-    async def availability(self) -> str | None:
-        """None when a new person can sign up now; otherwise why not: off, setup, full or busy (plex.tv did not answer)."""
+    async def availability(self, email: str | None = None) -> str | None:
+        """None when a new person can sign up now; otherwise why not: off, setup, test (Stripe test keys, and this
+        is not a tester), full or busy (plex.tv did not answer)."""
         s = self.settings()
         if not s["enabled"]:
             return "off"
         if self.problems(s):
             return "setup"
+        if s["mode"] != "live" and not self.is_tester(email, s):
+            return "test"
         cap = await self.capacity()
         if cap["error"]:
             return "busy"
@@ -348,7 +387,8 @@ class Signup:
         return False
 
     def paying(self, plex_id: str, email: str) -> bool:
-        """Does Stripe already have a running subscription under this person's email (or one linked to them by hand)."""
+        """Does Stripe already have a running subscription under this person's email (or one linked to them by hand).
+        Read from Billing's copy of Stripe, which is up to 15 minutes old."""
         if self.billing is None:
             return False
         emails = {email.lower()}
@@ -365,7 +405,7 @@ class Signup:
 
         Outcomes: `go` (a sign-up was started or picked up again; the cookie is theirs), `member` (already on a
         server: sign in instead), `paying` (already has a subscription), `disabled`, `noemail`, or a closed
-        reason (off, setup, full, busy)."""
+        reason (off, setup, test, full, busy)."""
         pid, email = str(info["id"]), (info.get("email") or "").lower() or None
         if not email:
             return "noemail", None
@@ -374,80 +414,104 @@ class Signup:
         user = self.directory.get_user(pid)
         if user and user.get("disabled"):
             return "disabled", None
-        row = self.by_plex(pid)
         cookie = secrets.token_urlsafe(32)
-        fresh = {"token_hash": _hash(cookie), "plex_token_enc": self.store.box.seal(token), "username": info.get("username"),
-                 "title": info.get("title"), "email": email, "thumb": info.get("thumb"), "ip": ip}
-        if row and row["state"] in IN_FLIGHT:   # they came back (closed the tab after paying, say): carry on where it stood
-            self._set(row["id"], **fresh)
-            return "go", cookie
-        try:
-            member = await self.live_member(pid, email)
-        except (PlexError, httpx.HTTPError):
-            return "busy", None
-        if member:
-            return "member", None
-        if self.paying(pid, email):
-            return "paying", None
-        why = await self.availability()
-        if why:
-            return why, None
-        now = int(time.time())
-        if row:   # an earlier sign-up that never paid, or a member who left and is coming back
-            self._set(row["id"], **fresh, state="plex_ok", server_id=None, sections=None, checkout_session=None, customer=None,
-                      subscription=None, attempts=0, last_error=None, alerted=0, created=now, checked=0, paid_at=None,
-                      invited_at=None, active_at=None)
-        else:
-            with self.lock:
-                self.db.execute(
-                    "INSERT INTO signups (id, token_hash, plex_id, username, title, email, thumb, plex_token_enc, state, ip, created, updated) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                    (secrets.token_urlsafe(12), fresh["token_hash"], pid, fresh["username"], fresh["title"], email, fresh["thumb"],
-                     fresh["plex_token_enc"], "plex_ok", ip, now, now))
-                self.db.commit()
+        mine = {"token_hash": _hash(cookie), "plex_token_enc": self.store.box.seal(token), "ip": ip}
+        who = {"username": info.get("username"), "title": info.get("title"), "email": email, "thumb": info.get("thumb")}
+        async with self._lock_for("plex:" + pid):   # one at a time per Plex account (two tabs, a double click)
+            row = self.by_plex(pid)
+            if row and row["state"] in IN_FLIGHT:
+                # They came back (closed the tab after paying, say): carry on where it stood. The email the payment
+                # and the invite were made for stays as it is, whatever their Plex account says now.
+                self._set(row["id"], **mine)
+                return "go", cookie
+            try:
+                member = await self.live_member(pid, email)
+            except (PlexError, httpx.HTTPError):
+                return "busy", None
+            if member:
+                return "member", None
+            if self.paying(pid, email):
+                return "paying", None
+            if row and row.get("subscription"):
+                # They joined through here before and are off the server now. Billing's copy of Stripe can be minutes
+                # old (or not connected), so ask Stripe itself before letting them pay a second time.
+                try:
+                    sub = await self.stripe().subscription(row["subscription"])
+                except (StripeError, httpx.HTTPError):
+                    return "busy", None
+                if sub.get("status") in PAYING:
+                    return "paying", None
+            why = await self.availability(email)
+            if why:
+                return ("off" if why == "test" else why), None
+            now = int(time.time())
+            if row:   # an earlier sign-up that never paid, or a member who left and is coming back
+                async with self._lock_for(row["id"]):
+                    cur = self.get(row["id"])
+                    if cur and cur["state"] in IN_FLIGHT:   # another tab opened a payment form meanwhile: leave it be
+                        self._set(row["id"], **mine)
+                    else:
+                        self._set(row["id"], **mine, **who, state="plex_ok", server_id=None, sections=None, checkout_session=None,
+                                  customer=None, subscription=None, attempts=0, last_error=None, alerted=0, created=now, checked=0,
+                                  paid_at=None, invited_at=None, active_at=None, pending=0, invites=0)
+            else:
+                with self.lock:
+                    self.db.execute(
+                        "INSERT INTO signups (id, token_hash, plex_id, username, title, email, thumb, plex_token_enc, state, ip, created, updated) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        (secrets.token_urlsafe(12), mine["token_hash"], pid, who["username"], who["title"], email, who["thumb"],
+                         mine["plex_token_enc"], "plex_ok", ip, now, now))
+                    self.db.commit()
         return "go", cookie
 
     # ---------- step 2: pay ----------
     async def checkout(self, row: dict, base_url: str) -> dict:
         """The Stripe Checkout for this sign-up: the one already open, or a new one. Returns {client_secret} or {paid: True}."""
-        if row["state"] not in ("plex_ok", "checkout_open"):
-            return {"paid": True}
-        s = self.settings()
-        api = self.stripe()
-        if row["state"] == "checkout_open" and row.get("checkout_session"):
-            sess = await api.get_checkout(row["checkout_session"])
-            if sess.get("status") == "open" and sess.get("client_secret"):
-                return {"client_secret": sess["client_secret"]}
-            if sess.get("status") == "complete":
+        async with self._lock_for(row["id"]):
+            row = self.get(row["id"])   # as it is now, not as the caller read it
+            if not row:
+                raise SignupClosed("off")
+            if row["state"] not in ("plex_ok", "checkout_open"):
                 return {"paid": True}
-        why = await self.availability()
-        if why:
-            raise SignupClosed(why)
-        # Counted before Stripe is asked: if the answer is lost, the next try uses a new idempotency key instead of
-        # tripping over the old one (the times in the request differ). A checkout nobody was shown just expires.
-        n = int(row["checkout_n"] or 0) + 1
-        self._set(row["id"], checkout_n=n)
-        meta = {"signup_id": row["id"], "plex_id": row["plex_id"], "plex_username": row.get("username")}
-        sess = await api.create_checkout(row["id"], n, s["price_id"], row["email"], meta, base_url.rstrip("/") + "/signup.html",
-                                         int(time.time()) + CHECKOUT_MINUTES * 60)
-        if not sess.get("client_secret"):
-            raise StripeError("Stripe did not return a checkout to show.")
-        self._set(row["id"], state="checkout_open", checkout_session=sess["id"], server_id=s["server_id"],
-                  sections=json.dumps(s["sections"]), last_error=None)
-        return {"client_secret": sess["client_secret"]}
+            s = self.settings()
+            api = self.stripe()
+            if row["state"] == "checkout_open" and row.get("checkout_session"):
+                sess = await api.get_checkout(row["checkout_session"])
+                if sess.get("status") == "open" and sess.get("client_secret"):
+                    return {"client_secret": sess["client_secret"]}
+                if sess.get("status") == "complete":
+                    return {"paid": True}
+            why = await self.availability(row["email"])
+            if why and not (why == "full" and row["state"] == "checkout_open"):   # their own open form is what holds the last place
+                raise SignupClosed("off" if why == "test" else why)
+            # Counted before Stripe is asked: if the answer is lost, the next try uses a new idempotency key instead of
+            # tripping over the old one (the times in the request differ). A checkout nobody was shown just expires.
+            n = int(row["checkout_n"] or 0) + 1
+            self._set(row["id"], checkout_n=n)
+            meta = {"signup_id": row["id"], "plex_id": row["plex_id"], "plex_username": row.get("username")}
+            sess = await api.create_checkout(row["id"], n, s["price_id"], row["email"], meta, base_url.rstrip("/") + "/signup.html",
+                                             int(time.time()) + CHECKOUT_MINUTES * 60)
+            if not sess.get("client_secret"):
+                raise StripeError("Stripe did not return a checkout to show.")
+            self._set(row["id"], state="checkout_open", checkout_session=sess["id"], server_id=s["server_id"],
+                      sections=json.dumps(s["sections"]), last_error=None, pending=0)
+            return {"client_secret": sess["client_secret"]}
 
     # ---------- steps 3 and 4: paid, invited, on the server ----------
     def _lock_for(self, sid: str) -> asyncio.Lock:
         return self._locks.setdefault(sid, asyncio.Lock())
 
-    async def advance(self, sid: str) -> dict | None:
+    async def advance(self, sid: str, min_gap: float = 0) -> dict | None:
         """Move one sign-up as far forward as it can go right now. Safe to call as often as you like: one runs at a
-        time per sign-up, and every step first looks at what is already true at Stripe and plex.tv."""
+        time per sign-up, and every step first looks at what is already true at Stripe and plex.tv.
+        min_gap: do nothing if it was looked at less than this many seconds ago (the page asks every few seconds)."""
         async with self._lock_for(sid):
             row = self.get(sid)
             if not row or row["state"] not in IN_FLIGHT:
                 return row
-            self._set(sid, checked=int(time.time()))
+            if min_gap and time.time() - int(row["checked"] or 0) < min_gap:
+                return row
+            self._set(sid, touch=False, checked=int(time.time()))
             try:
                 if row["state"] == "checkout_open":
                     row = await self._payment(row)
@@ -457,6 +521,9 @@ class Signup:
                     row = await self._accept(row)
             except (PlexError, StripeError, httpx.HTTPError) as e:
                 self._failed(self.get(sid), e)
+            except Exception as e:  # noqa: BLE001  anything else is a fault here, but it must still be counted and reported
+                log.exception("Sign-up %s: unexpected error", sid)
+                self._failed(self.get(sid), e)
             return self.get(sid)
 
     async def _payment(self, row: dict) -> dict:
@@ -464,16 +531,26 @@ class Signup:
             self._set(row["id"], state="plex_ok")
             return self.get(row["id"])
         sess = await self.stripe().get_checkout(row["checkout_session"])
+        if row["attempts"]:   # Stripe is answering again
+            self._set(row["id"], touch=False, attempts=0, last_error=None)
+            self._resolve_notice("signup:stripe", "Stripe is answering again", "Sign-up can check payments again.")
         sub = sess.get("subscription")
+        real = sess.get("livemode") is True or self.is_tester(row["email"])   # a test-mode payment is no payment
         if sess.get("status") == "expired":
-            self._set(row["id"], state="plex_ok", checkout_session=None)
-        elif (sess.get("status") == "complete" and sess.get("payment_status") == "paid" and sess.get("mode") == "subscription"
+            self._set(row["id"], state="plex_ok", checkout_session=None, pending=0)
+        elif (real and sess.get("status") == "complete" and sess.get("payment_status") == "paid" and sess.get("mode") == "subscription"
               and sess.get("client_reference_id") == row["id"] and isinstance(sub, dict) and sub.get("status") == "active"):
             cust = sess.get("customer")
-            self._set(row["id"], state="paid", paid_at=int(time.time()), subscription=sub.get("id"),
+            self._set(row["id"], state="paid", paid_at=int(time.time()), subscription=sub.get("id"), pending=0,
                       customer=cust if isinstance(cust, str) else (cust or {}).get("id"), attempts=0, last_error=None)
             self._capacity = None
             log.info("Sign-up %s (%s) paid: %s", row["id"], row.get("username"), sub.get("id"))
+        elif sess.get("status") == "complete" and not row["pending"]:
+            # The form was finished but the money is not confirmed (a slow payment method, or a session that is not
+            # ours to honour). Nothing is granted; remember since when, so the admins hear if it stays this way.
+            self._set(row["id"], pending=int(time.time()))
+        elif sess.get("status") == "open" and row["pending"]:
+            self._set(row["id"], pending=0)
         return self.get(row["id"])
 
     async def _share_state(self, tok: str, machine_id: str, row: dict) -> tuple[str, dict | None]:
@@ -481,7 +558,7 @@ class Signup:
         acct = self.plex()
         for sh in await acct.shares(tok, machine_id):
             if sh["user_id"] == row["plex_id"] or (sh.get("email") and sh["email"] == row["email"]):
-                return "accepted", sh
+                return ("accepted" if sh["accepted"] else "pending"), sh
         for inv in await acct.sent_invites(tok):
             if inv.get("email") and inv["email"] == row["email"]:
                 return "pending", inv
@@ -500,7 +577,11 @@ class Signup:
         if where == "accepted":
             return self._finish(row, srv)
         if where == "none":
+            if int(row["invites"] or 0) >= MAX_INVITES:
+                raise PlexError(f"The Plex invite was sent {MAX_INVITES} times and is gone again. Not sending another: "
+                                "check with this person, then press Try again now.")
             await self.plex().invite(tok, srv["machine_id"], row["email"], json.loads(row.get("sections") or "[]"))
+            self._set(row["id"], invites=int(row["invites"] or 0) + 1)
             self._capacity = None
             log.info("Sign-up %s (%s) invited to %s", row["id"], row.get("username"), srv["name"])
         self._set(row["id"], state="invited", invited_at=int(time.time()), attempts=0, last_error=None)
@@ -520,12 +601,9 @@ class Signup:
                 if getattr(e, "status", None) in (401, 403):   # their sign-in ran out: stop asking with it
                     self._set(row["id"], plex_token_enc=None)
                 raise
+            # Only an invite from the owner of the sign-up server is accepted on their behalf, never anybody else's.
             names = {str(owner.get(k) or "").lower() for k in ("username", "email")} - {""}
-            shares = [i for i in waiting if i["server"] == "1"]
-            mine = [i for i in shares if {str(i.get("username") or "").lower(), i.get("email") or ""} & names]
-            if not mine:   # plex.tv did not name the sender the way we know them: take the one invite to this server, if it is the only one
-                named = [i for i in shares if srv["name"].lower() in [str(x).lower() for x in i.get("servers") or []]]
-                mine = named if len(named) == 1 else []
+            mine = [i for i in waiting if i["server"] == "1" and ({str(i.get("username") or "").lower(), i.get("email") or ""} & names)]
             if mine:
                 await acct.accept_invite(user_token, mine[0])
                 where, _ = await self._share_state(tok, srv["machine_id"], row)
@@ -550,10 +628,10 @@ class Signup:
         self._capacity = None
         log.info("Sign-up %s (%s) is on %s", row["id"], row.get("username"), srv["name"])
         name = row.get("title") or row.get("username") or row.get("email")
+        if was_stuck:
+            self._resolve_notice(f"signup:stuck:{row['id']}", f"{name} is on {srv['name']} now", "The sign-up finished.")
         if self.notifier is not None:
             try:
-                if was_stuck:
-                    self.notifier.resolve(ADMINS, f"signup:stuck:{row['id']}", f"{name} is on {srv['name']} now", "The sign-up finished.")
                 self.notifier.post(ADMINS, f"signup:new:{row['id']}", "billing", f"New sign-up: {name}",
                                    f"Paid and added to {srv['name']}.", "Open Sign-up", "settings:signup")
             except Exception:  # noqa: BLE001  a notice is extra; the member is already in
@@ -563,28 +641,43 @@ class Signup:
             self.poller.kick()
         return self.get(row["id"])
 
+    def _resolve_notice(self, key: str, title: str, body: str) -> None:
+        if self.notifier is not None:
+            try:
+                self.notifier.resolve(ADMINS, key, title, body)
+            except Exception:  # noqa: BLE001
+                log.exception("Sign-up: could not close a notice")
+
     def _failed(self, row: dict | None, e: Exception) -> None:
         if not row:
             return
         msg = (str(e) or type(e).__name__)[:300]
-        if row["state"] == "checkout_open":   # Stripe did not answer: nothing is owed yet, just try again
-            self._set(row["id"], last_error=msg)
-            return
         n = int(row["attempts"] or 0) + 1
         self._set(row["id"], attempts=n, last_error=msg)
         log.warning("Sign-up %s (%s) could not move on from %s (try %d): %s", row["id"], row.get("username"), row["state"], n, msg)
-        if n >= FAIL_ALERT and not row["alerted"]:
+        if row["state"] == "checkout_open":
+            # Stripe could not be asked whether they paid. They may not have; but if this keeps up nobody who pays
+            # gets in, so the admins hear about it once (one notice for all, not one per person).
+            if n >= FAIL_ALERT and self.notifier is not None:
+                try:
+                    self.notifier.post(ADMINS, "signup:stripe", "billing", "Sign-up cannot check payments with Stripe",
+                                       f"Nobody who pays can be added until this works: {msg}", "Open Sign-up", "settings:signup", urgent=True)
+                except Exception:  # noqa: BLE001
+                    log.exception("Sign-up: could not post the Stripe notice")
+        elif n >= FAIL_ALERT and not row["alerted"]:
             self._alert(row, f"They paid but could not be added to Plex: {msg}")
 
-    def _alert(self, row: dict, body: str) -> None:
-        self._set(row["id"], alerted=1)
+    def _alert(self, row: dict, body: str, title: str = "Paid sign-up needs you") -> None:
+        """Tell the admins once about this sign-up. If the notice cannot be posted it is tried again next time."""
         name = row.get("title") or row.get("username") or row.get("email")
         if self.notifier is not None:
             try:
-                self.notifier.post(ADMINS, f"signup:stuck:{row['id']}", "billing", f"Paid sign-up needs you: {name}", body,
+                self.notifier.post(ADMINS, f"signup:stuck:{row['id']}", "billing", f"{title}: {name}", body,
                                    "Open Sign-up", "settings:signup", urgent=True)
             except Exception:  # noqa: BLE001
                 log.exception("Sign-up: could not post the stuck notice")
+                return
+        self._set(row["id"], touch=False, alerted=1)
 
     # ---------- keeping unfinished sign-ups moving ----------
     @staticmethod
@@ -604,20 +697,30 @@ class Signup:
         now = int(now or time.time())
         with self.lock:
             self.db.execute("DELETE FROM signups WHERE state = 'plex_ok' AND updated < ?", (now - 86400,))
-            # Nobody's Plex sign-in is kept for more than a week, used or not.
-            self.db.execute("UPDATE signups SET plex_token_enc = NULL WHERE plex_token_enc IS NOT NULL AND updated < ?", (now - 7 * 86400,))
+            # Nobody's Plex sign-in is kept for more than a week after they started, used or not.
+            self.db.execute("UPDATE signups SET plex_token_enc = NULL WHERE plex_token_enc IS NOT NULL AND created < ?", (now - 7 * 86400,))
             self.db.commit()
-            rows = [dict(r) for r in self.db.execute(f"SELECT * FROM signups WHERE state IN ({','.join('?' * len(IN_FLIGHT))})", IN_FLIGHT)]
+            ids = [r["id"] for r in self.db.execute(f"SELECT id FROM signups WHERE state IN ({','.join('?' * len(IN_FLIGHT))})", IN_FLIGHT)]
         moved = 0
-        for r in rows:
-            if r["state"] == "invited" and not r["alerted"] and now - int(r["invited_at"] or now) > 86400:
-                self._alert(r, "They paid a day ago and still have not accepted the Plex invite.")
-            if not self.due(r, now):
-                continue
-            after = await self.advance(r["id"])
-            moved += int(bool(after) and after["state"] != r["state"])
-        for sid in [k for k, lk in self._locks.items() if not lk.locked() and (self.get(k) or {}).get("state") not in IN_FLIGHT]:
-            self._locks.pop(sid, None)
+        for sid in ids:
+            try:   # one sign-up going wrong must not stop the others being looked at
+                r = self.get(sid)
+                if not r or r["state"] not in IN_FLIGHT:
+                    continue
+                if not r["alerted"]:
+                    if r["state"] == "invited" and now - int(r["invited_at"] or now) > 86400:
+                        self._alert(r, "They paid a day ago and still have not accepted the Plex invite.")
+                    elif r["state"] == "checkout_open" and r["pending"] and now - int(r["pending"]) > PENDING_ALERT:
+                        self._alert(r, "They finished the payment form over an hour ago, but Stripe has not confirmed the payment. "
+                                       "They are not on Plex. Look at this checkout in Stripe.", "Sign-up payment not confirmed")
+                if not self.due(r, now):
+                    continue
+                after = await self.advance(sid)
+                moved += int(bool(after) and after["state"] != r["state"])
+            except Exception:  # noqa: BLE001
+                log.exception("Sign-up sweep: %s failed", sid)
+        for key in [k for k, lk in self._locks.items() if not lk.locked() and (self.get(k) or {}).get("state") not in IN_FLIGHT]:
+            self._locks.pop(key, None)
         return moved
 
     async def loop(self) -> None:
@@ -635,12 +738,14 @@ class Signup:
         srv = self.server(row["server_id"]) if row.get("server_id") is not None else self.server()
         out = {"name": row.get("title") or row.get("username"), "email": row.get("email"), "server": srv["name"] if srv else None}
         st = row["state"]
+        if st == "checkout_open" and row["pending"]:   # the form is finished; Stripe has not confirmed the money yet
+            return {**out, "step": "working", "confirming": True, "stuck": bool(row["alerted"]), "accept": False}
         if st in ("plex_ok", "checkout_open"):
             return {**out, "step": "pay"}
         if st == "active":
             return {**out, "step": "done"}
         waiting = st == "invited" and not row.get("plex_token_enc")
-        return {**out, "step": "working", "stuck": bool(row["alerted"]) or int(row["attempts"] or 0) >= FAIL_ALERT,
+        return {**out, "step": "working", "confirming": False, "stuck": bool(row["alerted"]) or int(row["attempts"] or 0) >= FAIL_ALERT,
                 "accept": waiting or (st == "invited" and int(time.time()) - int(row["invited_at"] or 0) > 45)}
 
 
@@ -654,11 +759,13 @@ class SettingsIn(BaseModel):
     stripe_key: str | None = Field(default=None, max_length=300)
     cap: int | None = Field(default=None, ge=1, le=PLEX_LIMIT)
     support: str | None = Field(default=None, max_length=300)
+    testers: str | None = Field(default=None, max_length=2000)
 
 
 CLOSED_WORDS = {
     "off": "Sign-ups are closed right now.",
     "setup": "Sign-ups are closed right now.",
+    "test": "Sign-ups are closed right now.",
     "full": "We are full right now. Please check back soon.",
     "busy": "We could not reach Plex just now. Please try again in a minute.",
 }
@@ -671,7 +778,9 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
     pins: dict[str, tuple[int, float]] = {}
 
     def secure(request: Request) -> bool:
-        return request.url.scheme == "https"
+        return request.url.scheme == "https" or env("COOKIE_SECURE", "auto") == "true"
+
+    PLEX_DOWN = "We could not reach Plex just now. Please try again in a minute."
 
     def mine(request: Request) -> dict:
         row = svc.by_cookie(request.cookies.get(COOKIE))
@@ -685,8 +794,13 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
         s = svc.settings()
         why = await svc.availability()
         srv = svc.server(s["server_id"])
-        return {"open": why is None, "reason": why, "message": CLOSED_WORDS.get(why or ""), "plan": s["plan"] if not svc.problems(s) else None,
-                "publishable_key": s["publishable_key"] if why is None or why in ("full", "busy") else None,
+        ready = s["enabled"] and not svc.problems(s)
+        return {"open": why is None, "reason": "off" if why == "test" else why, "message": CLOSED_WORDS.get(why or ""),
+                # Stripe test keys: closed to the public; the listed test accounts get in from /signup.html?test
+                "test": ready and s["mode"] == "test",
+                # Someone who paid and lost their place can always come back, even while sign-up is closed.
+                "resume": svc.in_flight() > 0,
+                "plan": s["plan"] if ready else None, "publishable_key": s["publishable_key"] if ready else None,
                 "server": srv["name"] if srv and s["enabled"] else None, "support": s["support"]}
 
     @r.post("/api/signup/plex/start")
@@ -695,9 +809,12 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
         if throttled("signup:" + ip, limit=20, window=600):
             raise HTTPException(429, "Too many attempts. Wait a few minutes.")
         record_failure("signup:" + ip)   # every start counts, so one address gets 20 per 10 minutes
-        if not svc.settings()["enabled"]:
+        if not svc.settings()["enabled"] and not svc.in_flight():
             raise HTTPException(403, CLOSED_WORDS["off"])
-        pin = await svc.plex().create_pin()
+        try:
+            pin = await svc.plex().create_pin()
+        except (PlexError, httpx.HTTPError):
+            raise HTTPException(502, PLEX_DOWN)
         now = time.time()
         for k, (_, t) in list(pins.items()):
             if now - t > 900:
@@ -715,11 +832,14 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
         if not bound or bound[0] != pin_id:
             raise HTTPException(400, "This sign-in expired. Start again.")
         acct = svc.plex()
-        token = await acct.check_pin(pin_id)
-        if not token:
-            return {"pending": True}
+        try:
+            token = await acct.check_pin(pin_id)
+            if not token:
+                return {"pending": True}
+            info = await acct.user_info(token)
+        except (PlexError, httpx.HTTPError):
+            raise HTTPException(502, PLEX_DOWN)
         pins.pop(nonce, None)
-        info = await acct.user_info(token)
         outcome, cookie = await svc.begin(info, token, client_ip(request))
         if outcome == "noemail":
             raise HTTPException(400, "Your Plex account has no email address. Add one in Plex, then try again.")
@@ -739,9 +859,10 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
         row = svc.by_cookie(request.cookies.get(COOKIE))
         # The page asks every few seconds. Stripe and plex.tv are asked less often than that, and less often still
         # after a failed try, so a short plex.tv hiccup does not count as three failures and page the admins.
-        gap = 5 if row and row["state"] == "checkout_open" else min(60, 3 + 10 * int((row or {}).get("attempts") or 0))
-        if row and row["state"] in IN_FLIGHT and time.time() - int(row["checked"] or 0) >= gap:
-            row = await svc.advance(row["id"])
+        # (The gap is checked again inside advance, under the sign-up's lock, so two tabs do not count double.)
+        if row and row["state"] in IN_FLIGHT:
+            gap = 5 if row["state"] == "checkout_open" else min(60, 3 + 10 * int(row["attempts"] or 0))
+            row = await svc.advance(row["id"], min_gap=gap)
         return svc.view(row)
 
     @r.post("/api/signup/checkout")
@@ -754,12 +875,15 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
             out = await svc.checkout(row, str(request.base_url))
         except SignupClosed as e:
             raise HTTPException(409, CLOSED_WORDS[e.reason])
-        except StripeError as e:
+        except (StripeError, httpx.HTTPError) as e:
             log.warning("Sign-up %s: Stripe would not open a checkout: %s", row["id"], e)
             raise HTTPException(502, "We could not open the payment form. Please try again in a minute.")
         if out.get("paid"):
             row = await svc.advance(row["id"])
-            return {"paid": True, **svc.view(row)}
+            v = svc.view(row)
+            if v["step"] == "pay":   # the form was finished but Stripe could not be asked just now: the page waits, it does not show a second form
+                v = {**v, "step": "working", "confirming": True, "stuck": False, "accept": False}
+            return {"paid": True, **v}
         return {"client_secret": out["client_secret"], "publishable_key": svc.settings()["publishable_key"]}
 
     @r.post("/api/signup/finish")
@@ -852,6 +976,8 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
             set_("signup_cap", str(body.cap))
         if body.support is not None:
             set_("signup_support", body.support.strip() or None)
+        if body.testers is not None:
+            set_("signup_testers", body.testers.strip().lower() or None)
         if body.enabled is not None:
             if body.enabled and svc.problems():
                 raise HTTPException(422, "Sign-up is not ready to turn on: " + " ".join(svc.problems()))
@@ -894,7 +1020,10 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
             tid = "test-" + secrets.token_urlsafe(8)
             sess = await svc.stripe().create_checkout(tid, 1, s["price_id"] or "", "signup-test@example.com", {"signup_test": "1"},
                                                       str(request.base_url).rstrip("/") + "/signup.html", int(time.time()) + 1900)
-            await svc.stripe().expire_checkout(sess["id"])
+            try:
+                await svc.stripe().get_checkout(sess["id"])   # the same read that later proves a payment (needs Subscriptions: Read)
+            finally:
+                await svc.stripe().expire_checkout(sess["id"])
             out["stripe"] = {"ok": True, "livemode": bool(sess.get("livemode"))}
         except StripeError as e:
             out["stripe"] = {"ok": False, "error": str(e)}
@@ -923,8 +1052,11 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
             raise HTTPException(404, "No such sign-up.")
         if row["state"] not in IN_FLIGHT:
             raise HTTPException(409, "There is nothing to retry for this sign-up.")
-        svc._set(sid, attempts=0)
-        return {"row": svc.admin_row(await svc.advance(sid))}
+        svc._set(sid, attempts=0, invites=0)   # a person looked: the automatic limits start again
+        after = await svc.advance(sid)
+        if not after:
+            raise HTTPException(404, "No such sign-up.")
+        return {"row": svc.admin_row(after)}
 
     @r.delete("/api/settings/signup/{sid}")
     def forget(sid: str, request: Request, force: bool = False):

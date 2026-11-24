@@ -214,10 +214,12 @@ class PlexAccount:
             e = PlexError(f"plex.tv {what} failed: HTTP {r.status_code}")
             e.status = r.status_code   # callers tell "your sign-in ran out" (401) from "plex.tv is having a moment"
             raise e
-        try:
-            return ET.fromstring(r.text) if r.text.strip() else ET.Element("MediaContainer")
-        except ET.ParseError:
+        if not r.text.strip():
             return ET.Element("MediaContainer")
+        try:
+            return ET.fromstring(r.text)
+        except ET.ParseError:   # an answer that cannot be read is not "nobody is shared with": say so
+            raise PlexError(f"plex.tv {what} failed: the answer could not be read")
 
     async def server_sections(self, owner_token: str, machine_id: str) -> list[dict]:
         """A server's libraries as plex.tv knows them. `id` is what a share lists (not the server's own key)."""
@@ -226,11 +228,12 @@ class PlexAccount:
                 for s in root.iter("Section") if s.attrib.get("id")]
 
     async def shares(self, owner_token: str, machine_id: str) -> list[dict]:
-        """Everyone who has accepted a share of this server, with the libraries each has. (Each record also carries
-        that person's access token; it is never read.)"""
+        """Everyone this server is shared with, with the libraries each has. On the live fleet every record here is an
+        accepted share (invites still waiting are in sent_invites); `accepted` is read anyway and is what counts.
+        (Each record also carries that person's access token; it is never read.)"""
         root = await self._xml("GET", f"/api/servers/{machine_id}/shared_servers", owner_token, "share list")
         return [{"id": s.attrib.get("id"), "user_id": str(s.attrib.get("userID") or ""), "username": s.attrib.get("username"),
-                 "email": (s.attrib.get("email") or "").lower() or None,
+                 "email": (s.attrib.get("email") or "").lower() or None, "accepted": bool(s.attrib.get("acceptedAt")),
                  "sections": [str(x.attrib.get("id")) for x in s.iter("Section") if x.attrib.get("shared") == "1"]}
                 for s in root.iter("SharedServer")]
 

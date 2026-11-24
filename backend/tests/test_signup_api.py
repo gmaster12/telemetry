@@ -103,7 +103,7 @@ def test_from_nothing_to_signed_in(app):
     assert c.post("/api/signup/finish", headers=H).status_code == 401   # the sign-up cookie is spent
     listed = a.get("/api/settings/signup").json()
     assert listed["counts"]["active"] == 1 and listed["rows"][0]["state"] == "active" and listed["rows"][0]["email"] == "newbie@example.com"
-    assert a.get("/api/settings/summary").json()["signup"] == {"enabled": True, "ready": True, "counts": listed["counts"], "server": "GALAXY"}
+    assert a.get("/api/settings/summary").json()["signup"] == {"enabled": True, "ready": True, "counts": listed["counts"], "server": "GALAXY", "mode": "live"}
 
 
 def test_members_and_payers_are_sent_to_sign_in_not_to_pay(app):
@@ -179,7 +179,7 @@ def test_settings_never_hand_back_a_secret(app):
     plex_sign_in(c)
     c.post("/api/signup/checkout", headers=H)
     text = a.get("/api/settings/signup").text + c.get("/api/signup/status").text + c.get("/api/signup/config").text
-    assert '"has_key":true' in text.replace(" ", "") and '"mode":"test"' in text.replace(" ", "")
+    assert '"has_key":true' in text.replace(" ", "") and '"mode":"live"' in text.replace(" ", "")
     for secret in (M.STRIPE_KEY, M.OWNER_TOKEN, "tok-new", "srv-token", "token_hash", "plex_token"):
         assert secret not in text
 
@@ -189,8 +189,8 @@ def test_settings_refuse_what_would_not_work(app):
     put = lambda body: a.put("/api/settings/signup", json=body, headers=H)
     assert put({"enabled": True}).status_code == 422                                   # nothing set up yet
     assert put({"stripe_key": "pk_test_wrongkind"}).status_code == 422
-    assert put({"stripe_key": "rk_test_not_the_key"}).status_code == 422                # Stripe says no
-    assert put({"publishable_key": "sk_test_oops"}).status_code == 422
+    assert put({"stripe_key": "rk_live_not_the_key"}).status_code == 422                # Stripe says no
+    assert put({"publishable_key": "sk_live_oops"}).status_code == 422
     assert put({"server_id": 999}).status_code == 404
     off = app.store.add_server({"name": "OFF", "plex_url": "http://off.test:32400", "machine_id": "m-off", "owner_plex_id": "900", "enabled": 0}, "t")
     nobody = app.store.add_server({"name": "NOBODY", "plex_url": "http://n.test:32400", "machine_id": "m-n", "owner_plex_id": "12345"}, "t")
@@ -201,7 +201,7 @@ def test_settings_refuse_what_would_not_work(app):
     assert put({"stripe_key": M.STRIPE_KEY, "price_id": "price_nope"}).status_code == 422
     assert put({"price_id": "price_once"}).status_code == 422                           # a one-time price is not a subscription
     assert put({"cap": 101}).status_code == 422 and put({"cap": 0}).status_code == 422  # Plex stops at 100
-    r = put({"sections": ["11", "12"], "price_id": M.PRICE, "publishable_key": "pk_live_other"})
+    r = put({"sections": ["11", "12"], "price_id": M.PRICE, "publishable_key": "pk_test_other"})
     assert r.status_code == 200 and any("same mode" in p for p in r.json()["problems"])
     assert put({"enabled": True}).status_code == 422
     assert put({"publishable_key": M.PUBLISHABLE, "enabled": True}).json()["enabled"] is True
@@ -218,10 +218,11 @@ def test_changing_server_drops_the_old_servers_libraries(app):
 def test_the_test_button_charges_nobody(app):
     a = set_up(app)
     out = a.post("/api/settings/signup/test", headers=H).json()
-    assert out["stripe"] == {"ok": True, "livemode": False}
+    assert out["stripe"] == {"ok": True, "livemode": True}
     assert out["plex"]["ok"] is True and out["plex"]["sharing"] == ["TV Shows", "Movies"] and out["plex"]["not_sharing"] == ["4k Movies"]
     assert out["capacity"]["used"] == 1 and out["capacity"]["cap"] == 100
     assert [s["status"] for s in M.state["sessions"].values()] == ["expired"]
+    assert [c["read_first"] for c in M.calls if c["what"] == "expire"] == [True]   # it also proved the key can read a checkout back
     assert app.signup.rows() == [] and [c for c in M.calls if c["what"] == "invite"] == []
     libs = a.get(f"/api/settings/signup/libraries?server_id={app.galaxy}").json()["libraries"]
     assert [x["title"] for x in libs] == ["TV Shows", "Movies", "4k Movies"]
@@ -281,3 +282,54 @@ def test_a_short_plex_hiccup_does_not_page_the_admins(app):
     M.state["fail"].clear()
     app.signup._set(sid, checked=0)
     assert c.get("/api/signup/status").json()["step"] == "done"
+
+
+def test_the_test_button_catches_a_key_that_cannot_read_payments(app):
+    a = set_up(app)
+    M.state["fail"]["session"] = 403
+    out = a.post("/api/settings/signup/test", headers=H).json()
+    assert out["stripe"]["ok"] is False and [s["status"] for s in M.state["sessions"].values()] == ["expired"]
+
+
+def test_with_stripe_test_keys_the_public_stays_out(app):
+    a = set_up(app, stripe_key=M.TEST_KEY, publishable_key=M.TEST_PUBLISHABLE)
+    c = TestClient(app.app)
+    cfg = c.get("/api/signup/config").json()
+    assert cfg["open"] is False and cfg["reason"] == "off" and cfg["test"] is True
+    assert c.get("/api/auth/options").json()["signup"] is False                 # no Sign up button on the sign-in page
+    r = plex_sign_in(c)                                                         # even someone who finds the test address
+    assert r.json()["step"] == "closed" and "set-cookie" not in r.headers and app.signup.rows() == []
+    s = a.put("/api/settings/signup", json={"testers": " Newbie@Example.com "}, headers=H).json()
+    assert s["testers"] == ["newbie@example.com"] and s["mode"] == "test"
+    assert c.get("/api/signup/config").json()["open"] is False                  # still closed to everyone else
+    assert plex_sign_in(c).json()["step"] == "pay"
+    assert c.post("/api/signup/checkout", headers=H).json()["publishable_key"] == M.TEST_PUBLISHABLE
+    M.pay(next(iter(M.state["sessions"])))
+    app.signup._set(app.signup.rows()[0]["id"], checked=0)
+    assert c.get("/api/signup/status").json()["step"] == "done"
+
+
+def test_someone_who_paid_can_come_back_even_when_sign_up_is_closed(app):
+    a = set_up(app)
+    c = TestClient(app.app)
+    plex_sign_in(c)
+    c.post("/api/signup/checkout", headers=H)
+    M.pay(next(iter(M.state["sessions"])))
+    a.put("/api/settings/signup", json={"enabled": False}, headers=H)
+    other = TestClient(app.app)   # a new browser: no sign-up cookie
+    cfg = other.get("/api/signup/config").json()
+    assert cfg["open"] is False and cfg["resume"] is True
+    assert plex_sign_in(other).json()["step"] == "pay"
+    app.signup._set(app.signup.rows()[0]["id"], checked=0)
+    assert other.get("/api/signup/status").json()["step"] == "done"
+    assert other.get("/api/signup/config").json()["resume"] is False
+    assert other.post("/api/signup/plex/start", headers=H).status_code == 403   # nobody is mid-way any more
+
+
+def test_plex_being_down_is_said_plainly(app):
+    set_up(app)
+    c = TestClient(app.app)
+    pin = c.post("/api/signup/plex/start", headers=H).json()
+    M.state["pins"].clear()   # plex.tv answers 404 for the PIN
+    r = c.get(f"/api/signup/plex/check/{pin['pin_id']}")
+    assert r.status_code == 502 and "Plex" in r.json()["detail"]

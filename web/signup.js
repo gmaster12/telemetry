@@ -63,6 +63,8 @@
   function every(p) { return p.interval_count > 1 ? 'every ' + p.interval_count + ' ' + p.interval + 's' : 'a ' + p.interval; }
   function support() { return cfg && cfg.support ? el('p', { class: 'su__note' }, el('b', { text: 'Need a hand? ' }), cfg.support) : null; }
   function stopTimer() { if (timer) clearTimeout(timer); timer = null; }
+  // With Stripe test keys the page is closed to the public; the test accounts get in from /signup.html?test
+  function testing() { return !!(cfg && cfg.test) && /[?&]test(=|&|$)/.test(window.location.search); }
   function dropCheckout() { if (checkout) { try { checkout.destroy(); } catch (e) { /* already gone */ } checkout = null; } }
 
   function mark(step) {
@@ -94,6 +96,8 @@
     var go = el('button', { type: 'button', class: 'su__btn su__btn--go', text: 'Continue with Plex' });
     go.addEventListener('click', function () { plexSignIn(go, msg, err); });
     draw('plex', 'Join Greystar', [
+      testing() ? el('p', { class: 'su__msg su__msg--warn' }, el('b', { text: 'Test mode. ' }),
+        'No real money is taken: use a Stripe test card. Only the test accounts listed in Settings can continue.') : null,
       plan ? el('p', { class: 'su__price' }, el('b', { text: money(plan) }), el('span', { text: every(plan) })) : null,
       el('ul', { class: 'su__list' },
         el('li', { text: 'Movies and shows on your TV, phone, tablet and computer, through the Plex app.' }),
@@ -107,14 +111,15 @@
     ]);
   }
 
-  function plexSignIn(go, msg, err) {
+  function plexSignIn(go, msg, err, label) {
+    label = label || 'Continue with Plex';
     err.hidden = true;
     // Open the window during the click so pop-up blockers allow it.
     var win = window.open('about:blank', 'plex-auth', 'width=520,height=720');
     var fail = function (e) {
       try { if (win) win.close(); } catch (x) { /* ignore */ }
       stopTimer();
-      go.disabled = false; go.textContent = 'Continue with Plex';
+      go.disabled = false; go.textContent = label;
       msg.hidden = true;
       err.textContent = e.message; err.hidden = false;
     };
@@ -186,12 +191,19 @@
   function showWorking() {
     dropCheckout();
     var body = el('div', { class: 'su__stack' });
+    var line = el('span');
     draw('working', 'Setting you up', [
-      el('p', { class: 'su__msg su__msg--wait', role: 'status' }, dots(), 'Payment received. Adding you to ' + (view.server || 'the server') + '…'),
+      el('p', { class: 'su__msg su__msg--wait', role: 'status' }, dots(), line),
       body
     ]);
     var paint = function () {
-      if (view.stuck) {
+      line.textContent = view.confirming ? 'Confirming your payment with Stripe…' : 'Payment received. Adding you to ' + (view.server || 'the server') + '…';
+      if (view.confirming) {
+        body.replaceChildren(el('p', { class: 'su__note', text: view.stuck
+          ? 'Stripe has not confirmed the payment yet. We have been told and are looking at it. You do not need to pay again.'
+          : 'Some ways of paying take a little while to confirm. You are added as soon as Stripe confirms it; you do not need to pay again.' }),
+          view.stuck ? support() || '' : '');
+      } else if (view.stuck) {
         body.replaceChildren(el('p', { class: 'su__msg su__msg--warn' }, el('b', { text: 'Your payment went through. ' }),
           'Adding you to Plex is taking longer than it should. We have been told and will finish it for you. You do not need to pay again. You can close this page; to see where it stands, come back here and continue with the same Plex account.'),
           support() || '');
@@ -267,11 +279,16 @@
   }
   function showClosed(message) {
     stopTimer(); dropCheckout();
-    draw('closed', 'Sign-ups are closed', [
-      el('p', { class: 'su__sub', text: message || 'Sign-ups are closed right now.' }),
-      support(),
-      el('a', { class: 'su__btn su__btn--quiet', href: '/login.html', text: 'Already a member? Sign in' })
-    ]);
+    var kids = [el('p', { class: 'su__sub', text: message || 'Sign-ups are closed right now.' }), support()];
+    if (cfg && cfg.resume) {   // someone who already paid can always get back to where they were
+      var msg = el('p', { class: 'su__msg su__msg--wait', role: 'status', hidden: true });
+      var err = el('p', { class: 'su__msg su__msg--error', role: 'alert', hidden: true });
+      var go = el('button', { type: 'button', class: 'su__btn su__btn--quiet', text: 'Already paid here? Continue with Plex' });
+      go.addEventListener('click', function () { plexSignIn(go, msg, err, 'Already paid here? Continue with Plex'); });
+      kids.push(go, msg, err);
+    }
+    kids.push(el('a', { class: 'su__btn su__btn--quiet', href: '/login.html', text: 'Already a member? Sign in' }));
+    draw('closed', 'Sign-ups are closed', kids);
   }
 
   function route(v) {
@@ -282,7 +299,7 @@
     else if (view.step === 'member') showMember();
     else if (view.step === 'paying') showPaying();
     else if (view.step === 'closed') showClosed(view.message);
-    else if (!cfg.open) showClosed(cfg.message);
+    else if (!cfg.open && !testing()) showClosed(cfg.message);
     else showPlex();
   }
 

@@ -11,8 +11,10 @@ from urllib.parse import parse_qsl
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
-STRIPE_KEY = "rk_test_signupkey"
-PUBLISHABLE = "pk_test_signuppub"
+STRIPE_KEY = "rk_live_signupkey"
+PUBLISHABLE = "pk_live_signuppub"
+TEST_KEY = "rk_test_signupkey"          # Stripe test mode: nothing is charged
+TEST_PUBLISHABLE = "pk_test_signuppub"
 OWNER_TOKEN = "owner-token"
 MACHINE = "machine-galaxy"
 PRICE = "price_month"
@@ -30,6 +32,7 @@ def reset():
             OWNER_TOKEN: {"id": 900, "username": "galaxyowner", "title": "Galaxy Owner", "email": "owner@greystar.test"},
             "tok-new": {"id": 3001, "username": "newbie", "title": "New Bie", "email": "Newbie@Example.com"},
             "tok-old": {"id": 2001, "username": "sable", "title": "Sable", "email": "sable@example.com"},
+            "tok-two": {"id": 3002, "username": "second", "title": "Second One", "email": "second@example.com"},
         },
         "pins": {},          # pin id -> token (None until approved)
         "sections": [{"id": "11", "key": "1", "title": "TV Shows", "type": "show"}, {"id": "12", "key": "2", "title": "Movies", "type": "movie"},
@@ -38,6 +41,8 @@ def reset():
         "invites": [],       # {"id", "email", "sections"}: sent by the owner, not accepted yet
         "fail": {},          # route name -> HTTP status to answer with (invite, shares, requests, accept, checkout)
         "instant": set(),    # emails plex.tv shares with at once (already a friend of the owner)
+        "garbage": False,    # answer the share list with something that is not XML
+        "subs": {},          # subscription id -> status, when it differs from what its checkout says
         # Stripe
         "sessions": {},
         "prices": {PRICE: {"id": PRICE, "active": True, "type": "recurring", "unit_amount": 1599, "currency": "usd",
@@ -126,12 +131,14 @@ def server(mid: str, request: Request):
 def shares(mid: str, request: Request):
     _owner(request)
     _fail("shares")
+    if state["garbage"]:
+        return Response("<html>Bad gateway", media_type="text/html")
     out = ""
     for s in state["shares"]:
         secs = "".join(f'<Section id="{x["id"]}" key="{x["key"]}" title="{x["title"]}" type="{x["type"]}" '
                        f'shared="{1 if x["id"] in s["sections"] else 0}"/>' for x in state["sections"])
         out += (f'<SharedServer id="{s["id"]}" username="{s["username"]}" email="{s["email"]}" userID="{s["userID"]}" '
-                f'accessToken="SECRET-ACCESS-TOKEN" acceptedAt="1" invitedAt="1">{secs}</SharedServer>')
+                f'accessToken="SECRET-ACCESS-TOKEN" acceptedAt="{s.get("acceptedAt", "1")}" invitedAt="1">{secs}</SharedServer>')
     return _xml(out)
 
 
@@ -169,7 +176,8 @@ def received(request: Request):
     extra = state.get("other_invites", [])   # invites from somebody who is not the owner
     return _xml("".join(f'<Invite id="{i["id"]}" email="{o["email"]}" username="{o["username"]}" friend="1" home="0" server="1">'
                         f'<Server name="GALAXY" numLibraries="2"/></Invite>' for i in mine)
-                + "".join(f'<Invite id="{i}" email="stranger@x.com" username="stranger" friend="1" home="0" server="1"/>' for i in extra))
+                + "".join(f'<Invite id="{i}" email="stranger@x.com" username="stranger" friend="1" home="0" server="1">'
+                          f'<Server name="GALAXY" numLibraries="9"/></Invite>' for i in extra))   # a stranger whose server has the same name
 
 
 def accept(invite_id: str):
@@ -194,9 +202,13 @@ def accept_route(invite_id: str, request: Request):
 
 # ---------- Stripe ----------
 def _stripe(request: Request):
-    if request.headers.get("authorization") != f"Bearer {STRIPE_KEY}":
+    if request.headers.get("authorization") not in (f"Bearer {STRIPE_KEY}", f"Bearer {TEST_KEY}"):
         return JSONResponse({"error": {"message": "Invalid API Key provided"}}, status_code=401)
     return None
+
+
+def _live(request: Request) -> bool:
+    return request.headers.get("authorization") == f"Bearer {STRIPE_KEY}"
 
 
 @app.post("/v1/checkout/sessions")
@@ -217,7 +229,7 @@ async def new_session(request: Request):
     state["sessions"][sid] = {
         "id": sid, "object": "checkout.session", "status": "open", "payment_status": "unpaid", "mode": form.get("mode"),
         "ui_mode": form.get("ui_mode"), "client_secret": f"{sid}_secret_abc", "client_reference_id": form.get("client_reference_id"),
-        "customer_email": form.get("customer_email"), "customer": None, "subscription": None, "livemode": False,
+        "customer_email": form.get("customer_email"), "customer": None, "subscription": None, "livemode": _live(request),
         "expires_at": int(form.get("expires_at") or time.time() + 3600), "_idem": request.headers.get("idempotency-key")}
     return state["sessions"][sid]
 
@@ -238,7 +250,21 @@ def get_session(sid: str, request: Request):
         return JSONResponse({"error": {"message": "the mock was told to fail"}}, status_code=state["fail"]["session"])
     if sid not in state["sessions"]:
         return JSONResponse({"error": {"message": "No such checkout.session"}}, status_code=404)
+    state.setdefault("read", set()).add(sid)
     return state["sessions"][sid]
+
+
+@app.get("/v1/subscriptions/{sub_id}")
+def get_subscription(sub_id: str, request: Request):
+    bad = _stripe(request)
+    if bad:
+        return bad
+    if state["fail"].get("sub"):
+        return JSONResponse({"error": {"message": "the mock was told to fail"}}, status_code=state["fail"]["sub"])
+    for s in state["sessions"].values():
+        if isinstance(s.get("subscription"), dict) and s["subscription"]["id"] == sub_id:
+            return {"id": sub_id, "status": state["subs"].get(sub_id, s["subscription"]["status"])}
+    return JSONResponse({"error": {"message": "No such subscription"}}, status_code=404)
 
 
 @app.post("/v1/checkout/sessions/{sid}/expire")
@@ -246,7 +272,7 @@ def expire_session(sid: str, request: Request):
     bad = _stripe(request)
     if bad:
         return bad
-    calls.append({"what": "expire", "id": sid})
+    calls.append({"what": "expire", "id": sid, "read_first": sid in state.get("read", set())})
     state["sessions"][sid]["status"] = "expired"
     return state["sessions"][sid]
 

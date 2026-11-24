@@ -308,6 +308,7 @@
       var su0 = s.signup || {}, sc = su0.counts || {};
       if (sc.stuck) return ['danger', sc.stuck + ' need' + (sc.stuck === 1 ? 's' : '') + ' you'];
       if (!su0.enabled) return ['neutral', su0.ready ? 'Off' : 'Not set up'];
+      if (su0.ready && su0.mode === 'test') return ['warning', 'Test mode, closed to the public'];
       return su0.ready ? ['success', 'Open, joins ' + (su0.server || 'a server')] : ['danger', 'Setup incomplete'];
     }
     if (view === 'requests') return !rq.connected ? ['neutral', 'Not connected'] : rq.error ? ['danger', 'Seerr not answering'] : rq.pending ? ['warning', rq.pending + ' waiting'] : ['success', 'Seerr on'];
@@ -1283,10 +1284,15 @@
     var srvName = (su.servers.filter(function (x) { return x.id === su.server_id; })[0] || {}).name;
 
     // On or off, and whether there is room
-    var top = el('section', { class: 'st-section' }, el('h3', { text: su.enabled ? (cap.full ? 'Sign-up is on, but ' + srvName + ' is full' : 'Sign-up is on') : 'Sign-up is off' }));
+    var testMode = su.mode === 'test';
+    var top = el('section', { class: 'st-section' }, el('h3', { text: su.enabled ? (testMode ? 'Sign-up is on in test mode: closed to the public' : cap.full ? 'Sign-up is on, but ' + srvName + ' is full' : 'Sign-up is on') : 'Sign-up is off' }));
     if (su.problems.length) {
       top.appendChild(el('p', { class: 'st-note', text: 'Before it can be turned on:' }));
       top.appendChild(el('ul', { class: 'st-note' }, su.problems.map(function (x) { return el('li', { text: x }); })));
+    } else if (testMode) {
+      top.appendChild(el('p', { class: 'st-note' }, 'These are Stripe test keys, so nothing is charged. To stop a test card buying real access, only the test accounts listed under Payment can sign up, from ',
+        el('a', { href: '/signup.html?test', target: '_blank', rel: 'noopener', text: location.origin + '/signup.html?test' }),
+        ' (open it in a private window). Everyone else sees “Sign-ups are closed”, and the sign-in page shows no Sign up button. A test account that finishes really is added to ' + (srvName || 'the server') + '.'));
     } else {
       top.appendChild(el('p', { class: 'st-note' }, su.enabled ? 'The sign-in page shows a Sign up button. The page is ' : 'When it is on, the sign-in page shows a Sign up button. The page will be ',
         el('a', { href: '/signup.html', target: '_blank', rel: 'noopener', text: location.origin + '/signup.html' }),
@@ -1376,13 +1382,22 @@
           } }),
           el('span', { class: 'st-spacer' }),
           el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Replace keys', onclick: function () { suKeys = true; render(); } })));
+      if (testMode) {
+        var testers = input({ value: (su.testers || []).join(', '), placeholder: 'throwaway@example.com', maxlength: '2000' }, 'su-testers');
+        stripeSec.append(
+          field('Test accounts (Plex emails)', testers, 'Only these Plex accounts can sign up while the test keys are in. Separate several with commas. They are ignored once live keys are saved.'),
+          el('div', { class: 'st-row' }, el('button', { type: 'button', class: 'st-btn', text: busy['su-testers'] ? 'Saving…' : 'Save test accounts', disabled: busy['su-testers'], onclick: function () {
+            saveSignup('su-testers', { testers: testers.value }, 'Saved.').then(function () { if (msgs['su-testers'].kind === 'ok') { clearDrafts('su-testers'); render(); } });
+          } })),
+          message('su-testers'));
+      }
     } else {
       var sk = input({ type: 'password', placeholder: 'rk_live_…', autocomplete: 'new-password', class: 'st-input is-mono' }, 'su-sk');
       var pk = input({ placeholder: 'pk_live_…', value: su.publishable_key || '', class: 'st-input is-mono' }, 'su-pk');
       stripeSec.append(
         el('p', { class: 'st-note', text: 'Sign-up needs its own Stripe key, because it opens checkouts and the Billing key is read-only on purpose.' }),
         el('div', { class: 'st-form' },
-          el('div', { class: 'st-wide' }, field('Restricted key for sign-up', sk, 'In Stripe: Developers, API keys, Create restricted key. Give it Write on Checkout Sessions and Read on Prices and Products, and nothing else.')),
+          el('div', { class: 'st-wide' }, field('Restricted key for sign-up', sk, 'In Stripe: Developers, API keys, Create restricted key. Give it Write on Checkout Sessions and Read on Subscriptions, Prices and Products, and nothing else. Test the setup checks all of them.')),
           el('div', { class: 'st-wide' }, field('Publishable key', pk, 'On the same Stripe page, starts with pk_. It is not a secret: the sign-up page uses it to show the payment form.'))),
         el('div', { class: 'st-row' },
           el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['su-stripe'] ? 'Checking…' : 'Save keys', disabled: busy['su-stripe'], onclick: function () {
@@ -1405,7 +1420,8 @@
       list.appendChild(el('li', { class: 'st-item' },
         el('div', { class: 'st-item__top' },
           el('span', { class: 'st-item__name', text: r.name || r.username || r.email }),
-          el('span', { class: 'st-tag ' + (r.stuck ? 'st-tag--danger' : r.state === 'active' ? 'st-tag--ok' : ''), text: r.stuck ? 'Paid, needs you' : SU_STATE[r.state] || r.state }),
+          el('span', { class: 'st-tag ' + (r.stuck ? 'st-tag--danger' : r.state === 'active' ? 'st-tag--ok' : ''),
+            text: r.unconfirmed ? 'Payment not confirmed by Stripe' : r.stuck ? 'Paid, needs you' : SU_STATE[r.state] || r.state }),
           el('span', { class: 'st-spacer' }),
           moving ? el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: busy['su-retry-' + r.id] ? 'Trying…' : 'Try again now', disabled: busy['su-retry-' + r.id], onclick: function () {
             withBusy('su-retry-' + r.id, api('POST', '/api/settings/signup/' + encodeURIComponent(r.id) + '/retry').then(function (out) {

@@ -104,11 +104,15 @@ Then open **Settings** (the sliders button in the top bar):
      number of people to stop at (Plex itself stops at 100 per server; invites
      nobody has accepted yet count too).
    - **Payment**: a second Stripe **restricted** key just for sign-up (Write on
-     Checkout Sessions, Read on Prices and Products), the publishable key
-     (`pk_...`), and the price. The Billing key stays read-only. Test keys
-     (`rk_test_`, `pk_test_`) work for a dry run with Stripe's test cards.
-   - **Test the setup** opens a checkout and closes it again (nobody is
-     charged) and reads the server's libraries.
+     Checkout Sessions, Read on Subscriptions, Prices and Products), the
+     publishable key (`pk_...`), and the price. The Billing key stays read-only.
+   - **Test the setup** opens a checkout, reads it back and closes it again
+     (nobody is charged), and reads the server's libraries.
+   - **Dry run with Stripe test keys** (`rk_test_`, `pk_test_`): nothing is
+     charged, so sign-up stays closed to the public and the sign-in page shows
+     no Sign up button. Only the Plex emails listed under **Test accounts** can
+     sign up, from `/signup.html?test`, with Stripe's test cards. A test
+     account that finishes really is added to the server.
 
    Nobody is invited until Stripe itself says the checkout is complete, paid
    and its subscription active. The checkout is locked to the person's Plex
@@ -117,7 +121,10 @@ Then open **Settings** (the sliders button in the top bar):
    person pays and closes the tab, the app finishes the invite within a minute.
    If someone has paid and cannot be added after three tries, admins get a
    **Paid sign-up needs you** notification and the app keeps trying every
-   hour; **Try again now** is on their row under Sign-ups. Removing a row
+   hour; **Try again now** is on their row under Sign-ups. One payment sends at
+   most two invites by itself. Admins are also told when Stripe cannot be asked
+   about payments, and when a finished checkout is still unconfirmed after an
+   hour. Removing a row
    there changes nothing in Stripe or on Plex. Canceling a subscription does
    not remove anyone from Plex. See `backend/app/signup.py`.
 

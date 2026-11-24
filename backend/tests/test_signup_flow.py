@@ -116,7 +116,7 @@ def test_nobody_is_invited_before_stripe_says_paid(env):
     assert run(svc.advance(row["id"]))["state"] == "checkout_open"
     s.update(status="open", subscription={"id": "sub_x", "status": "active"})   # paid and running, but the checkout never finished
     assert run(svc.advance(row["id"]))["state"] == "checkout_open"
-    assert what("invite") == [] and svc.view(svc.get(row["id"]))["step"] == "pay"
+    assert what("invite") == [] and svc.view(svc.get(row["id"]))["step"] == "pay" and svc.get(row["id"])["paid_at"] is None
 
 
 def test_a_checkout_that_belongs_to_someone_else_is_refused(env):
@@ -141,7 +141,8 @@ def test_paid_but_plex_refuses_the_admins_hear_once_and_it_keeps_trying(env):
     row = run(svc.advance(row["id"]))
     assert row["attempts"] == 3 and row["alerted"] == 1 and "HTTP 500" in row["last_error"]
     assert [p["title"] for p in svc.notifier.posts] == ["Paid sign-up needs you: New Bie"] and svc.notifier.posts[0]["urgent"]
-    assert svc.view(row) == {"name": "New Bie", "email": "newbie@example.com", "server": "GALAXY", "step": "working", "stuck": True, "accept": False}
+    assert svc.view(row) == {"name": "New Bie", "email": "newbie@example.com", "server": "GALAXY", "step": "working", "confirming": False,
+                             "stuck": True, "accept": False}
     run(svc.advance(row["id"]))
     assert len(svc.notifier.posts) == 1   # told once, not every try
     now = int(time.time())
@@ -270,13 +271,14 @@ def test_only_the_owners_invite_is_accepted(env):
     assert [c["id"] for c in what("accept")] != ["999"] and len(what("accept")) == 1
 
 
-def test_the_invite_is_still_found_when_plex_names_the_sender_differently(env):
+def test_a_strangers_invite_is_never_accepted_even_from_a_server_with_the_same_name(env):
     _, _, svc = env
-    M.state["people"][M.OWNER_TOKEN].update(username="GalaxyC58-renamed", email="other@greystar.test")   # not what we have saved
-    M.state["other_invites"] = ["999"]
+    M.state["people"][M.OWNER_TOKEN].update(username="renamed", email="other@greystar.test")   # so the owner's own invite is not recognised
+    M.state["other_invites"] = ["999"]   # a stranger's server is also called GALAXY
     _, row = open_checkout(svc, start(svc))
     M.pay(row["checkout_session"])
-    assert run(svc.advance(row["id"]))["state"] == "active" and [c["id"] for c in what("accept")] != ["999"]
+    row = run(svc.advance(row["id"]))
+    assert row["state"] == "invited" and what("accept") == []   # they accept it themselves; nobody else's is touched
 
 
 def test_a_lost_answer_from_stripe_does_not_wedge_the_next_try(env):
@@ -362,3 +364,221 @@ def test_stripe_key_is_saved_encrypted(env):
     store, _, _ = env
     raw = store.db.execute("SELECT value FROM settings WHERE key = 'signup_stripe_key'").fetchone()["value"]
     assert M.STRIPE_KEY not in raw and store.get_setting("signup_stripe_key") == M.STRIPE_KEY
+
+
+# ---------- Stripe test keys: nothing is charged, so only listed test accounts get in ----------
+def use_test_keys(store, testers=None):
+    store.set_setting("signup_stripe_key", M.TEST_KEY)
+    store.set_setting("signup_publishable_key", M.TEST_PUBLISHABLE)
+    store.set_setting("signup_testers", testers)
+
+
+def test_with_test_keys_a_test_card_does_not_buy_real_access(env):
+    store, _, svc = env
+    use_test_keys(store)
+    assert svc.settings()["mode"] == "test" and svc.problems() == [] and run(svc.availability()) == "test"
+    assert run(svc.begin(newbie(), "tok-new", None)) == ("off", None) and svc.rows() == []
+    use_test_keys(store, "Someone@Else.com, newbie@example.com")
+    assert run(svc.availability()) == "test" and run(svc.availability("newbie@example.com")) is None
+    _, row = open_checkout(svc, start(svc))
+    assert M.state["sessions"][row["checkout_session"]]["livemode"] is False
+    M.pay(row["checkout_session"])
+    assert run(svc.advance(row["id"]))["state"] == "active"   # a listed test account goes all the way, to prove the flow
+
+
+def test_a_test_mode_payment_is_never_honoured_for_anyone_else(env):
+    store, _, svc = env
+    use_test_keys(store, "newbie@example.com")
+    _, row = open_checkout(svc, start(svc))
+    use_test_keys(store, None)   # taken off the list while the form was open
+    M.pay(row["checkout_session"])
+    row = run(svc.advance(row["id"]))
+    assert row["state"] == "checkout_open" and row["pending"] and what("invite") == []
+    assert run(svc.sweep(int(time.time()) + 61)) == 0 and svc.get(row["id"])["state"] == "checkout_open"
+
+
+# ---------- what the review found ----------
+def test_coming_back_never_changes_who_the_invite_is_for(env):
+    _, _, svc = env
+    _, row = open_checkout(svc, start(svc))
+    out, cookie = run(svc.begin(dict(newbie(), email="somebody.else@example.com"), "tok-new", None))
+    again = svc.by_cookie(cookie)
+    assert out == "go" and again["id"] == row["id"] and again["email"] == "newbie@example.com"
+    M.pay(row["checkout_session"])
+    run(svc.advance(row["id"]))
+    assert [c["body"]["shared_server"]["invited_email"] for c in what("invite")] == ["newbie@example.com"]
+
+
+def test_one_payment_sends_at_most_two_invites_by_itself(env):
+    _, _, svc = env
+    _, row = open_checkout(svc, start(svc))
+    M.pay(row["checkout_session"])
+    M.state["fail"]["accept"] = 500
+    for expect in (1, 2):
+        row = run(svc.advance(row["id"]))                    # invited (again); accepting fails
+        assert row["state"] == "invited" and len(what("invite")) == expect
+        M.state["invites"].clear()                           # the invite is declined
+        svc._set(row["id"], invited_at=int(time.time()) - 600)
+        assert run(svc.advance(row["id"]))["state"] == "paid"
+    for _ in range(4):
+        row = run(svc.advance(row["id"]))
+    assert len(what("invite")) == 2 and row["state"] == "paid" and row["alerted"] == 1 and "Not sending another" in row["last_error"]
+    assert [p["title"] for p in svc.notifier.posts] == ["Paid sign-up needs you: New Bie"]
+    M.state["fail"].clear()
+    svc._set(row["id"], attempts=0, invites=0)               # what Try again now does
+    assert run(svc.advance(row["id"]))["state"] == "active" and len(what("invite")) == 3
+
+
+def test_any_kind_of_error_is_counted_and_never_stops_the_others(env, monkeypatch):
+    _, _, svc = env
+    _, a = open_checkout(svc, start(svc))
+    _, b = open_checkout(svc, start(svc, dict(M.state["people"]["tok-two"], id="3002"), "tok-two"))
+    M.pay(a["checkout_session"]); M.pay(b["checkout_session"])
+    real = svc._invite
+
+    async def broken(row):
+        if row["id"] == a["id"]:
+            raise KeyError("something nobody planned for")
+        return await real(row)
+    monkeypatch.setattr(svc, "_invite", broken)
+    now = int(time.time())
+    for i in (1, 2, 3):
+        run(svc.sweep(now + 61 * i))
+    ra, rb = svc.get(a["id"]), svc.get(b["id"])
+    assert ra["state"] == "paid" and ra["attempts"] == 3 and ra["alerted"] == 1 and "planned" in ra["last_error"]
+    assert rb["state"] == "active"
+
+    async def worse(sid, min_gap=0):
+        raise RuntimeError("the sweep itself must survive this")
+    monkeypatch.setattr(svc, "advance", worse)
+    svc._set(a["id"], touch=False, checked=0)
+    assert run(svc.sweep(now + 9000)) == 0   # no exception escapes
+
+
+def test_someone_who_left_but_still_pays_is_not_charged_again(env):
+    _, _, svc = env
+    _, row = open_checkout(svc, start(svc))
+    M.pay(row["checkout_session"])
+    row = run(svc.advance(row["id"]))
+    M.state["shares"] = [s for s in M.state["shares"] if s["userID"] != "3001"]   # removed from the server by hand
+    assert run(svc.begin(newbie(), "tok-new", None)) == ("paying", None)          # Stripe says the subscription still runs
+    M.state["fail"]["sub"] = 500
+    assert run(svc.begin(newbie(), "tok-new", None)) == ("busy", None)            # cannot tell: take no chances
+    M.state["fail"].clear()
+    M.state["subs"][row["subscription"]] = "canceled"
+    out, cookie = run(svc.begin(newbie(), "tok-new", None))
+    fresh = svc.by_cookie(cookie)
+    assert out == "go" and fresh["state"] == "plex_ok" and fresh["subscription"] is None and fresh["invites"] == 0
+    assert len(what("checkout")) == 1
+
+
+def test_a_finished_form_without_confirmed_money_waits_and_the_admins_hear(env):
+    _, _, svc = env
+    _, row = open_checkout(svc, start(svc))
+    s = M.state["sessions"][row["checkout_session"]]
+    s.update(status="complete", payment_status="unpaid", subscription={"id": "sub_slow", "status": "incomplete"})
+    assert run(svc.checkout(row, "https://streaming.test/")) == {"paid": True} and len(what("checkout")) == 1   # no second form
+    row = run(svc.advance(row["id"]))
+    v = svc.view(row)
+    assert row["state"] == "checkout_open" and row["pending"] and v["step"] == "working" and v["confirming"] is True and what("invite") == []
+    now = int(time.time())
+    run(svc.sweep(now + 600))
+    assert svc.notifier.posts == []
+    run(svc.sweep(now + 4000))
+    assert [p["title"] for p in svc.notifier.posts] == ["Sign-up payment not confirmed: New Bie"] and svc.counts()["stuck"] == 1
+    run(svc.sweep(now + 8000))
+    assert len(svc.notifier.posts) == 1
+    s.update(payment_status="paid", subscription={"id": "sub_slow", "status": "active"})
+    run(svc.sweep(now + 9000))
+    assert svc.get(row["id"])["state"] == "active"
+
+
+def test_admins_hear_when_stripe_cannot_be_asked_about_payments(env):
+    _, _, svc = env
+    _, row = open_checkout(svc, start(svc))
+    M.pay(row["checkout_session"])
+    M.state["fail"]["session"] = 403   # say the key cannot read the checkout
+    now = int(time.time())
+    run(svc.sweep(now + 61)); run(svc.sweep(now + 122))
+    assert svc.notifier.posts == [] and svc.get(row["id"])["state"] == "checkout_open"
+    run(svc.sweep(now + 183)); run(svc.sweep(now + 244))
+    assert {p["key"] for p in svc.notifier.posts} == {"signup:stripe"} and svc.notifier.posts[0]["urgent"]
+    M.state["fail"].clear()
+    run(svc.sweep(now + 305))
+    assert svc.get(row["id"])["state"] == "active" and "signup:stripe" in svc.notifier.resolved
+
+
+def test_a_share_plex_has_not_marked_accepted_does_not_count(env):
+    _, _, svc = env
+    _, row = open_checkout(svc, start(svc))
+    M.pay(row["checkout_session"])
+    M.state["shares"].append({"id": "600", "userID": "3001", "username": "newbie", "email": "newbie@example.com", "sections": ["11"], "acceptedAt": ""})
+    M.state["fail"]["requests"] = 503
+    row = run(svc.advance(row["id"]))
+    assert row["state"] == "invited" and what("invite") == [] and store_token(env) == "tok-new"
+    M.state["shares"][-1]["acceptedAt"] = "1700000000"
+    assert run(svc.advance(row["id"]))["state"] == "active"
+
+
+def store_token(env):
+    store, _, svc = env
+    return store.box.open(svc.rows() and svc.get(svc.rows()[0]["id"])["plex_token_enc"])
+
+
+def test_a_stuck_sign_up_still_loses_its_plex_sign_in_after_a_week(env):
+    store, _, svc = env
+    _, row = open_checkout(svc, start(svc))
+    M.pay(row["checkout_session"])
+    M.state["fail"]["requests"] = 503
+    run(svc.advance(row["id"]))
+    with store.lock:
+        store.db.execute("UPDATE signups SET created = created - 8 * 86400 WHERE id = ?", (row["id"],))
+        store.db.commit()
+    run(svc.advance(row["id"]))   # it was looked at a moment ago, as a stuck one always is
+    run(svc.sweep())
+    assert svc.get(row["id"])["plex_token_enc"] is None
+
+
+def test_the_sign_up_cookie_runs_out(env):
+    store, _, svc = env
+    out, cookie = run(svc.begin(newbie(), "tok-new", None))
+    assert svc.by_cookie(cookie) is not None
+    run(svc.advance(svc.by_cookie(cookie)["id"]))
+    with store.lock:
+        store.db.execute("UPDATE signups SET updated = updated - 8 * 86400")
+        store.db.commit()
+    assert svc.by_cookie(cookie) is None
+
+
+def test_two_tabs_at_once_make_one_sign_up(env):
+    _, _, svc = env
+
+    async def both():
+        return await asyncio.gather(svc.begin(newbie(), "tok-new", None), svc.begin(newbie(), "tok-new", None))
+    outs = run(both())
+    assert [o for o, _ in outs] == ["go", "go"] and len(svc.rows()) == 1
+
+
+def test_a_form_opened_in_another_tab_is_not_wiped_by_signing_in_again(env):
+    _, _, svc = env
+    row = start(svc)
+
+    async def race():
+        # the second sign-in is past its checks and about to save when the first tab opens the payment form
+        real = svc.availability
+        done = []
+
+        async def slow(email=None):
+            why = await real(email)
+            if not done:
+                done.append(1)
+                await svc.checkout(svc.get(row["id"]), "https://streaming.test/")
+            return why
+        svc.availability = slow
+        try:
+            return await svc.begin(newbie(), "tok-new", None)
+        finally:
+            svc.availability = real
+    out, _ = run(race())
+    after = svc.get(row["id"])
+    assert out == "go" and after["state"] == "checkout_open" and after["checkout_session"]
