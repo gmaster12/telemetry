@@ -6,7 +6,9 @@ When they come back, the page opens the Welcome back sheet with what they have n
 What makes one (`Notifier.tick`, every 2 minutes):
 - Their own movie and show requests (Seerr's full list as its admin; the requester is found through `seerr_links`):
   "started downloading" (Radarr or Sonarr has it in the queue), "is on Plex" (Seerr says available; for a show, every
-  requested season), "could not be downloaded" (Seerr says failed).
+  requested season), "could not be downloaded" (Seerr says failed). People who follow someone else's request (Notify
+  me too, `request_watch`) get the same three, never with the requester's name. A request older than REQUEST_DAYS is
+  still followed until it is on Plex; the first look at an old one is silent, so turning this on tells nobody old news.
 - Their own comic, ebook and audiobook requests (the media site's signed admin feed, `Media.admin_log`): the same three.
 - Billing (Stripe, read-only, from the copy the poller keeps): a subscription that is past due, unpaid or incomplete.
   Urgent: it stays pinned until Stripe says it is paid, then it says so.
@@ -82,7 +84,8 @@ ADMINS = "admins"
 TICK_SECONDS = 120
 KEEP_DAYS = 30            # what the list shows (urgent ones that are still open always show)
 PRUNE_DAYS = 60
-REQUEST_DAYS = 45         # requests older than this are not followed any more
+REQUEST_DAYS = 45         # requests older than this are followed only until they are on Plex
+JUST_ARRIVED = 2 * 86400  # an old request that reached Plex this recently is still announced
 LIST_MAX = 60
 WELCOME_GAP = 6 * 3600   # a visit after this long counts as coming back
 PAY_PROBLEM = ("past_due", "unpaid", "incomplete")
@@ -383,15 +386,25 @@ class Notifier:
             log.info("Notifications: Seerr not answering: %s", e.message)
             return
         people = self._seerr_people()
+        followers = self._followers()
         cutoff = now - REQUEST_DAYS * 86400
-        rows = []
+        rows, quiet = [], set()
         for q in every.values():
             uid = (q.get("requestedBy") or {}).get("id")
-            if uid is None or int(uid) not in people:
+            linked = uid is not None and int(uid) in people
+            if not (linked or followers.get(int(q["id"]))):
                 continue
             created = _stamp(q.get("createdAt"))
             if created and created < cutoff:
-                continue
+                # An old request is still followed until it is on Plex (a movie asked for months before its digital
+                # release). One already on Plex is left alone, unless it only just arrived and was never told.
+                m = q.get("media") or {}
+                done = m.get("status4k" if q.get("is4k") else "status") == 5
+                known = self._state(f"seerr:{q['id']}")
+                if done and (known == "ready" or (known is None and (_stamp(m.get("mediaAddedAt")) or 0) < now - JUST_ARRIVED)):
+                    continue
+                if not done and known is None:
+                    quiet.add(int(q["id"]))   # first look at an old one: remember where it is, announce nothing
             rows.append(q)
         gate = asyncio.Semaphore(4)
         states = await asyncio.gather(*[self._seerr_state(q, gate) for q in rows], return_exceptions=True)
@@ -399,7 +412,9 @@ class Notifier:
             if isinstance(st, BaseException) or st == "declined":
                 continue
             key = f"seerr:{q['id']}"
-            if not self._moved(key, st, seeding, now):
+            if int(q["id"]) in quiet and st == "ready":
+                continue   # Plex has it before Seerr says so: wait for Seerr's own date to tell whether it is news
+            if not self._moved(key, st, seeding or int(q["id"]) in quiet, now):
                 continue
             m = q.get("media") or {}
             kind = q.get("type") or m.get("mediaType") or "movie"
@@ -410,8 +425,22 @@ class Notifier:
             what = title + (f", season {seasons[0]}" if len(seasons) == 1 else f", seasons {seasons[0]} to {seasons[-1]}" if seasons else "")
             what += " (4K)" if q.get("is4k") else ""
             href = f"#/requests/{'series' if kind == 'tv' else 'movie'}/{tmdb}"
-            for pid in people[int(q["requestedBy"]["id"])]:
-                self._post_request(f"plex:{pid}", key, st, what, kind, href, info.get("poster"), now)
+            uid = (q.get("requestedBy") or {}).get("id")
+            told = []
+            for pid in [*people.get(int(uid), []), *followers.get(int(q["id"]), [])] if uid is not None else followers.get(int(q["id"]), []):
+                if pid not in told:   # Notify me too: followers hear the same news, never who asked
+                    told.append(pid)
+                    self._post_request(f"plex:{pid}", key, st, what, kind, href, info.get("poster"), now)
+
+    def _followers(self) -> dict[int, list[str]]:
+        """Notify me too (request_help.py): who follows which request, by member id."""
+        out: dict[int, list[str]] = {}
+        try:
+            for r in self.db.execute("SELECT request_id, subject FROM request_watch ORDER BY created"):
+                out.setdefault(int(r["request_id"]), []).append(str(r["subject"]))
+        except Exception:  # noqa: BLE001  (no request_watch table yet)
+            pass
+        return out
 
     def _post_request(self, who: str, key: str, state: str, what: str, media: str, href: str, poster: str | None, now: int) -> None:
         days = None

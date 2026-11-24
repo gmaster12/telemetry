@@ -213,3 +213,58 @@ def test_reported_issues_are_pinned_for_admins_until_resolved(env):
     tick(n)
     t = {x["title"] for x in n.items_for(boss)["items"] if x["kind"] == "issue" and x["pinned"]}
     assert t == {"sable reported a problem with Inception", "sable reported an audio problem with Inception"}
+
+
+def _ago(days):
+    return time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime(time.time() - days * 86400))
+
+
+def test_notify_me_too_followers_hear_the_same_news(env):
+    store, d, svc = env
+    svc.save_link("2001", 5, "email")            # the requester
+    req(9)
+    n = notifier(env)
+    tick(n)                                      # seeded
+    svc.help.watch(9, "3003", {"kind": "movie", "tmdbId": 27205, "title": "Inception"})
+    svc.help.watch(9, "2001", {"kind": "movie", "tmdbId": 27205, "title": "Inception"})  # the requester too: told once
+    M.state["requests"][-1]["media_status"] = 5
+    svc.clear_cache()
+    tick(n)
+    assert [x["title"] for x in n.items_for(principal("3003"))["items"]] == ["Inception is ready"]
+    assert [x["title"] for x in n.items_for(principal("2001"))["items"]] == ["Inception is ready"]
+    assert n.items_for(principal("4004"))["items"] == []
+
+
+def test_a_request_older_than_request_days_is_followed_until_it_is_on_plex(env):
+    store, d, svc = env
+    svc.save_link("2001", 5, "email")
+    n = notifier(env)
+    tick(n)                                      # seeded with nothing
+    req(10)                                      # waiting for its release, asked for 80 days ago
+    M.state["requests"][-1]["created"] = _ago(80)
+    req(11, media_status=5)                      # old and on Plex long ago: never news
+    M.state["requests"][-1]["created"] = _ago(90)
+    M.state["requests"][-1]["media_extra"] = {"mediaAddedAt": _ago(60)}
+    svc.clear_cache()
+    tick(n)                                      # first look at the old one: silent
+    assert n.items_for(principal("2001"))["items"] == []
+    M.state["requests"][-2]["media_status"] = 5  # released and on Plex now
+    M.state["requests"][-2]["media_extra"] = {"mediaAddedAt": _ago(0)}
+    svc.clear_cache()
+    tick(n)
+    assert [x["title"] for x in n.items_for(principal("2001"))["items"]] == ["Inception is ready"]
+
+
+def test_an_old_request_that_just_arrived_before_it_was_ever_seen_is_still_told(env):
+    store, d, svc = env
+    svc.save_link("2001", 5, "email")
+    n = notifier(env)
+    tick(n)
+    req(12, media_status=5)
+    M.state["requests"][-1]["created"] = _ago(78)
+    M.state["requests"][-1]["media_extra"] = {"mediaAddedAt": _ago(0.2)}
+    svc.help.watch(12, "3003", {"kind": "movie", "tmdbId": 27205, "title": "Inception"})
+    svc.clear_cache()
+    tick(n)
+    assert [x["title"] for x in n.items_for(principal("2001"))["items"]] == ["Inception is ready"]
+    assert [x["title"] for x in n.items_for(principal("3003"))["items"]] == ["Inception is ready"]
