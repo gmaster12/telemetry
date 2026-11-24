@@ -94,6 +94,33 @@ Then open **Settings** (the sliders button in the top bar):
    paused is handed back on its next run, with no payment email to them).
    **Remove** on the same card puts them back under the normal checks at once.
 
+6. **Sign-up** (People and billing): lets a new person join without you. On
+   `/signup.html` they sign in with Plex (the Plex window also makes a free
+   account), pay for one Stripe subscription in a payment form shown on the
+   page, are invited to one server by the Plex account that owns it, and the
+   invite is accepted for them. The last screen explains the Plex apps and how
+   to sign in here. It is **off** until you turn it on. To set it up:
+   - **Where new people go**: the server, the libraries they get, and the
+     number of people to stop at (Plex itself stops at 100 per server; invites
+     nobody has accepted yet count too).
+   - **Payment**: a second Stripe **restricted** key just for sign-up (Write on
+     Checkout Sessions, Read on Prices and Products), the publishable key
+     (`pk_...`), and the price. The Billing key stays read-only. Test keys
+     (`rk_test_`, `pk_test_`) work for a dry run with Stripe's test cards.
+   - **Test the setup** opens a checkout and closes it again (nobody is
+     charged) and reads the server's libraries.
+
+   Nobody is invited until Stripe itself says the checkout is complete, paid
+   and its subscription active. The checkout is locked to the person's Plex
+   email, so Billing matches them without a manual link. Someone already on a
+   server, or already paying, is sent to sign in instead of paying again. If a
+   person pays and closes the tab, the app finishes the invite within a minute.
+   If someone has paid and cannot be added after three tries, admins get a
+   **Paid sign-up needs you** notification and the app keeps trying every
+   hour; **Try again now** is on their row under Sign-ups. Removing a row
+   there changes nothing in Stripe or on Plex. Canceling a subscription does
+   not remove anyone from Plex. See `backend/app/signup.py`.
+
 ## Sign-in and roles
 
 | Who | How they sign in | What they see |

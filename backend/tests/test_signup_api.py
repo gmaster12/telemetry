@@ -263,3 +263,21 @@ def test_only_the_sign_up_page_may_load_stripe(app):
     assert "frame-ancestors 'none'" in csp and "object-src 'none'" in csp and "unsafe-eval" not in csp and "script-src 'self' 'unsafe-inline'" not in csp
     assert 'payment=(self "https://js.stripe.com"' in page.headers["permissions-policy"] and "camera=()" in page.headers["permissions-policy"]
     assert page.headers["x-frame-options"] == "DENY"
+
+
+def test_a_short_plex_hiccup_does_not_page_the_admins(app):
+    set_up(app)
+    c = TestClient(app.app)
+    plex_sign_in(c)
+    c.post("/api/signup/checkout", headers=H)
+    M.pay(next(iter(M.state["sessions"])))
+    M.state["fail"]["invite"] = 503
+    sid = app.signup.rows()[0]["id"]
+    app.signup._set(sid, checked=0)
+    for _ in range(6):   # the page asks every three seconds
+        v = c.get("/api/signup/status").json()
+    row = app.signup.get(sid)
+    assert row["state"] == "paid" and row["attempts"] == 1 and not row["alerted"] and v["stuck"] is False
+    M.state["fail"].clear()
+    app.signup._set(sid, checked=0)
+    assert c.get("/api/signup/status").json()["step"] == "done"

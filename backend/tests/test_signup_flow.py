@@ -270,6 +270,26 @@ def test_only_the_owners_invite_is_accepted(env):
     assert [c["id"] for c in what("accept")] != ["999"] and len(what("accept")) == 1
 
 
+def test_the_invite_is_still_found_when_plex_names_the_sender_differently(env):
+    _, _, svc = env
+    M.state["people"][M.OWNER_TOKEN].update(username="GalaxyC58-renamed", email="other@greystar.test")   # not what we have saved
+    M.state["other_invites"] = ["999"]
+    _, row = open_checkout(svc, start(svc))
+    M.pay(row["checkout_session"])
+    assert run(svc.advance(row["id"]))["state"] == "active" and [c["id"] for c in what("accept")] != ["999"]
+
+
+def test_a_lost_answer_from_stripe_does_not_wedge_the_next_try(env):
+    _, _, svc = env
+    row = start(svc)
+    M.state["fail"]["checkout"] = 500
+    with pytest.raises(Exception):
+        run(svc.checkout(row, "https://streaming.test/"))
+    M.state["fail"].clear()
+    out, row = open_checkout(svc, svc.get(row["id"]))
+    assert out["client_secret"] and [c["idem"] for c in what("checkout")] == [f"signup-{row['id']}-1", f"signup-{row['id']}-2"]
+
+
 def test_when_their_plex_sign_in_has_run_out_they_accept_it_themselves(env):
     _, _, svc = env
     _, row = open_checkout(svc, start(svc))

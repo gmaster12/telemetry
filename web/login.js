@@ -93,11 +93,14 @@
     if (!form.hidden) document.getElementById('u').focus();
   });
 
-  // Emby members: shown only when the server has Emby sign-in set up.
+  // Emby members: shown only when the server has Emby sign-in set up. New people: a Sign up button while sign-up is on.
   var embyForm = document.getElementById('emby');
   var showEmby = document.getElementById('show-emby');
   fetch('/api/auth/options', { credentials: 'same-origin', cache: 'no-store' }).then(read)
-    .then(function (o) { showEmby.hidden = !(o && o.emby); }).catch(function () {});
+    .then(function (o) {
+      showEmby.hidden = !(o && o.emby);
+      document.getElementById('join').hidden = !(o && o.signup);   // only while sign-up is turned on (Settings, Sign-up)
+    }).catch(function () {});
   showEmby.addEventListener('click', function () {
     embyForm.hidden = !embyForm.hidden;
     showEmby.setAttribute('aria-expanded', embyForm.hidden ? 'false' : 'true');

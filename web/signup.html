@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sign up · Greystar</title>
+<meta name="theme-color" content="#070912">
+<meta name="robots" content="noindex">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" href="assets/favicon-32.png" type="image/png" sizes="32x32">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="stylesheet" href="system.css">
+<link rel="stylesheet" href="signup.css">
+</head>
+<body>
+<main class="su">
+  <img class="su__logo" src="assets/logo-glow.png" alt="Greystar Networks" width="1000" height="250">
+  <ol class="su__steps" id="steps" aria-label="Sign-up steps">
+    <li data-step="plex"><span>1</span>Plex account</li>
+    <li data-step="pay"><span>2</span>Subscribe</li>
+    <li data-step="working"><span>3</span>Setting up</li>
+    <li data-step="done"><span>4</span>Start watching</li>
+  </ol>
+  <section class="su__card" id="card" aria-live="polite">
+    <p class="su__note">Loading…</p>
+  </section>
+  <p class="su__foot" id="foot">Plex shows Greystar Telemetry as asking to sign in. We only read your Plex name and email; we never see your Plex password. Your card details go straight to Stripe and are never seen or kept by this site.</p>
+</main>
+<script src="signup.js"></script>
+</body>
+</html>

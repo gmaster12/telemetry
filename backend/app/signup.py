@@ -423,13 +423,16 @@ class Signup:
         why = await self.availability()
         if why:
             raise SignupClosed(why)
+        # Counted before Stripe is asked: if the answer is lost, the next try uses a new idempotency key instead of
+        # tripping over the old one (the times in the request differ). A checkout nobody was shown just expires.
         n = int(row["checkout_n"] or 0) + 1
+        self._set(row["id"], checkout_n=n)
         meta = {"signup_id": row["id"], "plex_id": row["plex_id"], "plex_username": row.get("username")}
         sess = await api.create_checkout(row["id"], n, s["price_id"], row["email"], meta, base_url.rstrip("/") + "/signup.html",
                                          int(time.time()) + CHECKOUT_MINUTES * 60)
         if not sess.get("client_secret"):
             raise StripeError("Stripe did not return a checkout to show.")
-        self._set(row["id"], state="checkout_open", checkout_session=sess["id"], checkout_n=n, server_id=s["server_id"],
+        self._set(row["id"], state="checkout_open", checkout_session=sess["id"], server_id=s["server_id"],
                   sections=json.dumps(s["sections"]), last_error=None)
         return {"client_secret": sess["client_secret"]}
 
@@ -518,7 +521,11 @@ class Signup:
                     self._set(row["id"], plex_token_enc=None)
                 raise
             names = {str(owner.get(k) or "").lower() for k in ("username", "email")} - {""}
-            mine = [i for i in waiting if i["server"] == "1" and ({str(i.get("username") or "").lower(), i.get("email") or ""} & names)]
+            shares = [i for i in waiting if i["server"] == "1"]
+            mine = [i for i in shares if {str(i.get("username") or "").lower(), i.get("email") or ""} & names]
+            if not mine:   # plex.tv did not name the sender the way we know them: take the one invite to this server, if it is the only one
+                named = [i for i in shares if srv["name"].lower() in [str(x).lower() for x in i.get("servers") or []]]
+                mine = named if len(named) == 1 else []
             if mine:
                 await acct.accept_invite(user_token, mine[0])
                 where, _ = await self._share_state(tok, srv["machine_id"], row)
@@ -547,7 +554,7 @@ class Signup:
             try:
                 if was_stuck:
                     self.notifier.resolve(ADMINS, f"signup:stuck:{row['id']}", f"{name} is on {srv['name']} now", "The sign-up finished.")
-                self.notifier.post(ADMINS, f"signup:new:{row['id']}", "signup", f"New sign-up: {name}",
+                self.notifier.post(ADMINS, f"signup:new:{row['id']}", "billing", f"New sign-up: {name}",
                                    f"Paid and added to {srv['name']}.", "Open Sign-up", "settings:signup")
             except Exception:  # noqa: BLE001  a notice is extra; the member is already in
                 log.exception("Sign-up: could not post the new-member notice")
@@ -574,7 +581,7 @@ class Signup:
         name = row.get("title") or row.get("username") or row.get("email")
         if self.notifier is not None:
             try:
-                self.notifier.post(ADMINS, f"signup:stuck:{row['id']}", "signup", f"Paid sign-up needs you: {name}", body,
+                self.notifier.post(ADMINS, f"signup:stuck:{row['id']}", "billing", f"Paid sign-up needs you: {name}", body,
                                    "Open Sign-up", "settings:signup", urgent=True)
             except Exception:  # noqa: BLE001
                 log.exception("Sign-up: could not post the stuck notice")
@@ -730,13 +737,19 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
     @r.get("/api/signup/status")
     async def status(request: Request):
         row = svc.by_cookie(request.cookies.get(COOKIE))
-        if row and row["state"] in IN_FLIGHT and time.time() - int(row["checked"] or 0) >= (5 if row["state"] == "checkout_open" else 3):
+        # The page asks every few seconds. Stripe and plex.tv are asked less often than that, and less often still
+        # after a failed try, so a short plex.tv hiccup does not count as three failures and page the admins.
+        gap = 5 if row and row["state"] == "checkout_open" else min(60, 3 + 10 * int((row or {}).get("attempts") or 0))
+        if row and row["state"] in IN_FLIGHT and time.time() - int(row["checked"] or 0) >= gap:
             row = await svc.advance(row["id"])
         return svc.view(row)
 
     @r.post("/api/signup/checkout")
     async def checkout(request: Request):
         row = mine(request)
+        if throttled("signup-pay:" + row["id"], limit=30, window=600):
+            raise HTTPException(429, "Too many tries. Wait a few minutes.")
+        record_failure("signup-pay:" + row["id"])
         try:
             out = await svc.checkout(row, str(request.base_url))
         except SignupClosed as e:

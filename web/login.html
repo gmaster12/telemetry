@@ -29,6 +29,8 @@
   .lg__btn--dark { background: #f9fafb; color: #0f1720; }
   .lg__btn--emby { background: #52b54b; color: #0f1720; }
   .lg__btn--emby:hover { background: #63c55c; }
+  .lg__btn--join { background: transparent; color: #f9fafb; box-shadow: inset 0 0 0 1px rgba(249, 250, 251, 0.28); }
+  .lg__btn--join:hover { box-shadow: inset 0 0 0 1px #b8f265; color: #b8f265; }
   .lg__btn[hidden] { display: none; }
   .lg__btn--quiet { height: 40px; padding: 0 12px; background: transparent; color: #9daaa9; font-weight: 500; }
   .lg__btn:disabled { opacity: 0.55; cursor: default; }
@@ -71,6 +73,7 @@
     </form>
     <p class="lg__msg lg__msg--wait" id="wait" role="status" hidden></p>
     <p class="lg__msg lg__msg--error" id="err" role="alert" hidden></p>
+    <a class="lg__btn lg__btn--join" id="join" href="/signup.html" hidden>New here? Sign up</a>
     <div class="lg__or">or</div>
     <button type="button" class="lg__btn lg__btn--quiet" id="show-local" aria-expanded="false" aria-controls="local">Administrator sign-in</button>
     <form class="lg__form" id="local" hidden>

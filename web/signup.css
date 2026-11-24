@@ -1,0 +1,71 @@
+/* Greystar sign-up (web/signup.html): the sign-in page's look, with room for Stripe's payment form. */
+:root { color-scheme: dark; }
+html, body { margin: 0; min-height: 100%; background: #070912; }
+body { display: flex; min-height: 100svh; justify-content: center; padding: 32px 16px 48px; box-sizing: border-box;
+  background: radial-gradient(60% 50% at 50% 30%, #121a12 0%, #070912 70%) fixed; color: #f9fafb; font-family: "Urbanist", system-ui, sans-serif; }
+.su { display: flex; flex-direction: column; align-items: center; gap: 24px; width: 100%; max-width: 560px; }
+.su__logo { width: min(300px, 76vw); height: auto; }
+
+.su__steps { display: flex; gap: 6px; margin: 0; padding: 0; list-style: none; width: 100%; }
+.su__steps li { flex: 1 1 0; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #6f7b7a; text-align: center; }
+.su__steps span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; background: rgba(249, 250, 251, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(249, 250, 251, 0.14); font-size: 13px; }
+.su__steps li.is-now { color: #f9fafb; }
+.su__steps li.is-now span { background: #b8f265; color: #0f1720; box-shadow: none; }
+.su__steps li.is-done { color: #9daaa9; }
+.su__steps li.is-done span { background: rgba(184, 242, 101, 0.18); color: #b8f265; box-shadow: inset 0 0 0 1px rgba(184, 242, 101, 0.45); }
+.su__steps[hidden] { display: none; }
+
+.su__card { box-sizing: border-box; width: 100%; display: flex; flex-direction: column; gap: 16px; padding: 28px; border-radius: 32px;
+  background: rgba(249, 250, 251, 0.04); box-shadow: inset 0 0 0 1px rgba(249, 250, 251, 0.1), 0 24px 60px rgba(0, 0, 0, 0.45); }
+.su__title { margin: 0; font-size: 28px; line-height: 34px; font-weight: 300; letter-spacing: -0.01em; }
+.su__title:focus { outline: none; }
+.su__sub { margin: -8px 0 0; font-size: 15px; line-height: 22px; color: #c3cccb; }
+.su__note { margin: 0; font-size: 14px; line-height: 21px; color: #9daaa9; }
+.su__note b, .su__sub b { color: #f9fafb; font-weight: 600; }
+.su__price { display: flex; align-items: baseline; gap: 8px; margin: 0; }
+.su__price b { font-size: 40px; line-height: 44px; font-weight: 300; letter-spacing: -0.02em; }
+.su__price span { font-size: 15px; color: #9daaa9; }
+.su__list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 22px; }
+.su__list li { position: relative; padding-left: 26px; }
+.su__list li::before { content: ""; position: absolute; left: 4px; top: 7px; width: 9px; height: 5px; border-left: 2px solid #b8f265; border-bottom: 2px solid #b8f265; transform: rotate(-45deg); }
+.su__num { margin: 0; padding: 0 0 0 22px; display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 22px; }
+.su__num li::marker { color: #b8f265; font-weight: 700; }
+.su__block { display: flex; flex-direction: column; gap: 12px; padding: 20px; border-radius: 22px; background: rgba(249, 250, 251, 0.04); box-shadow: inset 0 0 0 1px rgba(249, 250, 251, 0.08); }
+.su__block h2 { margin: 0; font-size: 17px; line-height: 24px; font-weight: 600; }
+.su__who { margin: 0; padding: 12px 14px; border-radius: 16px; background: rgba(249, 250, 251, 0.05); font-size: 14px; line-height: 20px; color: #c3cccb; }
+.su__stack { display: flex; flex-direction: column; gap: 12px; }
+.su__stack:empty { display: none; }
+.su__who b { color: #f9fafb; font-weight: 600; overflow-wrap: anywhere; }
+
+.su__btn { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 52px; padding: 0 22px; border: 0; border-radius: 999px;
+  font-family: inherit; font-size: 15px; font-weight: 600; cursor: pointer; text-decoration: none; box-sizing: border-box; }
+.su__btn--go { background: #b8f265; color: #0f1720; }
+.su__btn--go:hover { background: #c6f77f; }
+.su__btn--quiet { min-height: 40px; padding: 0 12px; background: transparent; color: #9daaa9; font-weight: 500; }
+.su__btn:disabled { opacity: 0.55; cursor: default; }
+.su__btn:focus-visible, .su__link:focus-visible { outline: 2px solid #b8f265; outline-offset: 3px; }
+.su__link { color: #b8f265; }
+.su__msg { margin: 0; padding: 12px 14px; border-radius: 16px; font-size: 14px; line-height: 20px; }
+.su__msg--error { background: rgba(255, 138, 147, 0.1); color: #ffb3b9; box-shadow: inset 0 0 0 1px rgba(255, 138, 147, 0.45); }
+.su__msg--wait { background: rgba(184, 242, 101, 0.1); color: #e3f8c4; box-shadow: inset 0 0 0 1px rgba(184, 242, 101, 0.35); }
+.su__msg--warn { background: rgba(255, 196, 87, 0.1); color: #ffe0a3; box-shadow: inset 0 0 0 1px rgba(255, 196, 87, 0.45); }
+.su__dots { display: inline-flex; gap: 6px; vertical-align: middle; margin-right: 8px; }
+.su__dots i { width: 7px; height: 7px; border-radius: 50%; background: #b8f265; animation: su-pulse 1.2s infinite ease-in-out; }
+.su__dots i:nth-child(2) { animation-delay: 0.15s; }
+.su__dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes su-pulse { 0%, 100% { opacity: 0.25; } 50% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .su__dots i { animation: none; } }
+
+/* Stripe draws its own form inside this box; it brings its own light background. */
+.su__pay { min-height: 420px; border-radius: 18px; overflow: hidden; background: #fff; }
+.su__pay:empty { display: grid; place-items: center; min-height: 120px; background: rgba(249, 250, 251, 0.05); }
+.su__pay:empty::after { content: "Loading the payment form…"; font-size: 14px; color: #9daaa9; }
+
+.su__foot { font-size: 12px; color: #9daaa9; text-align: center; max-width: 420px; line-height: 18px; margin: 0; }
+@media (max-width: 480px) {
+  body { padding: 20px 12px 40px; }
+  .su__card { padding: 20px; border-radius: 26px; }
+  .su__steps li { font-size: 11px; }
+  .su__title { font-size: 25px; line-height: 31px; }
+}

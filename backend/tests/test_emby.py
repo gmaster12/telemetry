@@ -120,7 +120,7 @@ def test_emby_sign_in_makes_a_viewer_member(app, monkeypatch):
     monkeypatch.setattr(M.emby, "http", e.http)
     monkeypatch.setattr(M.emby, "connect_url", e.connect_url)
     c = TestClient(M.app)
-    assert c.get("/api/auth/options").json() == {"emby": True}
+    assert c.get("/api/auth/options").json() == {"emby": True, "signup": False}
     r = c.post("/api/auth/emby", json={"username": "steve@x.ca", "password": "pw"}, headers=H)
     assert r.status_code == 200 and r.json()["role"] == "viewer"
     me = c.get("/api/me").json()
@@ -159,7 +159,7 @@ def test_without_settings_the_button_is_hidden(tmp_path, monkeypatch):
         sys.modules.pop(m, None)
     import app.main as M
     c = TestClient(M.app)
-    assert c.get("/api/auth/options").json() == {"emby": False}
+    assert c.get("/api/auth/options").json() == {"emby": False, "signup": False}
     assert c.post("/api/auth/emby", json={"username": "a", "password": "b"}, headers=H).status_code == 404
     for m in ["app.main", "app.config"]:
         sys.modules.pop(m, None)

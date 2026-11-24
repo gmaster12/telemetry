@@ -112,6 +112,7 @@
     alerts: { title: 'Alerts', scope: 'all', lead: 'When a server counts as running hot. A hot server turns amber on the capacity rings and shows up under Alerts.' },
     access: { title: 'Access', scope: 'all', lead: 'Who can sign in and what each person can see. Anyone you share a Plex server with can sign in with Plex.' },
     billing: { title: 'Billing', scope: 'all', lead: 'Shows each person their own Stripe subscription. The key is read-only: nothing is ever charged or changed from here.' },
+    signup: { title: 'Sign-up', scope: 'all', lead: 'Lets a new person join on their own: they sign in with Plex (or make an account), pay for a subscription, and are added to one server straight away. Nobody is added until Stripe confirms the payment.' },
     reqlog: { title: 'Request log', scope: 'all', lead: 'Every movie, series, comic, ebook and audiobook requested through this site: who asked, when, and where it stands now.' },
     requests: { title: 'Requests', scope: 'all', lead: 'Connects your Seerr so people can find movies and series and request them here, without signing in to Seerr. Each person acts as their own Seerr account, so its permissions, limits and approvals still apply.' },
     books: { title: 'Books & comics', scope: 'all', lead: 'Shows the Greystar media site inside this dashboard, so people read comics and ebooks, listen to audiobooks and request more without signing in again.' },
@@ -125,7 +126,7 @@
     { key: 'you', title: 'Your dashboard', scope: 'Just you', views: ['display', 'cards', 'globe'] },
     { key: 'data', title: 'Servers and data', scope: 'Everyone', views: ['plex', 'netdata', 'alerts', 'backups'] },
     { key: 'media', title: 'Requests and media', scope: 'Everyone', views: ['requests', 'reqlog', 'arr', 'books'] },
-    { key: 'people', title: 'People and billing', scope: 'Everyone', views: ['access', 'billing'] }
+    { key: 'people', title: 'People and billing', scope: 'Everyone', views: ['access', 'billing', 'signup'] }
   ];
   function roomOf(view) { return ROOMS.filter(function (r) { return r.views.indexOf(view) >= 0; })[0] || null; }
   // Find a setting: words people might look for, per section.
@@ -139,6 +140,7 @@
     backups: 'backup backups copy copies restore database history safe nightly',
     access: 'access people viewers sections permissions admins admin login password sync users turn off',
     billing: 'billing stripe subscription key customers unmatched match paypal',
+    signup: 'sign up signup join new member register invite checkout price subscription stripe publishable key server libraries cap full',
     requests: 'requests seerr overseerr api key 4k approve link people movies series',
     reqlog: 'request log csv export needs you searches that found nothing import earlier books comics ebooks audiobooks not released not out yet',
     arr: 'radarr sonarr download progress unwatched cleanup delete remove days review auto',
@@ -190,6 +192,7 @@
       summaryTimer = setInterval(function () { if (!document.getElementById('settings-dock').hidden && tab === 'home') loadSummary(); }, 20000);
     } else if (t === 'access') loadAccess();
     else if (t === 'billing') loadBilling();
+    else if (t === 'signup') loadSignup();
     else if (t === 'requests') loadRequests();
     else if (t === 'books') loadBooks();
     else if (t === 'arr') loadArr();
@@ -264,6 +267,9 @@
     if (s.requests && s.requests.needs_you) out.push({ view: 'reqlog', tone: 'danger', text: s.requests.needs_you + (s.requests.needs_you === 1 ? ' failed request needs' : ' failed requests need') + ' you: tried again once, then sent to you.' });
     if (s.cleanup && s.cleanup.mode !== 'off' && !(s.cleanup.radarr && s.cleanup.sonarr)) out.push({ view: 'arr', tone: 'warning', text: 'Unwatched cleanup needs Radarr and Sonarr connected to remove anything.' });
     if (s.cleanup && s.cleanup.due) out.push({ view: 'arr', tone: 'warning', text: s.cleanup.due + (s.cleanup.due === 1 ? ' unwatched title runs' : ' unwatched titles run') + ' out within 3 days.', go: '#/cleanup' });
+    var sg = s.signup || {}, sgc = sg.counts || {};
+    if (sgc.stuck) out.push({ view: 'signup', tone: 'danger', text: sgc.stuck + (sgc.stuck === 1 ? ' person has' : ' people have') + ' paid but ' + (sgc.stuck === 1 ? 'is' : 'are') + ' not on Plex yet.' });
+    if (sg.enabled && !sg.ready) out.push({ view: 'signup', tone: 'danger', text: 'Sign-up is on but its setup is incomplete, so nobody can join.' });
     if (s.billing.connected && s.billing.unmatched) out.push({ view: 'billing', tone: 'warning', text: s.billing.unmatched + ' Stripe ' + (s.billing.unmatched === 1 ? 'customer is' : 'customers are') + ' not matched to a Plex user.' });
     return out;
   }
@@ -298,6 +304,12 @@
     }
     if (view === 'access') return ac.sync_error ? ['danger', 'Loading people failed'] : !ac.synced_at ? ['warning', 'People not loaded'] : ['neutral', (ac.custom + ac.off) + ' custom or off'];
     if (view === 'billing') return !bl.connected ? ['neutral', 'Not connected'] : bl.error ? ['danger', 'Last sync failed'] : bl.full_key ? ['danger', 'Full key, replace it'] : bl.unmatched ? ['warning', bl.unmatched + ' not matched'] : ['success', 'Synced ' + (since(bl.synced_at) || 'soon')];
+    if (view === 'signup') {
+      var su0 = s.signup || {}, sc = su0.counts || {};
+      if (sc.stuck) return ['danger', sc.stuck + ' need' + (sc.stuck === 1 ? 's' : '') + ' you'];
+      if (!su0.enabled) return ['neutral', su0.ready ? 'Off' : 'Not set up'];
+      return su0.ready ? ['success', 'Open, joins ' + (su0.server || 'a server')] : ['danger', 'Setup incomplete'];
+    }
     if (view === 'requests') return !rq.connected ? ['neutral', 'Not connected'] : rq.error ? ['danger', 'Seerr not answering'] : rq.pending ? ['warning', rq.pending + ' waiting'] : ['success', 'Seerr on'];
     if (view === 'reqlog') return rq.needs_you ? ['danger', rq.needs_you + ' need' + (rq.needs_you === 1 ? 's' : '') + ' you'] : lg.total ? ['neutral', (lg.day || 0) + ' in the last 24 h'] : ['neutral', 'Nothing yet'];
     if (view === 'books') return bk.enabled ? ['success', 'On'] : ['neutral', bk.has_secret ? 'Off' : 'Not connected'];
@@ -1224,6 +1236,202 @@
       el('p', { class: 'st-note', text: 'Not connected yet. PayPal subscriptions will show on the same card once it is set up.' })));
   }
 
+  // ---------- Sign-up: a new person pays and is added to one server on their own (backend/app/signup.py) ----------
+  var su = null, suLibs = null, suLibsFor = null, suPrices = null, suTest = null, suKeys = false, suForget = null;
+  var SU_STATE = { plex_ok: 'Signed in with Plex', checkout_open: 'At the payment form', paid: 'Paid, adding to Plex',
+    invited: 'Invited, not accepted yet', active: 'On the server' };
+
+  function money(p) {
+    if (!p) return '';
+    var n = (p.amount / 100).toFixed(2);
+    var every = p.interval_count > 1 ? 'every ' + p.interval_count + ' ' + p.interval + 's' : 'a ' + p.interval;
+    return (p.currency === 'usd' ? '$' + n : n + ' ' + String(p.currency).toUpperCase()) + ' ' + every;
+  }
+
+  function loadSuLibs(serverId) {
+    if (serverId == null) { suLibs = null; suLibsFor = null; return Promise.resolve(); }
+    return api('GET', '/api/settings/signup/libraries?server_id=' + encodeURIComponent(serverId))
+      .then(function (r) { suLibs = r.libraries || []; suLibsFor = serverId; })
+      .catch(function (e) { suLibs = null; suLibsFor = serverId; msgs['su-server'] = { kind: 'error', text: e.message }; });
+  }
+
+  function loadSuPrices() {
+    return api('GET', '/api/settings/signup/prices').then(function (p) { suPrices = p.prices || []; })
+      .catch(function (e) { suPrices = []; msgs['su-stripe'] = { kind: 'error', text: e.message }; });
+  }
+
+  function loadSignup() {
+    if (!isAdmin()) return Promise.resolve();
+    return Promise.all([api('GET', '/api/settings/signup'), api('GET', '/api/settings')]).then(function (r) {
+      su = r[0]; state = r[1];
+      var jobs = [];
+      if (su.server_id != null && suLibsFor !== su.server_id) jobs.push(loadSuLibs(su.server_id));
+      if (su.has_key && !suPrices) jobs.push(loadSuPrices());
+      return Promise.all(jobs);
+    }).then(render).catch(function (e) { setMsg('load', 'error', e.message); });
+  }
+
+  function saveSignup(key, body, okText) {
+    return withBusy(key, api('PUT', '/api/settings/signup', body).then(function (r) {
+      su = r; msgs[key] = { kind: 'ok', text: okText };
+    }).catch(function (e) { msgs[key] = { kind: 'error', text: e.message }; }));
+  }
+
+  function renderSignup(pane) {
+    if (!su) { pane.appendChild(el('p', { class: 'st-note', text: 'Loading…' })); return; }
+    var cap = su.capacity || {}, counts = su.counts || {};
+    var srvName = (su.servers.filter(function (x) { return x.id === su.server_id; })[0] || {}).name;
+
+    // On or off, and whether there is room
+    var top = el('section', { class: 'st-section' }, el('h3', { text: su.enabled ? (cap.full ? 'Sign-up is on, but ' + srvName + ' is full' : 'Sign-up is on') : 'Sign-up is off' }));
+    if (su.problems.length) {
+      top.appendChild(el('p', { class: 'st-note', text: 'Before it can be turned on:' }));
+      top.appendChild(el('ul', { class: 'st-note' }, su.problems.map(function (x) { return el('li', { text: x }); })));
+    } else {
+      top.appendChild(el('p', { class: 'st-note' }, su.enabled ? 'The sign-in page shows a Sign up button. The page is ' : 'When it is on, the sign-in page shows a Sign up button. The page will be ',
+        el('a', { href: '/signup.html', target: '_blank', rel: 'noopener', text: location.origin + '/signup.html' }),
+        ' (open it in a private window: people who are signed in are sent to the dashboard).'));
+    }
+    if (cap.error) top.appendChild(el('p', { class: 'st-msg st-msg--error' }, el('b', { text: 'Error: ' }), 'Could not ask Plex how full ' + (srvName || 'the server') + ' is: ' + cap.error));
+    else if (cap.used != null) top.appendChild(el('p', { class: 'st-note', text: srvName + ': ' + cap.shares + (cap.shares === 1 ? ' person' : ' people') + ', ' + cap.invites + (cap.invites === 1 ? ' invite' : ' invites') + ' not accepted yet'
+      + (cap.held ? ', ' + cap.held + ' paying now' : '') + '. ' + cap.used + ' of ' + cap.cap + ' places taken' + (cap.full ? ', so new people are told it is full.' : ', ' + (cap.cap - cap.used) + ' left.') }));
+    top.appendChild(el('div', { class: 'st-row' },
+      su.enabled
+        ? el('button', { type: 'button', class: 'st-btn', text: busy['su-on'] ? 'Turning off…' : 'Turn sign-up off', disabled: busy['su-on'], onclick: function () { saveSignup('su-on', { enabled: false }, 'Sign-up is off. Anyone who has already paid is still carried through.'); } })
+        : el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['su-on'] ? 'Turning on…' : 'Turn sign-up on', disabled: busy['su-on'] || su.problems.length > 0, onclick: function () { saveSignup('su-on', { enabled: true }, 'Sign-up is on.'); } }),
+      el('button', { type: 'button', class: 'st-btn', text: busy['su-test'] ? 'Testing…' : 'Test the setup', disabled: busy['su-test'], onclick: function () {
+        withBusy('su-test', api('POST', '/api/settings/signup/test').then(function (r) { suTest = r; msgs['su-on'] = null; return loadSignup(); })
+          .catch(function (e) { suTest = null; msgs['su-on'] = { kind: 'error', text: e.message }; }));
+      } })));
+    if (suTest) {
+      var st = suTest.stripe || {}, px = suTest.plex || {};
+      top.appendChild(el('ul', { class: 'st-list' },
+        el('li', { class: 'st-item' }, el('div', { class: 'st-item__top' }, el('span', { class: 'st-item__name', text: 'Stripe' }), el('span', { class: 'st-tag ' + (st.ok ? 'st-tag--ok' : 'st-tag--danger'), text: st.ok ? 'Working' : 'Failed' })),
+          el('div', { class: 'st-item__meta', text: st.ok ? 'Opened a checkout and closed it again. Nobody was charged. ' + (st.livemode ? 'Live mode: real cards.' : 'Test mode: only Stripe test cards work.') : st.error })),
+        el('li', { class: 'st-item' }, el('div', { class: 'st-item__top' }, el('span', { class: 'st-item__name', text: 'Plex' }), el('span', { class: 'st-tag ' + (px.ok ? 'st-tag--ok' : 'st-tag--danger'), text: px.ok ? 'Working' : 'Failed' })),
+          el('div', { class: 'st-item__meta', text: px.error ? px.error : 'New people on ' + px.server + ' get: ' + (px.sharing || []).join(', ') + '.' + ((px.not_sharing || []).length ? ' Not shared: ' + px.not_sharing.join(', ') + '.' : '') }))));
+    }
+    top.appendChild(message('su-on'));
+    pane.appendChild(top);
+
+    // Where new people go
+    var pickId = Object.prototype.hasOwnProperty.call(drafts, 'su-server') && drafts['su-server'] !== '' ? Number(drafts['su-server']) : su.server_id;
+    var sel = el('select', { class: 'st-select', id: 'su-server' }, el('option', { value: '', text: 'Choose a server' }));
+    su.servers.forEach(function (x) {
+      var o = el('option', { value: String(x.id), text: x.name + (x.enabled ? '' : ' (turned off)') + (x.linked ? '' : ' (owner account not linked)') });
+      if (!x.enabled || !x.linked) o.disabled = true;
+      if (x.id === su.server_id) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener('change', function () {
+      var id = sel.value === '' ? null : Number(sel.value);
+      clearDrafts('su-lib'); msgs['su-server'] = null;
+      drafts['su-server'] = sel.value;
+      withBusy('su-libs', loadSuLibs(id));
+    });
+    var libBox = el('div', { class: 'st-checks', role: 'group', 'aria-label': 'Libraries new people get' });
+    var libsReady = suLibs && suLibsFor === pickId;
+    if (libsReady) suLibs.forEach(function (l) {
+      libBox.appendChild(el('label', null, el('input', { type: 'checkbox', id: 'su-lib-' + l.id, value: l.id, checked: pickId === su.server_id && su.sections.indexOf(l.id) >= 0 }), l.title));
+    });
+    var capIn = input({ type: 'number', min: '1', max: String(su.plex_limit), value: String(su.cap), inputmode: 'numeric' }, 'su-cap');
+    var support = input({ value: su.support || '', placeholder: 'Email support@example.com or message us on Discord', maxlength: '300' }, 'su-support');
+    pane.appendChild(el('section', { class: 'st-section' }, el('h3', { text: 'Where new people go' }),
+      el('div', { class: 'st-form' },
+        field('Server', sel, 'Everyone who signs up is invited to this one server by the Plex account that owns it.'),
+        field('Stop at this many people', capIn, 'Counts people on the server and invites not accepted yet. Plex itself stops at ' + su.plex_limit + '.'),
+        el('div', { class: 'st-wide st-field' }, el('label', { text: 'Libraries they get' }),
+          busy['su-libs'] ? el('p', { class: 'st-note', text: 'Reading the libraries from Plex…' })
+            : libsReady ? libBox : el('p', { class: 'st-note', text: pickId == null ? 'Choose a server to see its libraries.' : 'Could not read this server’s libraries.' })),
+        el('div', { class: 'st-wide' }, field('How to reach you', support, 'Shown when something goes wrong, for example to someone who paid but is not on Plex yet.'))),
+      el('div', { class: 'st-row' },
+        el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['su-server'] ? 'Saving…' : 'Save', disabled: busy['su-server'] || !libsReady, onclick: function () {
+          var picked = (suLibs || []).map(function (l) { return l.id; }).filter(function (id) { var c = document.getElementById('su-lib-' + id); return c && c.checked; });
+          var n = parseInt(capIn.value, 10);
+          if (!picked.length) { setMsg('su-server', 'error', 'Choose at least one library.'); return; }
+          if (!(n >= 1 && n <= su.plex_limit)) { setMsg('su-server', 'error', 'The limit is a number from 1 to ' + su.plex_limit + '.'); return; }
+          saveSignup('su-server', { server_id: pickId, sections: picked, cap: n, support: support.value }, 'Saved.').then(function () { if (msgs['su-server'].kind === 'ok') { clearDrafts('su'); suTest = null; render(); } });
+        } })),
+      message('su-server')));
+
+    // Stripe: the two keys and the price
+    var stripeSec = el('section', { class: 'st-section' }, el('h3', { text: 'Payment' }));
+    if (su.has_key && !suKeys) {
+      stripeSec.appendChild(el('p', { class: 'st-note', text: 'Stripe is connected in ' + (su.mode === 'test' ? 'test mode: only Stripe test cards work, and no real money moves.' : 'live mode.') + ' This key only opens checkouts; the Billing section keeps its own read-only key.' }));
+      var priceSel = el('select', { class: 'st-select', id: 'su-price' }, el('option', { value: '', text: 'Choose a price' }));
+      (suPrices || []).forEach(function (pr) {
+        var o = el('option', { value: pr.id, text: money(pr) + (pr.name ? ' · ' + pr.name : '') + ' · ' + pr.id });
+        if (pr.id === su.price_id) o.selected = true;
+        priceSel.appendChild(o);
+      });
+      if (su.price_id && !(suPrices || []).some(function (pr) { return pr.id === su.price_id; })) {
+        var keep = el('option', { value: su.price_id, text: money(su.plan) + ' · ' + su.price_id }); keep.selected = true; priceSel.appendChild(keep);
+      }
+      stripeSec.append(
+        field('Subscription price', priceSel, su.plan ? 'New people pay ' + money(su.plan) + '.' : 'The price every new person subscribes to.'),
+        el('div', { class: 'st-row' },
+          el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['su-stripe'] ? 'Saving…' : 'Save price', disabled: busy['su-stripe'], onclick: function () {
+            if (!priceSel.value) { setMsg('su-stripe', 'error', 'Choose a price.'); return; }
+            saveSignup('su-stripe', { price_id: priceSel.value }, 'Saved.').then(function () { if (msgs['su-stripe'].kind === 'ok') { clearDrafts('su-price'); suTest = null; render(); } });
+          } }),
+          el('span', { class: 'st-spacer' }),
+          el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Replace keys', onclick: function () { suKeys = true; render(); } })));
+    } else {
+      var sk = input({ type: 'password', placeholder: 'rk_live_…', autocomplete: 'new-password', class: 'st-input is-mono' }, 'su-sk');
+      var pk = input({ placeholder: 'pk_live_…', value: su.publishable_key || '', class: 'st-input is-mono' }, 'su-pk');
+      stripeSec.append(
+        el('p', { class: 'st-note', text: 'Sign-up needs its own Stripe key, because it opens checkouts and the Billing key is read-only on purpose.' }),
+        el('div', { class: 'st-form' },
+          el('div', { class: 'st-wide' }, field('Restricted key for sign-up', sk, 'In Stripe: Developers, API keys, Create restricted key. Give it Write on Checkout Sessions and Read on Prices and Products, and nothing else.')),
+          el('div', { class: 'st-wide' }, field('Publishable key', pk, 'On the same Stripe page, starts with pk_. It is not a secret: the sign-up page uses it to show the payment form.'))),
+        el('div', { class: 'st-row' },
+          el('button', { type: 'button', class: 'st-btn st-btn--primary', text: busy['su-stripe'] ? 'Checking…' : 'Save keys', disabled: busy['su-stripe'], onclick: function () {
+            var body = { publishable_key: pk.value.trim() };
+            if (sk.value.trim()) body.stripe_key = sk.value.trim();
+            else if (!su.has_key) { setMsg('su-stripe', 'error', 'Paste the restricted key.'); return; }
+            saveSignup('su-stripe', body, 'Saved.').then(function () {
+              if (msgs['su-stripe'] && msgs['su-stripe'].kind === 'ok') { clearDrafts('su-sk'); clearDrafts('su-pk'); suKeys = false; suPrices = null; suTest = null; return loadSignup(); }
+            });
+          } }),
+          su.has_key ? el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Cancel', onclick: function () { suKeys = false; clearDrafts('su-sk'); clearDrafts('su-pk'); render(); } }) : null));
+    }
+    stripeSec.appendChild(message('su-stripe'));
+    pane.appendChild(stripeSec);
+
+    // Who signed up
+    var list = el('ul', { class: 'st-list' });
+    (su.rows || []).forEach(function (r) {
+      var moving = r.state === 'checkout_open' || r.state === 'paid' || r.state === 'invited';
+      list.appendChild(el('li', { class: 'st-item' },
+        el('div', { class: 'st-item__top' },
+          el('span', { class: 'st-item__name', text: r.name || r.username || r.email }),
+          el('span', { class: 'st-tag ' + (r.stuck ? 'st-tag--danger' : r.state === 'active' ? 'st-tag--ok' : ''), text: r.stuck ? 'Paid, needs you' : SU_STATE[r.state] || r.state }),
+          el('span', { class: 'st-spacer' }),
+          moving ? el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: busy['su-retry-' + r.id] ? 'Trying…' : 'Try again now', disabled: busy['su-retry-' + r.id], onclick: function () {
+            withBusy('su-retry-' + r.id, api('POST', '/api/settings/signup/' + encodeURIComponent(r.id) + '/retry').then(function (out) {
+              msgs['su-rows'] = out.row.state === r.state ? { kind: 'error', text: (r.name || r.email) + ' is still at “' + (SU_STATE[out.row.state] || out.row.state) + '”' + (out.row.last_error ? ': ' + out.row.last_error : '.') }
+                : { kind: 'ok', text: (r.name || r.email) + ': ' + (SU_STATE[out.row.state] || out.row.state) + '.' };
+              return loadSignup();
+            }).catch(function (e) { msgs['su-rows'] = { kind: 'error', text: e.message }; }));
+          } }) : null,
+          suForget === r.id
+            ? el('span', { class: 'st-row' },
+                el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Keep', onclick: function () { suForget = null; render(); } }),
+                el('button', { type: 'button', class: 'st-btn st-btn--danger', text: 'Remove record', onclick: function () {
+                  api('DELETE', '/api/settings/signup/' + encodeURIComponent(r.id) + (r.state === 'paid' || r.state === 'invited' ? '?force=true' : '')).then(function () { suForget = null; return loadSignup(); })
+                    .catch(function (e) { suForget = null; setMsg('su-rows', 'error', e.message); });
+                } }))
+            : el('button', { type: 'button', class: 'st-btn st-btn--quiet', text: 'Remove…', onclick: function () { suForget = r.id; render(); } })),
+        el('div', { class: 'st-item__meta', text: [r.email, r.server, r.paid_at ? 'paid ' + when(r.paid_at) : 'started ' + when(r.created), r.subscription].filter(Boolean).join(' · ') }),
+        r.last_error && r.state !== 'active' ? el('div', { class: 'st-item__meta', text: 'Last try' + (r.attempts ? ' (' + r.attempts + ')' : '') + ': ' + r.last_error }) : null,
+        suForget === r.id ? el('div', { class: 'st-item__meta', text: (r.state === 'paid' || r.state === 'invited' ? 'This person has paid and is not on the server. ' : '') + 'Removing the record changes nothing in Stripe or on Plex.' }) : null));
+    });
+    pane.appendChild(el('section', { class: 'st-section' },
+      el('h3', { text: 'Sign-ups (' + (counts.active || 0) + ' joined' + (counts.stuck ? ', ' + counts.stuck + ' need you' : '') + ')' }),
+      (su.rows || []).length ? list : el('p', { class: 'st-note', text: 'Nobody has signed up yet.' }),
+      message('su-rows')));
+  }
+
   // ---------- Books & comics: the Greystar media site ----------
   var bks = null;
   function loadBooks() {
@@ -1913,6 +2121,8 @@
       renderAlerts(pane);
     } else if (tab === 'billing') {
       renderBilling(pane);
+    } else if (tab === 'signup') {
+      renderSignup(pane);
     } else if (tab === 'requests') {
       renderRequests(pane);
     } else if (tab === 'books') {
