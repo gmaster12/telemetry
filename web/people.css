@@ -64,6 +64,15 @@
 .gp-namebtn:hover { text-decoration-color: currentColor; }
 .gp-namebtn:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; border-radius: 4px; }
 .gp-histbtn { margin-top: 12px; }
+/* The title on a stream card opens its play history: it keeps the card's own type, and shortens with the line it is in. */
+.gp-titlebtn { display: block; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: inherit; text-decoration-color: transparent; }
+.gp-titlebtn:hover { text-decoration-color: currentColor; }
+.gp-titleicon { flex: 0 0 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; background: var(--volt); color: #0f1720; }
+.gp-seg { display: inline-flex; align-self: flex-start; gap: 4px; padding: 4px; border-radius: 999px; background: color-mix(in srgb, currentColor 8%, transparent); }
+.gp-seg__btn { min-height: 36px; padding: 0 16px; border: 0; border-radius: 999px; background: none; color: inherit; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.gp-seg__btn[aria-pressed="true"] { background: var(--volt); color: #0f1720; }
+.gp-seg__btn:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; }
+
 
 /* ---------- tags, stats, lists ---------- */
 .gp-tags { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -136,7 +136,7 @@
   }
 
   // ---------- history list (drawer and the viewer's own section) ----------
-  function playItem(r) {
+  function playItem(r, who) {   // who: a title's history, where each row is led by the person, not the title
     // The play icon always shows; the cover replaces it only once it has loaded, so a cover that cannot load
     // (server offline, item re-added) leaves the icon, not an empty dark box.
     var thumb = el('span', { class: 'gp-play__thumb', 'aria-hidden': 'true' });
@@ -156,12 +156,12 @@
     if (r.source === 'live' && r.progress_pct != null && !r.live) tags.appendChild(el('span', { class: 'gp-tag', text: Math.round(r.progress_pct) + '% watched' }));
     return el('li', { class: 'gp-play' + (r.live ? ' is-live' : '') }, thumb,
       el('span', { class: 'gp-play__main' },
-        el('b', { class: 'gp-play__title', text: r.title || 'Unknown title' }),
+        el('b', { class: 'gp-play__title', text: who ? (r.user || 'Unknown viewer') : (r.title || 'Unknown title') }),
         r.subtitle ? el('span', { class: 'gp-play__sub', text: r.subtitle }) : null,
         el('span', { class: 'gp-play__meta', text: meta.filter(Boolean).join(' · ') })),
       tags.childNodes.length ? tags : null);
   }
-  function historyList(rows, into) {
+  function historyList(rows, into, who) {
     var lastDay = into.dataset.lastDay || '';
     var list = into.querySelector('ol:last-of-type');
     rows.forEach(function (r) {
@@ -172,7 +172,7 @@
         into.appendChild(list);
         lastDay = d;
       }
-      list.appendChild(playItem(r));
+      list.appendChild(playItem(r, who));
     });
     into.dataset.lastDay = lastDay;
   }
@@ -197,7 +197,8 @@
   }
 
   // A history view with paging: fetchPage(before) returns {rows}
-  function pagedHistory(container, fetchPage, isSelf) {
+  function pagedHistory(container, fetchPage, isSelf, opts) {
+    opts = opts || {};
     var box = el('div', { class: 'gp-history' });
     var more = el('button', { type: 'button', class: 'st-btn gp-more', text: 'Show older plays', hidden: true });
     var status = el('p', { class: 'st-note', role: 'status' });
@@ -207,8 +208,8 @@
       more.disabled = true; more.textContent = 'Loading…';
       return fetchPage(oldest).then(function (rows) {
         total += rows.length;
-        if (!total) { box.replaceChildren(emptyHistory(isSelf)); more.hidden = true; return; }
-        historyList(rows, box);
+        if (!total) { box.replaceChildren(opts.empty ? opts.empty() : emptyHistory(isSelf)); more.hidden = true; return; }
+        historyList(rows, box, opts.who);
         if (rows.length) oldest = rows[rows.length - 1].started_at;
         more.hidden = rows.length < 50;
         status.textContent = '';
@@ -568,6 +569,73 @@
       body.appendChild(el('p', { class: 'st-msg st-msg--error', role: 'alert' }, el('b', { text: 'Error: ' }), e.message));
     });
   }
+  // ---------- one title's history: the show or movie name on a stream card opens this ----------
+  function openTitle(r) {
+    if (!drawer || !r || !r.title) return;
+    lastFocus = document.activeElement;
+    fromMenu = false;
+    closeMenu();
+    var isMovie = r.kind === 'Movie';
+    var hasEpisode = !isMovie && !!r.subtitle;
+    var everyone = me && me.role === 'admin';
+    var panel = drawer.querySelector('.gp-drawer__panel');
+    panel.replaceChildren();
+    var close = el('button', { type: 'button', class: 'gp-drawer__close', 'aria-label': 'Close history', onclick: closeHistory }, icon('close', 18));
+    var badge = el('span', { class: 'gp-titleicon', 'aria-hidden': 'true' }, icon('play', 22));
+    var sub = el('p', { class: 'gp-drawer__sub' });
+    var head = el('div', { class: 'gp-drawer__head' }, badge,
+      el('div', { class: 'gp-drawer__who' }, el('p', { class: 'gp-eyebrow', text: everyone ? 'Play history' : 'Your play history' }), el('h2', { id: 'hist-title', text: r.title }), sub));
+    var seg = hasEpisode ? el('div', { class: 'gp-seg', role: 'group', 'aria-label': 'Which plays to show' }) : null;
+    var body = el('div', { class: 'gp-drawer__body' });
+    panel.append(close, head);
+    if (seg) panel.appendChild(seg);
+    panel.appendChild(body);
+    drawer.hidden = false;
+    if (!drawerDetach) drawerDetach = window.gsUI.sheet(panel, { onClose: closeHistory });
+    close.focus();
+    var turn = 0;
+    function show(episode) {
+      var mine = ++turn;
+      if (seg) Array.prototype.forEach.call(seg.children, function (b) { b.setAttribute('aria-pressed', String((b.dataset.ep === '1') === !!episode)); });
+      sub.textContent = isMovie ? (r.subtitle ? 'Movie · ' + r.subtitle : 'Movie') : episode ? r.subtitle : 'Every episode';
+      body.replaceChildren(el('p', { class: 'st-note', role: 'status', text: 'Loading…' }));
+      var q = '?title=' + encodeURIComponent(r.title) + (r.kind ? '&kind=' + encodeURIComponent(r.kind) : '') +
+        (isMovie && /^\d{4}$/.test(r.subtitle || '') ? '&year=' + r.subtitle : '') + (episode ? '&episode=' + encodeURIComponent(r.subtitle) : '');
+      api('GET', '/api/titles/history' + q + '&limit=50').then(function (x) {
+        if (mine !== turn) return;
+        body.replaceChildren();
+        var st = x.stats || {};
+        if (st.plays) {
+          var tile = function (v, l) { return el('div', { class: 'gp-stat' }, el('b', { text: String(v) }), el('span', { text: l })); };
+          body.appendChild(el('div', { class: 'gp-stats' }, tile(st.plays, st.plays === 1 ? 'Play' : 'Plays'),
+            everyone ? tile(st.people, st.people === 1 ? 'Person' : 'People') : st.episodes != null ? tile(st.episodes, st.episodes === 1 ? 'Episode' : 'Episodes') : null,
+            tile(st.hours, 'Hours watched')));
+          if (st.first_play) body.appendChild(el('p', { class: 'gp-servers' }, el('span', { class: 'gp-label', text: 'First played' }), ' ' + day(st.first_play),
+            everyone && st.episodes != null ? ' · ' + plural(st.episodes, 'episode', 'episodes') + ' played' : ''));
+        }
+        var first = x.rows;
+        return pagedHistory(body, function (before) {
+          if (first && before == null) { var f = first; first = null; return Promise.resolve(f); }
+          return api('GET', '/api/titles/history' + q + '&limit=50&before=' + before).then(function (y) { return y.rows; });
+        }, !everyone, { who: everyone, empty: function () {
+          return el('div', { class: 'gp-empty' }, el('b', { text: 'No plays recorded yet' }),
+            el('span', { text: (everyone ? 'Nobody has' : 'You have not') + ' played ' + (episode ? 'this episode' : 'this') + ' before. A stream that is playing now shows up here within a minute.' }));
+        } });
+      }).catch(function (e) {
+        if (mine !== turn) return;
+        body.replaceChildren(el('p', { class: 'st-msg st-msg--error', role: 'alert' }, el('b', { text: 'Error: ' }), e.message));
+      });
+    }
+    if (seg) {
+      seg.append(el('button', { type: 'button', class: 'gp-seg__btn', 'data-ep': '0', text: 'Whole show', onclick: function () { show(false); } }),
+        el('button', { type: 'button', class: 'gp-seg__btn', 'data-ep': '1', text: 'This episode', onclick: function () { show(true); } }));
+    }
+    show(false);
+  }
+  function canOpenTitle(r) {
+    return !!(me && r && r.title && (me.role === 'admin' || (me.kind !== 'local' && (window.dash.can('history') || window.dash.can('mystreams') || window.dash.can('streams')))));
+  }
+
   if (drawer) {
     drawer.addEventListener('click', function (e) { if (e.target === drawer) closeHistory(); });
     drawer.addEventListener('keydown', function (e) {
@@ -650,6 +718,19 @@
   window.gsPeople = {
     canOpen: function (r) { return !!(me && me.role === 'admin' && r && r.user_id); },
     openHistory: openHistory,
+    openTitle: openTitle,
+    // The title on a stream card, as a button that opens that show or movie's play history.
+    titleButton: function (r) {
+      if (!canOpenTitle(r)) return null;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'gp-namebtn gp-titlebtn';
+      b.textContent = r.title;
+      b.setAttribute('aria-label', r.title + ', see play history');
+      b.addEventListener('click', function (e) { e.stopPropagation(); openTitle(r); });
+      b.addEventListener('keydown', function (e) { e.stopPropagation(); });
+      return b;
+    },
     nameButton: function (r, cls, tag) {
       if (!window.gsPeople.canOpen(r)) return null;
       var b = document.createElement('button');

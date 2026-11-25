@@ -153,6 +153,7 @@ class Store:
         self.db.execute("CREATE INDEX IF NOT EXISTS samples_server_ts ON samples (server_id, ts)")
         self.db.execute("CREATE INDEX IF NOT EXISTS plays_server_item ON plays (server_id, rating_key)")
         self.db.execute("CREATE INDEX IF NOT EXISTS plays_started ON plays (started_at)")
+        self.db.execute("CREATE INDEX IF NOT EXISTS plays_title ON plays (title COLLATE NOCASE, started_at)")
         self.db.commit()
         self.box = box
         self.lock = threading.Lock()
@@ -595,6 +596,43 @@ class Directory:
             (plex_id, before, max(1, min(limit, 200))),
         )
         return [dict(r) for r in cur]
+
+    # ---------- one title's plays (the name on a stream card opens this) ----------
+    @staticmethod
+    def _title_where(title: str, kind: str | None, year: str | None, episode: str | None, user_id: str | None) -> tuple[str, list]:
+        """Plays of one show or movie on every server. A title is matched by name: Plex item ids differ per server.
+        A movie is also matched by year when the play has one, so a remake is not mixed in with the original."""
+        where, args = ["title = ? COLLATE NOCASE"], [title]
+        if kind == "Movie":
+            where.append("kind = 'Movie'")
+            if year:
+                where.append("(subtitle = ? OR subtitle IS NULL OR subtitle = '')")
+                args.append(str(year))
+        elif kind:
+            where.append("kind = ?")
+            args.append(kind)
+            if episode:
+                where.append("subtitle = ?")
+                args.append(episode)
+        if user_id is not None:
+            where.append("user_id = ?")
+            args.append(user_id)
+        return " AND ".join(where), args
+
+    def title_history(self, title: str, kind: str | None = None, year: str | None = None, episode: str | None = None,
+                      user_id: str | None = None, before: int | None = None, limit: int = 50) -> list[dict]:
+        where, args = self._title_where(title, kind, year, episode, user_id)
+        cur = self.db.execute(f"SELECT * FROM plays WHERE {where} AND started_at < ? ORDER BY started_at DESC LIMIT ?",
+                              (*args, before or 2**62, max(1, min(limit, 200))))
+        return [dict(r) for r in cur]
+
+    def title_stats(self, title: str, kind: str | None = None, year: str | None = None, episode: str | None = None,
+                    user_id: str | None = None) -> dict:
+        where, args = self._title_where(title, kind, year, episode, user_id)
+        r = self.db.execute(f"SELECT COUNT(*) AS plays, COUNT(DISTINCT COALESCE(user_id, username)) AS people, COALESCE(SUM(watched_sec), 0) AS sec, "
+                            f"MIN(started_at) AS first_play, MAX(started_at) AS last_play, COUNT(DISTINCT subtitle) AS parts FROM plays WHERE {where}", args).fetchone()
+        return {"plays": r["plays"], "people": r["people"], "hours": round((r["sec"] or 0) / 3600, 1), "first_play": r["first_play"],
+                "last_play": r["last_play"], "episodes": r["parts"] if kind and kind != "Movie" and not episode else None}
 
     # ---------- playback tracking ----------
     def starts_since(self, ts: int) -> int:

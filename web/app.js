@@ -718,12 +718,18 @@
   };
   // Long titles (often a file name when Plex has not matched it) are cut to two lines; hover shows all of it.
   function withTip(node, text) { node.title = text || ''; return node; }
+  // A stream's title: a button that opens that show or movie's play history (people.js), plain text if it cannot.
+  function titleEl(tag, cls, r) {
+    const b = window.gsPeople && window.gsPeople.titleButton && window.gsPeople.titleButton(r);
+    if (!b) return el(tag, cls, r.title);
+    const n = el(tag, cls); n.appendChild(b); return n;
+  }
   function whoEl(r) {
     const who = el('div', 'sd-scard__who');
     const nameEl = el('h3', 'sd-scard__name');
     const nb = window.gsPeople && window.gsPeople.nameButton(r);
     if (nb) nameEl.appendChild(nb); else nameEl.textContent = r.user;
-    who.append(nameEl, withTip(el('p', 'sd-scard__title', r.title), r.title));
+    who.append(nameEl, withTip(titleEl('p', 'sd-scard__title', r), r.title + ' \u00b7 see play history'));
     return who;
   }
   function tagsEl(r, withMethod) {
@@ -764,7 +770,7 @@
     const body = el('div', 'sd-is__body');
     const who = el('p', 'sd-is__who');
     who.append(nameNode(r), el('span', 'sd-is__bar'), el('span', 'sd-is__muted', n0(r.progress_pct) + ' %, ' + n0(r.elapsed_min) + ' min in'));
-    body.append(el('span', 'sd-eyebrow', r.server), withTip(el('h3', 'sd-is__title', r.title), r.title), who);
+    body.append(el('span', 'sd-eyebrow', r.server), withTip(titleEl('h3', 'sd-is__title', r), r.title + ' \u00b7 see play history'), who);
     const foot = el('div', 'sd-is__foot');
     foot.append(rateEl(r), ctaEl('Details'));
     card.append(poster, body, el('div', 'sd-rule'), factsEl([['auto', r.device], ['film', r.resolution], [methodIcon(r), r.method]]), el('div', 'sd-rule'), foot);
@@ -779,7 +785,7 @@
     who.append(nameNode(r), document.createTextNode(', watching on ' + r.device));
     const clock = el('p', 'sd-tr__clock');
     clock.append(icon('clock', 16), document.createTextNode(n0(r.elapsed_min) + ' min in'), el('span', 'sd-is__bar'), document.createTextNode(n0(r.progress_pct) + ' %'));
-    top.append(eb, withTip(el('h3', 'sd-tr__title', r.title), r.title), who, el('span', 'sd-tr__rule'), clock, rateEl(r, 'sd-rate--big'));
+    top.append(eb, withTip(titleEl('h3', 'sd-tr__title', r), r.title + ' \u00b7 see play history'), who, el('span', 'sd-tr__rule'), clock, rateEl(r, 'sd-rate--big'));
     const tray = el('div', 'sd-tr__tray');
     tray.append(factsEl([['film', r.resolution], [methodIcon(r), r.method], ['wifi', r.location]]), progressEl(r, false), ctaEl('Playback details', 'sd-cta--wide'));
     card.append(top, tray);
@@ -787,7 +793,7 @@
   }
   function glanceFront(r, card, art) {
     const poster = el('div', 'sd-scard__poster'); poster.style.setProperty('--art', art);
-    poster.appendChild(withTip(el('h3', 'sd-gl__title', r.title), r.title));
+    poster.appendChild(withTip(titleEl('h3', 'sd-gl__title', r), r.title + ' \u00b7 see play history'));
     const panel = el('div', 'sd-gl__panel');
     const head = el('div', 'sd-gl__head');
     const who = el('div', 'sd-gl__who');
@@ -850,7 +856,7 @@
     const nameEl = el('h3', 'sd-scard__name');
     const nb = window.gsPeople && window.gsPeople.nameButton(r);
     if (nb) nameEl.appendChild(nb); else nameEl.textContent = r.user;
-    who.append(nameEl, withTip(el('p', 'sd-scard__title', r.title), r.title));
+    who.append(nameEl, withTip(titleEl('p', 'sd-scard__title', r), r.title + ' \u00b7 see play history'));
     const foot = el('div', 'sd-scard__foot');
     const left = el('div');
     left.appendChild(el('span', 'sd-micro', 'Playing on'));
@@ -881,7 +887,7 @@
     const nb = window.gsPeople && window.gsPeople.nameButton(r);
     // Tiles are narrow: leave out the session id there.
     sub.append(nb || document.createTextNode(r.user), document.createTextNode(cardStyle === 'tiles' ? ' \u00b7 ' + r.location : ' \u00b7 ' + r.id + ' \u00b7 ' + r.location));
-    head.append(el('p', 'sd-back__eyebrow', 'Playback details'), withTip(el('h3', 'sd-back__title', r.title), r.title), sub);
+    head.append(el('p', 'sd-back__eyebrow', 'Playback details'), withTip(titleEl('h3', 'sd-back__title', r), r.title + ' \u00b7 see play history'), sub);
     const tags = el('div', 'sd-tags');
     tags.appendChild(badge(METHOD_TONE[r.method] || 'neutral', r.method));
     tags.appendChild(el('span', 'sd-tag', r.quality));

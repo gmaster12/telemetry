@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -1073,6 +1073,7 @@ def _history_rows(rows: list[dict]) -> list[dict]:
             "id": r["id"], "server": by_id.get(sid) or r["server"], "watched_on": r["server"], "title": r["title"], "subtitle": r["subtitle"], "kind": r["kind"],
             "device": r["device"], "player": r["player"], "location": r["location"], "method": r["method"],
             "resolution": r["resolution"], "started_at": r["started_at"], "stopped_at": r["stopped_at"],
+            "user": r["username"], "user_id": r["user_id"],
             "watched_min": round((r["watched_sec"] or 0) / 60), "progress_pct": r["progress_pct"], "source": r["source"],
             "live": r["stopped_at"] is None,
             "poster": (f"/api/emby/poster/{r['art']}" if r["server"] == EMBY_SERVER and r["art"] else
@@ -1100,6 +1101,27 @@ def api_my_history(request: Request, before: int | None = None, limit: int = 50)
     u = directory.get_user(p.subject)
     return {"user": _user_public(u, with_email=True), "stats": directory.user_stats(p.subject),
             "rows": _history_rows(directory.history(p.subject, before, limit))}
+
+
+@app.get("/api/titles/history")
+def api_title_history(request: Request, title: str = Query(min_length=1, max_length=300), kind: str | None = Query(None, max_length=20),
+                      year: str | None = Query(None, max_length=8), episode: str | None = Query(None, max_length=300),
+                      before: int | None = None, limit: int = 50):
+    """Every play of one show or movie, on all servers (the title on a stream card opens this). Administrators see
+    everyone's plays; a member sees only their own."""
+    p = me(request)
+    if p.is_admin:
+        who = None
+    elif p.member and (p.can("history") or p.can("mystreams") or p.can("streams")):
+        who = str(p.subject)
+    else:
+        raise HTTPException(403, "You do not have access to this section.")
+    rows = _history_rows(directory.title_history(title, kind, year, episode, who, before, limit))
+    if who is not None:
+        for r in rows:
+            r.pop("user_id", None)
+    return {"title": title, "kind": kind, "episode": episode, "scope": "you" if who is not None else "everyone",
+            "stats": directory.title_stats(title, kind, year, episode, who) if before is None else None, "rows": rows}
 
 
 RECAP_DAYS = {"week": 7, "month": None, "year": None}
