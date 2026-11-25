@@ -633,17 +633,23 @@ def test_the_new_member_is_matched_in_billing_and_made_ready(env):
     assert svc.ready(row) == {"matched": True, "billing": False, "requests": False, "done": False, "late": False}
     assert svc.view(row)["ready"]["done"] is False
     row = run(svc.prepare(row["id"]))
-    assert svc.poller.syncs == 1 and svc.requests.made == [("3001", "newbie@example.com")]
+    # Only their own customer is read from Stripe (seconds), not the whole account (minutes).
+    assert svc.poller.syncs == 0 and what("customer") == [{"what": "customer", "id": row["customer"]}]
+    mine = svc.billing.summary("3001")
+    assert mine["status"] == "active" and [x["id"] for x in mine["subscriptions"]] == [row["subscription"]] and mine["subscriptions"][0]["amount"] == 1599
+    assert mine["subscriptions"][0]["plan"] == "Greystar Monthly" and mine["last_payment"]["amount"] == 1599
+    assert svc.requests.made == [("3001", "newbie@example.com")]
     assert row["ready_at"] and svc.ready(row) == {"matched": True, "billing": True, "requests": True, "done": True, "late": False}
     run(svc.prepare(row["id"]))                     # asked again: nothing is done twice
-    assert svc.poller.syncs == 1 and len(svc.requests.made) == 1
-    assert run(svc.sweep()) == 0 and svc.poller.syncs == 1
+    assert len(what("customer")) == 1 and len(svc.requests.made) == 1
+    assert run(svc.sweep()) == 0 and len(what("customer")) == 1 and svc.poller.syncs == 0
 
 
 def test_a_part_that_fails_is_tried_again_and_the_page_does_not_wait_for_ever(env):
     store, d, svc = env
     billing_poller(svc, store, fail=1)
     svc.requests = FakeRequests(fail=1)
+    M.state["fail"]["customer"] = 403               # the Billing key cannot read one customer: the whole account is read instead
     row = joined(svc)
     row = run(svc.prepare(row["id"]))
     assert not row["billing_at"] and not row["requests_at"] and not row["ready_at"] and "not fully ready" in row["last_error"]
@@ -675,6 +681,7 @@ def test_with_no_billing_key_and_no_requests_there_is_nothing_to_wait_for(env):
 def test_one_billing_refresh_serves_everyone_who_joined_before_it_started(env):
     store, d, svc = env
     billing_poller(svc, store)
+    M.state["fail"]["customer"] = 403
     row = joined(svc)
     svc._billing_from = row["active_at"] + 5        # a refresh that started after they were added
     run(svc.prepare(row["id"]))

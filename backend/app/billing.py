@@ -138,6 +138,22 @@ class StripeClient:
         charges = await self._all("/v1/charges", {"created[gte]": int(time.time()) - CHARGE_DAYS * 86400})
         return {"customers": customers, "subscriptions": subs, "products": products, "charges": charges}
 
+    async def one_customer(self, customer: str) -> dict:
+        """The same as snapshot(), for one customer: a handful of calls instead of every page of the account."""
+        cust = await self._get(f"/v1/customers/{customer}")
+        subs = await self._all("/v1/subscriptions", {"customer": customer, "status": "all"})
+        charges = await self._all("/v1/charges", {"customer": customer, "created[gte]": int(time.time()) - CHARGE_DAYS * 86400})
+        products: dict = {}
+        for s in subs:
+            for it in (s.get("items") or {}).get("data") or []:
+                prod = (it.get("price") or it.get("plan") or {}).get("product")
+                if isinstance(prod, str) and prod not in products:
+                    try:
+                        products[prod] = (await self._get(f"/v1/products/{prod}")).get("name")
+                    except StripeError:
+                        products[prod] = None   # the plan is then shown by its price nickname, or as "Subscription"
+        return {"customers": [cust], "subscriptions": subs, "products": products, "charges": charges}
+
 
 def _lower(v) -> str | None:
     return v.strip().lower() if isinstance(v, str) and v.strip() else None
@@ -207,6 +223,21 @@ class Billing:
             self.db.executemany(f"INSERT OR REPLACE INTO stripe_charges ({', '.join(ccols)}) VALUES ({', '.join('?' * len(ccols))})",
                                 [[r[c] for c in ccols] for r in charges])
             self.db.execute("DELETE FROM stripe_charges WHERE created < ?", (cutoff,))
+            self.db.commit()
+        return {"customers": len(customers), "subscriptions": len(subs), "charges": len(charges)}
+
+    def save_customer(self, snap: dict) -> dict:
+        """Add or update one customer from StripeClient.one_customer(), leaving everyone else as they are."""
+        customers = [c for c in snap["customers"] if not c.get("deleted")]
+        subs = [subscription_row(s, snap["products"]) for s in snap["subscriptions"]]
+        charges = [charge_row(c) for c in snap["charges"]]
+        with self.lock:
+            self.db.executemany("INSERT OR REPLACE INTO stripe_customers VALUES (?,?,?,?)",
+                                [(c["id"], _lower(c.get("email")), c.get("name"), c.get("created")) for c in customers])
+            for table, rows in (("stripe_subscriptions", subs), ("stripe_charges", charges)):
+                for r in rows:
+                    cols = list(r)
+                    self.db.execute(f"INSERT OR REPLACE INTO {table} ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})", [r[c] for c in cols])
             self.db.commit()
         return {"customers": len(customers), "subscriptions": len(subs), "charges": len(charges)}
 

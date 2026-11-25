@@ -290,3 +290,36 @@ def price(pid: str, request: Request):
     if pid not in state["prices"]:
         return JSONResponse({"error": {"message": f"No such price: '{pid}'"}}, status_code=404)
     return state["prices"][pid]
+
+
+# ---------- Stripe, as the read-only Billing key sees it (one customer: billing.StripeClient.one_customer) ----------
+def _paid_session(customer: str) -> dict | None:
+    return next((s for s in state["sessions"].values() if s.get("customer") == customer), None)
+
+
+@app.get("/v1/customers/{cid}")
+def get_customer(cid: str):
+    s = _paid_session(cid)
+    if state["fail"].get("customer") or not s:
+        return JSONResponse({"error": {"message": "No such customer"}}, status_code=state["fail"].get("customer") or 404)
+    calls.append({"what": "customer", "id": cid})
+    return {"id": cid, "email": s.get("customer_email"), "name": None, "created": 1}
+
+
+@app.get("/v1/subscriptions")
+def list_subscriptions(customer: str = ""):
+    s = _paid_session(customer)
+    sub = dict(s["subscription"], customer=customer, currency="usd", created=1, current_period_end=2000000000,
+               items={"data": [{"quantity": 1, "price": {"unit_amount": 1599, "currency": "usd", "product": "prod_1", "recurring": {"interval": "month", "interval_count": 1}}}]}) if s else None
+    return {"data": [sub] if sub else [], "has_more": False}
+
+
+@app.get("/v1/charges")
+def list_charges(customer: str = ""):
+    return {"data": [{"id": "ch_" + customer, "customer": customer, "amount": 1599, "currency": "usd", "status": "succeeded", "created": 1999999999,
+                      "billing_details": {"email": (_paid_session(customer) or {}).get("customer_email")}}], "has_more": False}
+
+
+@app.get("/v1/products/{pid}")
+def get_product(pid: str):
+    return {"id": pid, "name": "Greystar Monthly"}

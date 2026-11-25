@@ -36,7 +36,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .auth import Principal, is_admin_email, new_session, record_failure, set_cookie, throttled
-from .billing import STRIPE_API, STRIPE_VERSION, StripeError
+from .billing import STRIPE_API, STRIPE_VERSION, StripeClient, StripeError
 from .config import env
 from .plex import PlexAccount, PlexError
 
@@ -669,10 +669,24 @@ class Signup:
         self._set(row["id"], touch=False, linked_at=int(time.time()))
 
     async def _refresh_billing(self, row: dict) -> None:
-        """Read Stripe into Billing again, so the dashboard shows the new subscription. One refresh at a time; a
-        refresh that started after this person was added serves everybody waiting."""
-        if self.poller is None or not self.store.get_setting("stripe_key"):
+        """Put the new subscription into Billing, so the dashboard shows it. Only this customer is read from Stripe,
+        which takes a second or two; reading the whole account takes minutes. If that cannot be done (the Billing
+        key cannot read this customer), the whole account is read instead: one such refresh at a time, and one that
+        started after this person was added serves everybody waiting."""
+        key = self.store.get_setting("stripe_key")
+        if self.billing is None or not key:
             return   # Billing is not set up: nothing to refresh
+        if row.get("customer"):
+            try:
+                snap = await StripeClient(key, self.http).one_customer(row["customer"])
+                if any(s.get("id") == row.get("subscription") for s in snap["subscriptions"]):
+                    self.billing.save_customer(snap)
+                    return
+                log.warning("Sign-up %s: the Billing key does not see the new subscription yet; reading the whole account", row["id"])
+            except (StripeError, httpx.HTTPError) as e:
+                log.warning("Sign-up %s: could not read the one customer for Billing (%s); reading the whole account", row["id"], e)
+        if self.poller is None:
+            return
         async with self._billing_lock:
             if self._billing_from >= int(row["active_at"] or 0):
                 return
