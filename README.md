@@ -99,7 +99,12 @@ Then open **Settings** (the sliders button in the top bar):
    account), pay for one Stripe subscription in a payment form shown on the
    page, are invited to one server by the Plex account that owns it, and the
    invite is accepted for them. The last screen explains the Plex apps and how
-   to sign in here. It is **off** until you turn it on. To set it up:
+   to sign in here, with a short how-to-request video
+   (`web/assets/how-to-request.mp4`). While it shows, the subscription is
+   matched to their Plex account in Billing (a permanent link), Billing is
+   refreshed from Stripe and their Requests account is made; a progress bar
+   follows that and the button to open the dashboard unlocks when it is done
+   (or after two minutes: signing in never depends on it). It is **off** until you turn it on. To set it up:
    - **Where new people go**: the server, the libraries they get, and the
      number of people to stop at (Plex itself stops at 100 per server; invites
      nobody has accepted yet count too).

@@ -90,6 +90,7 @@ notifier.push = push
 signup = Signup(store, directory, poller.http, lambda: client_id(), billing=poller.billing)
 signup.notifier = notifier
 signup.poller = poller
+signup.requests = seerr   # the new member's Requests account is made while the last sign-up screen waits
 add_requests_section(store)
 add_mystreams_section(store)
 add_books_section(store)

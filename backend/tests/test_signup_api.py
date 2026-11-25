@@ -94,7 +94,8 @@ def test_from_nothing_to_signed_in(app):
     M.pay(next(iter(M.state["sessions"])))
     row = app.signup.rows()[0]
     app.signup._set(row["id"], checked=0)   # the page asks again a few seconds later
-    assert c.get("/api/signup/status").json()["step"] == "done"
+    done = c.get("/api/signup/status").json()
+    assert done["step"] == "done" and done["ready"]["matched"] is True and set(done["ready"]) == {"matched", "billing", "requests", "done", "late"}
     assert c.get("/api/me").status_code == 401   # not signed in to the dashboard until they ask
     assert c.post("/api/signup/finish", headers=H).json() == {"ok": True}
     me = c.get("/api/me").json()

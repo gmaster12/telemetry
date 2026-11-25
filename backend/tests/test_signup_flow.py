@@ -582,3 +582,100 @@ def test_a_form_opened_in_another_tab_is_not_wiped_by_signing_in_again(env):
     out, _ = run(race())
     after = svc.get(row["id"])
     assert out == "go" and after["state"] == "checkout_open" and after["checkout_session"]
+
+
+# ---------- after they are in: Billing match, Billing refresh, Requests account ----------
+class FakeRequests:
+    def __init__(self, fail=0):
+        self.made, self.fail, self.on = [], fail, True
+
+    def configured(self):
+        return self.on
+
+    async def seerr_user(self, who, directory):
+        if self.fail:
+            self.fail -= 1
+            raise RuntimeError("Seerr is down")
+        assert who.member and who.kind == "plex" and not who.is_admin
+        self.made.append((who.subject, who.email))
+        return 77
+
+
+def joined(svc):
+    row = start(svc)
+    _, row = open_checkout(svc, row)
+    M.pay(row["checkout_session"])
+    row = run(svc.advance(row["id"]))
+    assert row["state"] == "active"
+    return row
+
+
+def billing_poller(svc, store, fail=0):
+    svc.poller.syncs, svc.poller.fail = 0, fail
+
+    async def sync_billing():
+        if svc.poller.fail:
+            svc.poller.fail -= 1
+            raise RuntimeError("Stripe is down")
+        svc.poller.syncs += 1
+        return {}
+    svc.poller.sync_billing = sync_billing
+    store.set_setting("stripe_key", "rk_live_billing")
+
+
+def test_the_new_member_is_matched_in_billing_and_made_ready(env):
+    store, d, svc = env
+    billing_poller(svc, store)
+    svc.requests = FakeRequests()
+    row = joined(svc)
+    # Matched the moment they are in, before anything else is waited for.
+    assert [(l["email"], l["plex_id"]) for l in svc.billing.links()] == [("newbie@example.com", "3001")]
+    assert svc.ready(row) == {"matched": True, "billing": False, "requests": False, "done": False, "late": False}
+    assert svc.view(row)["ready"]["done"] is False
+    row = run(svc.prepare(row["id"]))
+    assert svc.poller.syncs == 1 and svc.requests.made == [("3001", "newbie@example.com")]
+    assert row["ready_at"] and svc.ready(row) == {"matched": True, "billing": True, "requests": True, "done": True, "late": False}
+    run(svc.prepare(row["id"]))                     # asked again: nothing is done twice
+    assert svc.poller.syncs == 1 and len(svc.requests.made) == 1
+    assert run(svc.sweep()) == 0 and svc.poller.syncs == 1
+
+
+def test_a_part_that_fails_is_tried_again_and_the_page_does_not_wait_for_ever(env):
+    store, d, svc = env
+    billing_poller(svc, store, fail=1)
+    svc.requests = FakeRequests(fail=1)
+    row = joined(svc)
+    row = run(svc.prepare(row["id"]))
+    assert not row["billing_at"] and not row["requests_at"] and not row["ready_at"] and "not fully ready" in row["last_error"]
+    assert svc.ready(row)["done"] is False
+    # Signing in never needed any of it: after a while the page lets them through and says the rest follows.
+    late = dict(row, active_at=row["active_at"] - 121)
+    assert svc.ready(late)["done"] is True and svc.ready(late)["late"] is True
+    run(svc.sweep())                                # the sweep comes back for what failed
+    row = svc.get(row["id"])
+    assert row["billing_at"] and row["requests_at"] and row["ready_at"] and row["last_error"] is None
+    assert svc.poller.syncs == 1 and len(svc.requests.made) == 1
+
+
+def test_a_link_made_by_hand_to_someone_else_is_left_alone(env):
+    store, d, svc = env
+    svc.billing.link("newbie@example.com", "555")
+    row = joined(svc)
+    assert [(l["email"], l["plex_id"]) for l in svc.billing.links()] == [("newbie@example.com", "555")]
+    assert row["linked_at"]
+
+
+def test_with_no_billing_key_and_no_requests_there_is_nothing_to_wait_for(env):
+    store, d, svc = env
+    row = joined(svc)                               # FakePoller has no sync_billing: it must not be called
+    row = run(svc.prepare(row["id"]))
+    assert row["ready_at"] and svc.ready(row)["done"] is True
+
+
+def test_one_billing_refresh_serves_everyone_who_joined_before_it_started(env):
+    store, d, svc = env
+    billing_poller(svc, store)
+    row = joined(svc)
+    svc._billing_from = row["active_at"] + 5        # a refresh that started after they were added
+    run(svc.prepare(row["id"]))
+    assert svc.poller.syncs == 0 and svc.get(row["id"])["billing_at"]

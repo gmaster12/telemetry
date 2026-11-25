@@ -35,7 +35,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .auth import is_admin_email, new_session, record_failure, set_cookie, throttled
+from .auth import Principal, is_admin_email, new_session, record_failure, set_cookie, throttled
 from .billing import STRIPE_API, STRIPE_VERSION, StripeError
 from .config import env
 from .plex import PlexAccount, PlexError
@@ -89,6 +89,8 @@ INVITE_SETTLE = 180        # plex.tv can take a moment to list a new invite; do 
 MAX_INVITES = 2            # invites one payment may send by itself; after that a person has to look
 PENDING_ALERT = 3600       # a finished checkout whose payment Stripe has not confirmed after this long: tell the admins
 CAPACITY_TTL = 120
+READY_WAIT = 120           # the last screen stops waiting for the account to be made ready after this; signing in works regardless
+READY_TRIES = 3600         # how long the sweep keeps trying to finish getting an account ready
 PAYING = ("active", "trialing", "past_due", "unpaid")
 ADMINS = "admins"          # notify.ADMINS (not imported: notify.py pulls in half the app)
 
@@ -189,10 +191,15 @@ class Signup:
         self._locks: dict[str, asyncio.Lock] = {}
         self._capacity: tuple[float, dict] | None = None
         self._cap_lock = asyncio.Lock()
+        self.requests: Any = None   # seerr.Requests (main.py): the new member's Requests account is made at sign-up
+        self._ready_locks: dict[str, asyncio.Lock] = {}
+        self._ready_tasks: dict[str, asyncio.Task] = {}
+        self._billing_lock = asyncio.Lock()
+        self._billing_from = 0.0    # when the newest finished Billing refresh started
         with self.lock:
             self.db.executescript(SCHEMA)
             cols = {r["name"] for r in self.db.execute("PRAGMA table_info(signups)")}
-            for col in ("pending", "invites"):   # added after the first sign-up release
+            for col in ("pending", "invites", "linked_at", "billing_at", "requests_at", "ready_at"):   # added after the first sign-up release
                 if col not in cols:
                     self.db.execute(f"ALTER TABLE signups ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0")
             self.db.commit()
@@ -627,6 +634,10 @@ class Signup:
         self._set(row["id"], state="active", active_at=int(time.time()), plex_token_enc=None, attempts=0, last_error=None, alerted=0)
         self._capacity = None
         log.info("Sign-up %s (%s) is on %s", row["id"], row.get("username"), srv["name"])
+        try:
+            self._link(self.get(row["id"]))
+        except Exception:  # noqa: BLE001  prepare() tries again; the member is already in
+            log.exception("Sign-up %s: could not match the subscription in Billing", row["id"])
         name = row.get("title") or row.get("username") or row.get("email")
         if was_stuck:
             self._resolve_notice(f"signup:stuck:{row['id']}", f"{name} is on {srv['name']} now", "The sign-up finished.")
@@ -640,6 +651,81 @@ class Signup:
             self.poller.users_synced_at = 0   # read the people list from plex.tv again
             self.poller.kick()
         return self.get(row["id"])
+
+    # ---------- after they are in: Billing match, Billing refresh, Requests account ----------
+    def _link(self, row: dict) -> None:
+        """Match the subscription to the Plex account in Billing for good. The checkout email is their Plex email
+        today; the link keeps the match if they change their Plex email later. A link somebody made by hand to a
+        different person is left alone."""
+        if row["linked_at"]:
+            return
+        email = (row.get("email") or "").strip().lower()
+        if self.billing is not None and email:
+            have = self.db.execute("SELECT plex_id FROM billing_links WHERE email = ?", (email,)).fetchone()
+            if have is None:
+                self.billing.link(email, row["plex_id"])
+            elif str(have["plex_id"]) != str(row["plex_id"]):
+                log.warning("Sign-up %s: %s is already linked by hand to another person in Billing; left as it is", row["id"], email)
+        self._set(row["id"], touch=False, linked_at=int(time.time()))
+
+    async def _refresh_billing(self, row: dict) -> None:
+        """Read Stripe into Billing again, so the dashboard shows the new subscription. One refresh at a time; a
+        refresh that started after this person was added serves everybody waiting."""
+        if self.poller is None or not self.store.get_setting("stripe_key"):
+            return   # Billing is not set up: nothing to refresh
+        async with self._billing_lock:
+            if self._billing_from >= int(row["active_at"] or 0):
+                return
+            started = time.time()
+            await self.poller.sync_billing()
+            self._billing_from = started
+
+    async def _requests_account(self, row: dict) -> None:
+        if self.requests is None or not self.requests.configured():
+            return
+        who = Principal(kind="plex", subject=str(row["plex_id"]), name=row.get("title") or row.get("username") or "", role="viewer",
+                        email=row.get("email"))
+        await self.requests.seerr_user(who, self.directory)
+
+    async def prepare(self, sid: str) -> dict | None:
+        """Get a finished sign-up's dashboard account ready. Each part is done once and remembered; a part that
+        fails is tried again by the sweep. None of it is needed to sign in, so the page stops waiting after
+        READY_WAIT."""
+        async with self._ready_locks.setdefault(sid, asyncio.Lock()):
+            row = self.get(sid)
+            if not row or row["state"] != "active" or row["ready_at"]:
+                return row
+            failed = None
+            for col, step in (("linked_at", None), ("billing_at", self._refresh_billing), ("requests_at", self._requests_account)):
+                if row[col]:
+                    continue
+                try:
+                    if step is None:
+                        self._link(row)
+                    else:
+                        await step(row)
+                        self._set(sid, touch=False, **{col: int(time.time())})
+                except Exception as e:  # noqa: BLE001  the other parts still run; the sweep comes back for this one
+                    failed = f"{col[:-3]}: {e}"
+                    log.warning("Sign-up %s: getting the account ready, %s", sid, failed)
+            row = self.get(sid)
+            if all(row[c] for c in ("linked_at", "billing_at", "requests_at")):
+                self._set(sid, touch=False, ready_at=int(time.time()), last_error=None)
+            elif failed:
+                self._set(sid, touch=False, last_error=("Account not fully ready: " + failed)[:300])
+            return self.get(sid)
+
+    def prepare_soon(self, sid: str) -> None:
+        """Start prepare() in the background unless it is already running (the status route calls this)."""
+        t = self._ready_tasks.get(sid)
+        if t is None or t.done():
+            self._ready_tasks[sid] = asyncio.get_running_loop().create_task(self.prepare(sid))
+
+    def ready(self, row: dict) -> dict:
+        """What the last screen's progress bar shows."""
+        waited = int(time.time()) - int(row["active_at"] or 0) > READY_WAIT
+        return {"matched": bool(row["linked_at"]), "billing": bool(row["billing_at"]), "requests": bool(row["requests_at"]),
+                "done": bool(row["ready_at"]) or waited, "late": waited and not row["ready_at"]}
 
     def _resolve_notice(self, key: str, title: str, body: str) -> None:
         if self.notifier is not None:
@@ -719,6 +805,16 @@ class Signup:
                 moved += int(bool(after) and after["state"] != r["state"])
             except Exception:  # noqa: BLE001
                 log.exception("Sign-up sweep: %s failed", sid)
+        with self.lock:
+            unready = [r["id"] for r in self.db.execute("SELECT id FROM signups WHERE state = 'active' AND ready_at = 0 AND active_at > ?", (now - READY_TRIES,))]
+        for sid in unready:
+            try:
+                await self.prepare(sid)
+            except Exception:  # noqa: BLE001
+                log.exception("Sign-up sweep: getting %s ready failed", sid)
+        for key in [k for k, t in self._ready_tasks.items() if t.done()]:
+            self._ready_tasks.pop(key, None)
+            self._ready_locks.pop(key, None)
         for key in [k for k, lk in self._locks.items() if not lk.locked() and (self.get(k) or {}).get("state") not in IN_FLIGHT]:
             self._locks.pop(key, None)
         return moved
@@ -743,7 +839,7 @@ class Signup:
         if st in ("plex_ok", "checkout_open"):
             return {**out, "step": "pay"}
         if st == "active":
-            return {**out, "step": "done"}
+            return {**out, "step": "done", "ready": self.ready(row)}
         waiting = st == "invited" and not row.get("plex_token_enc")
         return {**out, "step": "working", "confirming": False, "stuck": bool(row["alerted"]) or int(row["attempts"] or 0) >= FAIL_ALERT,
                 "accept": waiting or (st == "invited" and int(time.time()) - int(row["invited_at"] or 0) > 45)}
@@ -863,6 +959,8 @@ def make_router(svc: Signup, admin: Callable[[Request], Any], client_ip: Callabl
         if row and row["state"] in IN_FLIGHT:
             gap = 5 if row["state"] == "checkout_open" else min(60, 3 + 10 * int(row["attempts"] or 0))
             row = await svc.advance(row["id"], min_gap=gap)
+        if row and row["state"] == "active" and not row["ready_at"]:
+            svc.prepare_soon(row["id"])
         return svc.view(row)
 
     @r.post("/api/signup/checkout")

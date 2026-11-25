@@ -229,36 +229,94 @@
   }
 
   // ---------- step 4: you are in ----------
+  var VIDEO = '/assets/how-to-request.mp4';
+  var VIDEO_POSTER = '/assets/how-to-request.jpg';
+  var BUFFER_EMAIL = 'info@greystarnetworks.com';
+  // The last screen waits for these before it unlocks the button (backend: Signup.prepare). The first two are
+  // true by the time this screen shows.
+  var READY = [
+    { key: null, text: 'Payment confirmed' },
+    { key: null, text: function () { return 'Added to ' + (view.server || 'the server') + ' on Plex'; } },
+    { key: 'matched', text: 'Subscription matched to your Plex account' },
+    { key: 'billing', text: 'Billing details refreshed' },
+    { key: 'requests', text: 'Requests account created' }
+  ];
+
+  function videoCard() {
+    var box = el('div');
+    var card = el('button', { type: 'button', class: 'su__video' },
+      el('span', { class: 'su__play', 'aria-hidden': 'true' }),
+      el('span', null, 'Watch: how to request a movie, show, ebook or audiobook', el('small', { text: '2 minutes · made for phones · no sound' })));
+    card.addEventListener('click', function () {
+      var v = el('video', { class: 'su__film', src: VIDEO, poster: VIDEO_POSTER, controls: true, playsinline: true, preload: 'metadata' });
+      box.replaceChild(v, card);
+      var p = v.play(); if (p && p.catch) p.catch(function () { /* they can press play */ });
+    });
+    box.appendChild(card);
+    return box;
+  }
+
   function showDone() {
     stopTimer(); dropCheckout();
     var server = view.server || 'the server';
-    var err = el('div');
-    var open = el('button', { type: 'button', class: 'su__btn su__btn--go', text: 'Open Greystar and request something' });
+    var title = el('h2'), fill = el('i'), bar = el('div', { class: 'su__bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100' }, fill);
+    var note = el('span'), pct = el('b'), tasks = el('ul', { class: 'su__tasks' });
+    var items = READY.map(function (t) { var li = el('li', { text: typeof t.text === 'function' ? t.text() : t.text }); tasks.appendChild(li); return li; });
+    var open = el('button', { type: 'button', class: 'su__btn su__btn--go' });
+    var opening = false;
     open.addEventListener('click', function () {
-      open.disabled = true; open.textContent = 'Opening…';
+      opening = true; open.disabled = true; open.textContent = 'Opening…';
       post('/api/signup/finish').then(function () { window.location.replace('/'); })
         .catch(function () { window.location.replace('/login.html'); });   // the sign-up is done either way: Sign in with Plex works now
     });
+    function paint(r) {
+      r = r || {};
+      var n = 0, now = false;
+      READY.forEach(function (t, i) {
+        var ok = !t.key || !!r[t.key];
+        if (ok) n++;
+        items[i].className = ok ? 'is-done' : (r.done || now) ? '' : 'is-now';
+        if (!ok) now = true;
+      });
+      var p = r.done && !r.late ? 100 : Math.round(n / READY.length * 100);
+      fill.style.width = p + '%'; pct.textContent = p + '%'; bar.setAttribute('aria-valuenow', String(p));
+      title.textContent = r.done ? 'Your Greystar account is ready' : 'Getting your Greystar account ready';
+      note.textContent = !r.done ? 'This takes about half a minute. Keep this page open.'
+        : r.late ? 'You can sign in now. The rest finishes by itself in a few minutes.' : 'You can sign in now.';
+      if (!opening) { open.disabled = !r.done; open.textContent = r.done ? 'Open Greystar and request something' : 'Getting ready…'; }
+    }
+    function poll() {
+      get('/api/signup/status').then(function (v) {
+        if (v.step !== 'done') { stopTimer(); route(v); return; }
+        view = v; paint(v.ready);
+        if (!(v.ready && v.ready.done)) timer = setTimeout(poll, 2000);
+      }).catch(function () { timer = setTimeout(poll, 5000); });
+    }
     draw('done', 'You’re in' + (view.name ? ', ' + view.name : ''), [
-      el('p', { class: 'su__sub' }, 'Your subscription is active and ', el('b', { text: server }), ' is shared with your Plex account. Two things to do next.'),
+      el('p', { class: 'su__sub' }, 'Your subscription is active and ', el('b', { text: server }), ' is shared with your Plex account.'),
+      el('div', { class: 'su__ready' }, title, bar, el('div', { class: 'su__pct' }, note, pct), tasks, open),
       el('div', { class: 'su__block' },
-        el('h2', { text: '1. Watch: put Plex on your TV and devices' }),
+        el('h2', { text: '1. Install Plex on your TV and devices' }),
         el('ul', { class: 'su__list' }, DEVICES.map(function (d) { return el('li', null, el('b', { text: d.name + ': ' }), d.how); })),
         el('ol', { class: 'su__num' },
           el('li', null, 'Open Plex and sign in with the same Plex account', view.email ? el('b', { text: ' (' + view.email + ')' }) : null,
             '. On a TV it shows a 4-letter code: go to ', link(PLEX_LINK, 'plex.tv/link'), ' on your phone and type it in.'),
           el('li', null, 'Find ', el('b', { text: server }), ': open the menu and choose ', el('b', { text: 'More' }), '. Its Movies and TV Shows are listed there.'),
           el('li', null, 'Pin them so they stay on your home screen: highlight a library, open its menu (the three dots) and choose ', el('b', { text: 'Pin' }), '.')),
-        el('p', { class: 'su__note' }, link(PLEX_APPS, 'Every device Plex works on'), ' · ', link(PLEX_WEB, 'Watch in your browser now'))),
+        el('p', { class: 'su__note' }, link(PLEX_APPS, 'Every device Plex works on'), ' · ', link(PLEX_WEB, 'Watch in your browser now')),
+        el('p', { class: 'su__star' }, el('b', { class: 'su__star-mark', text: '*' }), 'If you experience any amount of repeated buffering, email us at ',
+          el('a', { href: 'mailto:' + BUFFER_EMAIL, text: BUFFER_EMAIL }), ' and we can move you to a closer server that will resolve the problem.')),
       el('div', { class: 'su__block' },
-        el('h2', { text: '2. Ask: request movies and shows' }),
+        el('h2', { text: '2. Request movies, shows and books' }),
+        videoCard(),
         el('ol', { class: 'su__num' },
           el('li', null, 'Come to ', el('b', { text: window.location.host }), ' and press ', el('b', { text: 'Sign in with Plex' }), '. There is no separate password.'),
-          el('li', null, 'Open ', el('b', { text: 'Requests' }), ', search for a movie or show, and press Request.'),
-          el('li', null, 'We tell you here when it is ready to watch in Plex. You can also see your subscription and what you have watched.')),
-        open, err),
+          el('li', null, 'Open ', el('b', { text: 'Requests' }), ', search for a movie or show, and press Request. Ebooks and audiobooks are in the menu above the search box.'),
+          el('li', null, 'We tell you here when it is ready. You can also see your subscription and what you have watched.'))),
       support()
     ]);
+    paint(view.ready);
+    if (!(view.ready && view.ready.done)) timer = setTimeout(poll, 1200);
   }
 
   // ---------- the other endings ----------
