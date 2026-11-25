@@ -1073,7 +1073,7 @@ def _history_rows(rows: list[dict]) -> list[dict]:
             "id": r["id"], "server": by_id.get(sid) or r["server"], "watched_on": r["server"], "title": r["title"], "subtitle": r["subtitle"], "kind": r["kind"],
             "device": r["device"], "player": r["player"], "location": r["location"], "method": r["method"],
             "resolution": r["resolution"], "started_at": r["started_at"], "stopped_at": r["stopped_at"],
-            "user": r["username"], "user_id": r["user_id"],
+            "user": r.get("username"), "user_id": r.get("user_id"),
             "watched_min": round((r["watched_sec"] or 0) / 60), "progress_pct": r["progress_pct"], "source": r["source"],
             "live": r["stopped_at"] is None,
             "poster": (f"/api/emby/poster/{r['art']}" if r["server"] == EMBY_SERVER and r["art"] else
