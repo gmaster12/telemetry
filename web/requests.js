@@ -16,6 +16,7 @@
   var searchInput = null;
   var searchBox = null;   // the shared search box (usearch.js); its input is searchInput
   var routeToken = 0;
+  var arrived = {};       // "movie:123" / "movie:123:4k": copies seen landing on Plex while their page was open
 
   // ---------- helpers ----------
   var el = window.gsUI.el;   // shared helpers (ui.js)
@@ -613,7 +614,7 @@
     if (busy(d.media.status)) keys.push(key);
     if (me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] && busy(d.media.status4k)) keys.push(key + ':4k');
     if (!keys.length) return;
-    var notified = {}, keep = {};
+    var notified = {}, keep = {}, waiting = {};
     // The hero's badges and status button say where each copy really is (not Seerr's "Processing").
     function stageWord(p) {
       var s = p.stage;
@@ -657,6 +658,17 @@
       api('GET', '/api/requests/progress?ids=' + keys.join(',')).then(function (x) {
         if (!live.isConnected) return;
         var it = x.items || {};
+        // A copy that was on its way is now on Plex: draw the title again, so its badge, button and removal
+        // clock say so too (paintHead leaves copies on Plex alone, so they kept the last "Downloading" words).
+        // Once per copy, and only for a copy this page saw still on its way (not one already there when it opened).
+        var landed = keys.filter(function (k) { return it[k] && it[k].onPlex && waiting[k] && !arrived[k]; });
+        keys.forEach(function (k) { if (it[k] && !it[k].onPlex) waiting[k] = true; });
+        if (landed.length) {
+          landed.forEach(function (k) { arrived[k] = true; });
+          forget();
+          route(true);
+          return;
+        }
         var mov = [], tv = [];
         keys.forEach(function (k) {
           var p = it[k];
