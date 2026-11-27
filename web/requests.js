@@ -772,6 +772,9 @@
     var canKind = kind === 'movie' ? me.can.movie : me.can.tv;
     var can4k = kind === 'movie' ? me.can.movie4k : me.can.tv4k;
     var open = function (st) { return st === 'unknown' || st === 'deleted' || (kind === 'tv' && st === 'partial'); };
+    // The request buttons: for a series the seasons decide (tvLeft), not the series status. A show whose only
+    // tracked season is upcoming is "processing" in Seerr while its older seasons are still open to request.
+    var askable = function (st) { return kind === 'tv' || open(st); };
     var tvLeft = function (four) {
       return (d.seasons || []).some(function (s) {
         return (s.number > 0 || me.settings.specials) && !(four ? s.requested4k : s.requested) && seasonOpen(four ? s.status4k : s.status);
@@ -781,11 +784,15 @@
     // (autoAdd 'possible'), says it is on its way once Sonarr has it ('added'), or else puts it on the admins' list.
     var noAuto = kind === 'tv' && !d.tvdbId;
     var direct = noAuto && d.autoAdd === 'added' && open(d.media.status);
-    var mayStd = !direct && open(d.media.status) && (kind === 'movie' || tvLeft(false));
-    var may4k = !noAuto && me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] && can4k && open(d.media.status4k) && (kind === 'movie' || tvLeft(true));
+    var mayStd = !direct && askable(d.media.status) && (kind === 'movie' || tvLeft(false));
+    var may4k = !noAuto && me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] && can4k && askable(d.media.status4k) && (kind === 'movie' || tvLeft(true));
+    // Some season already on Plex or asked for: the button says "Request more seasons".
+    var more = d.media.status === 'partial' || (kind === 'tv' && (d.seasons || []).some(function (s) {
+      return (s.number > 0 || me.settings.specials) && (s.requested || !seasonOpen(s.status));
+    }));
     if (noAuto && !d.autoAdd && canKind && open(d.media.status)) box.appendChild(el('p', { class: 'rq-note', 'data-no-auto': '1', text: NO_AUTO_REQUEST }));
     if (direct) box.appendChild(el('span', { class: 'rq-btn rq-btn--ghost', 'aria-disabled': 'true', 'data-direct': '1' }, icon('clock', 18), 'Requested'));
-    else if (canKind && mayStd) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--accent', 'data-more': d.media.status === 'partial' ? '1' : null, onclick: function () { requestDialog(kind, d, false); } }, icon('plus', 18), d.media.status === 'partial' ? (kind === 'tv' ? 'Request more seasons' : 'Request more') : 'Request'));
+    else if (canKind && mayStd) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--accent', 'data-more': more ? '1' : null, onclick: function () { requestDialog(kind, d, false); } }, icon('plus', 18), more ? (kind === 'tv' ? 'Request more seasons' : 'Request more') : 'Request'));
     else if (['pending', 'processing'].indexOf(d.media.status) >= 0) box.appendChild(el('span', { class: 'rq-btn rq-btn--ghost', 'aria-disabled': 'true', 'data-statebtn': d.media.status === 'processing' ? '1' : null }, icon('clock', 18), d.media.status === 'pending' ? 'Requested' : 'In progress'));
     var follow = followBox(d);
     if (follow) box.appendChild(follow);
@@ -806,7 +813,7 @@
     if (me.can.issues && d.media.mediaId && onPlex) {
       box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--quiet', onclick: function () { issueDialog(kind, d); } }, icon('flag', 18), 'Report an issue'));
     }
-    if (!canKind && open(d.media.status)) box.appendChild(el('p', { class: 'rq-note', text: 'Your account cannot request ' + (kind === 'movie' ? 'movies' : 'series') + '. Ask the admin if you need to.' }));
+    if (!canKind && (kind === 'tv' ? tvLeft(false) : open(d.media.status))) box.appendChild(el('p', { class: 'rq-note', text: 'Your account cannot request ' + (kind === 'movie' ? 'movies' : 'series') + '. Ask the admin if you need to.' }));
     return box;
   }
 
