@@ -206,6 +206,31 @@ class RequestStatus:
                 pass
         return await self.onplex.movie(int(tmdb), is4k=is4k, size=size, file_name=name, title=title)
 
+    async def fill_from_plex(self, tvdb: int, tmdb: int | None, show: dict | None, is4k: bool) -> dict | None:
+        """Episodes Sonarr has no file for (aired, nothing downloading) that Plex has anyway, from a copy kept outside
+        Sonarr's folder, are marked On Plex instead of "Looking for a copy". Changes `show` in place and returns it."""
+        if not (self.onplex and show):
+            return show
+        rows = {(int(se["number"]), int(e["n"])): e for se in show.get("seasons") or [] for e in se.get("episodes") or []
+                if e.get("stage") == "searching" and e.get("n") and se.get("number")}
+        if not rows:
+            return show
+        title = None
+        if self.arr:
+            try:
+                title = ((await self.arr.series(int(tvdb), is4k)) or {}).get("title")
+            except ArrError:
+                pass
+        got = await self.onplex.present(set(rows), tvdb_id=int(tvdb), tmdb_id=tmdb, title=title, is4k=is4k)
+        counts = show.setdefault("counts", {})
+        for at in got:
+            row = rows[at]
+            row.update(stage="onplex", word="On Plex")
+            row.pop("lastSearch", None)
+            counts["searching"] = max(0, int(counts.get("searching") or 0) - 1)
+            counts["onplex"] = int(counts.get("onplex") or 0) + 1
+        return show
+
     async def show_on_plex(self, tvdb: int, tmdb: int | None, show: dict | None, is4k: bool) -> float | None:
         """When Plex has every asked-for episode Sonarr has finished with, else None."""
         if not (self.onplex and show):
@@ -244,6 +269,7 @@ class RequestStatus:
                 if not tvdb:
                     return {"stage": base, "plex_at": None}
                 show = await self.arr.show_progress(int(tvdb), sorted(asked_seasons(q)), is4k)
+                show = await self.fill_from_plex(int(tvdb), tmdb, show, is4k)
                 at = await self.show_on_plex(int(tvdb), tmdb, show, is4k)
                 eps = {e.get("stage") for se in (show or {}).get("seasons") or [] for e in se.get("episodes") or []}
                 started = next((s for s in DOWNLOADING_STAGES + ("importing",) if s in eps), None)

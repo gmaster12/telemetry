@@ -97,6 +97,7 @@ class OnPlex:
         self.poller = poller
         self._hits: dict[str, float] = {}
         self._misses: dict[str, float] = {}
+        self._present: dict[str, tuple[float, frozenset]] = {}   # episodes Plex has that Sonarr has no file for
         self._window: dict[str, tuple[float, list[Any]]] = {}   # library items, and each library's keys
         self._identity: dict[int, tuple[float, str]] = {}
         self._portal_cache: tuple[float, int | None] = (0.0, None)
@@ -333,21 +334,81 @@ class OnPlex:
             self._miss(key)
             return None
 
-    async def _has_all(self, server, show: dict, want: set[tuple[int, int]],
-                       sizes: dict[tuple[int, int], int] | None, want4k: bool) -> bool:
+    async def present(self, want: Iterable[tuple[int, int]], *, tvdb_id: int | None = None, tmdb_id: int | None = None,
+                      title: str | None = None, is4k: bool = False) -> set[tuple[int, int]]:
+        """Which of the asked-for (season, episode) pairs the portal's Plex library has a file for.
+
+        For episodes Sonarr has no file for: a copy kept outside Sonarr's folder (an older library root
+        Sonarr lost track of, as The Institute's first five episodes were, Nov 2026) is still on Plex and
+        watchable, so it must not read "Looking for a copy". Same show identity rule as `episodes`."""
+        want = {(int(s), int(e)) for s, e in want}
+        if not (self.enabled() and want and (tvdb_id or tmdb_id)):
+            return set()
+        key = f"tvp:{tvdb_id or 0}:{tmdb_id or 0}:{int(bool(is4k))}:" + ",".join(f"{s}x{e}" for s, e in sorted(want))
+        now = time.time()
+        hit = self._present.get(key)
+        if hit and hit[0] > now:
+            return set(hit[1])
+        server = await self.server()
+        if not server or self._sick.get(server.id, 0) > now:
+            return set()
+        async with self._lock(key):
+            hit = self._present.get(key)
+            if hit and hit[0] > time.time():
+                return set(hit[1])
+            got: set[tuple[int, int]] = set()
+            found = False
+            for section in await self._libraries(server, SHOW):
+                for source in ("changed", "title"):
+                    if source == "title" and not title:
+                        continue
+                    items = await self._changed(server, section, SHOW) if source == "changed" \
+                        else await self._titled(server, section, SHOW, title)
+                    for show in items:
+                        known = (tvdb_id and tvdb_id in ids_of(show, "tvdb")) or (tmdb_id and tmdb_id in ids_of(show, "tmdb"))
+                        if not known:
+                            continue
+                        found = True
+                        have = await self._have(server, show, bool(is4k))
+                        got |= {at for at in want if have.get(at)}
+                    if found:
+                        break
+                if got == want:
+                    break
+            if got:
+                log.info("onplex: %s has %d episode(s) of %s that Sonarr has no file for", server.name, len(got),
+                         title or tvdb_id or tmdb_id)
+            self._present[key] = (time.time() + (HIT_TTL if got == want else MISS_TTL), frozenset(got))
+            if len(self._present) > 2000:
+                t = time.time()
+                for k, (until, _) in list(self._present.items()):
+                    if until <= t:
+                        self._present.pop(k, None)
+            return got
+
+    async def _have(self, server, show: dict, want4k: bool) -> dict[tuple[int, int], list[dict]]:
+        """(season, episode) -> the readable files Plex has for it at the asked-for resolution."""
         try:
             leaves = await self.poller.client(server).leaves(show.get("ratingKey"))
         except Exception as e:  # noqa: BLE001
             log.debug("onplex: %s could not list episodes of %s: %s", server.name, show.get("title"), e)
             self._sick[server.id] = time.time() + SICK_TTL
-            return False
+            return {}
         have: dict[tuple[int, int], list[dict]] = {}
         for ep in leaves:
             try:
                 at = (int(ep.get("parentIndex")), int(ep.get("index")))
             except (TypeError, ValueError):
                 continue
-            have.setdefault(at, []).extend(parts_of(ep, want4k))
+            have.setdefault(at, []).extend(p for p in parts_of(ep, want4k)
+                                           if p.get("exists") is not False and p.get("accessible") is not False)
+        return have
+
+    async def _has_all(self, server, show: dict, want: set[tuple[int, int]],
+                       sizes: dict[tuple[int, int], int] | None, want4k: bool) -> bool:
+        have = await self._have(server, show, want4k)
+        if not have:
+            return False
         for at in want:
             parts = have.get(at) or []
             if not parts:

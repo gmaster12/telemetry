@@ -188,6 +188,38 @@ def test_every_asked_for_episode_must_be_there(px):
     assert run(onplex.episodes(want, tvdb_id=TVDB + 2, sizes={(2, 1): 999, (2, 2): 600})) is None    # another copy
 
 
+def test_episodes_sonarr_lost_track_of_are_found_on_plex(px):
+    """The Institute, Nov 2026: Sonarr lost S1E1-5 (files kept in an older library root), Plex still plays them."""
+    onplex, _ = px
+    P.state["items"]["2"] = [P.show(rating_key="80", title="A Show", tvdb=TVDB),
+                             P.show(rating_key="81", title="B Show", tvdb=TVDB + 1)]
+    P.state["leaves"]["80"] = [P.episode(1, 1), P.episode(1, 2), P.episode(1, 6)]
+    gone = P.episode(1, 3)
+    gone["Media"][0]["Part"][0]["accessible"] = False                      # Plex cannot read it: not on Plex
+    P.state["leaves"]["80"].append(gone)
+    P.state["leaves"]["81"] = [P.episode(1, 1), P.episode(1, 2), P.episode(1, 3)]   # another show's episodes
+    assert run(onplex.present({(1, 1), (1, 2), (1, 3), (1, 4)}, tvdb_id=TVDB)) == {(1, 1), (1, 2)}
+    assert run(onplex.present({(1, 1)}, tvdb_id=TVDB + 5)) == set()       # a show Plex does not have
+
+
+def test_the_season_list_says_on_plex_for_a_copy_sonarr_lost(px):
+    from app.request_state import RequestStatus
+    onplex, _ = px
+    P.state["items"]["2"] = [P.show(rating_key="80", title="A Show", tvdb=TVDB)]
+    P.state["leaves"]["80"] = [P.episode(1, n) for n in (1, 2, 3)]
+    show = {"seasons": [{"number": 1, "episodes": [
+                {"n": 1, "stage": "searching", "word": "Looking for a copy"},
+                {"n": 2, "stage": "searching", "word": "Looking for a copy"},
+                {"n": 3, "stage": "onplex", "word": "On Plex"},
+                {"n": 4, "stage": "searching", "word": "Looking for a copy"},
+                {"n": 5, "stage": "release", "word": "Not out yet"}]}],
+            "counts": {"onplex": 1, "searching": 3, "release": 1}, "total": 5}
+    run(RequestStatus(None, None, onplex).fill_from_plex(TVDB, None, show, False))
+    words = {e["n"]: e["stage"] for e in show["seasons"][0]["episodes"]}
+    assert words == {1: "onplex", 2: "onplex", 3: "onplex", 4: "searching", 5: "release"}
+    assert show["counts"] == {"onplex": 3, "searching": 1, "release": 1}
+
+
 # ---------- what the pages show ----------
 def client(px, sections=("requests",)):
     from app.auth import Principal

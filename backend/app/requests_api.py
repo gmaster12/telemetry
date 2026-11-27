@@ -980,6 +980,8 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                         tvdb = ((d or {}).get("externalIds") or {}).get("tvdbId")
                     seasons = sorted({s.get("seasonNumber") for x in reqs for s in (x.get("seasons") or []) if s.get("seasonNumber")})
                     show = await arr.show_progress(int(tvdb), seasons, is4k) if tvdb else None
+                    if tvdb:
+                        show = await status.fill_from_plex(int(tvdb), tmdb, show, is4k)
                     on_plex = MEDIA_STATUS.get(mm["status"]) == "available"
                     if not on_plex and tvdb:
                         on_plex = bool(await plex_has_episodes(int(tvdb), tmdb, show, is4k))
