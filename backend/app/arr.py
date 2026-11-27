@@ -299,6 +299,60 @@ class Arr:
             return []
         return await self._cached(f"e:{is4k}:{series_id}", 30, lambda: c.call("GET", "/episode", params={"seriesId": int(series_id)}))
 
+    # ---------- shows TheTVDB id is missing from on TMDB (Seerr cannot send them to Sonarr) ----------
+    async def show_by_imdb(self, imdb_id: str | None, year: int | None = None) -> dict | None:
+        """The one Sonarr lookup result for this IMDb id, or None. Sonarr's own lookup finds new streaming shows by
+        IMDb id even while TMDB has no TheTVDB id for them. Only an exact IMDb match counts, and when the first-air
+        year is known it must agree within a year, so a near-miss never gets added."""
+        c = self.client("sonarr")
+        imdb_id = str(imdb_id or "").strip()
+        if not c or not re.fullmatch(r"tt\d{5,10}", imdb_id):
+            return None
+
+        async def fetch():
+            return await c.call("GET", "/series/lookup", params={"term": f"imdb:{imdb_id}"}, timeout=30) or []
+        rows = [x for x in await self._cached(f"imdb:{imdb_id}", 300, fetch)
+                if x.get("tvdbId") and str(x.get("imdbId") or "") == imdb_id]
+        if len(rows) != 1:
+            return None
+        hit = rows[0]
+        if year and hit.get("year") and abs(int(hit["year"]) - int(year)) > 1:
+            return None
+        return hit
+
+    async def add_show(self, hit: dict, seasons: list[int], *, profile_id: int, root: str, season_folder: bool,
+                       series_type: str | None = None) -> dict:
+        """Add the show from `show_by_imdb` to Sonarr with only the asked-for seasons monitored, and search for them.
+        A show Sonarr already has gets those seasons monitored and searched instead. Returns {seriesId, tvdbId, added}."""
+        c = self.client("sonarr")
+        if not c:
+            raise ArrError(409, "Sonarr is not set up.")
+        want = {int(n) for n in seasons}
+        existing = await c.call("GET", "/series", params={"tvdbId": int(hit["tvdbId"])})
+        existing = (existing or [None])[0] if isinstance(existing, list) else existing
+        if existing:
+            for s in existing.get("seasons") or []:
+                if s.get("seasonNumber") in want:
+                    s["monitored"] = True
+            existing["monitored"] = True
+            await c.call("PUT", f"/series/{existing['id']}", body=existing)
+            for n in sorted(want):
+                await c.call("POST", "/command", body={"name": "SeasonSearch", "seriesId": existing["id"], "seasonNumber": n})
+            self._cache.pop(f"s:False:{hit['tvdbId']}", None)
+            self._cache.pop(f"imdb:{hit.get('imdbId')}", None)
+            return {"seriesId": existing["id"], "tvdbId": hit["tvdbId"], "added": False}
+        body = {k: hit.get(k) for k in ("title", "titleSlug", "tvdbId", "imdbId", "tmdbId", "year", "images")}
+        body.update(qualityProfileId=int(profile_id), rootFolderPath=root, seasonFolder=bool(season_folder), monitored=True,
+                    monitorNewItems="all", seriesType=series_type or hit.get("seriesType") or "standard",
+                    seasons=[{"seasonNumber": s.get("seasonNumber"), "monitored": s.get("seasonNumber") in want}
+                             for s in hit.get("seasons") or []],
+                    # no "monitor" option, as Seerr sends it: Sonarr then follows the seasons' own monitored flags
+                    addOptions={"ignoreEpisodesWithFiles": True, "searchForMissingEpisodes": True})
+        res = await c.call("POST", "/series", body=body, timeout=60)
+        self._cache.pop(f"s:False:{hit['tvdbId']}", None)
+        self._cache.pop(f"imdb:{hit.get('imdbId')}", None)
+        return {"seriesId": (res or {}).get("id"), "tvdbId": hit["tvdbId"], "added": True}
+
     # ---------- what members see ----------
     async def movie_progress(self, tmdb_id: int, is4k: bool = False) -> dict | None:
         """{stage, word, pct, done, size, speed, minutes, quality, problem?, release?} or None when Radarr is not set up

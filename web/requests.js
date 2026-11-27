@@ -764,7 +764,7 @@
     return el('div', { class: 'rq-follow' }, el('span', { class: 'rq-follow__note' }, el('span', { class: 'rq-follow__dot', 'aria-hidden': 'true' }), 'Requested by another member'), b);
   }
 
-  var NO_AUTO_REQUEST = 'This show can\'t be requested automatically yet. Please submit an issue in our Discord support tickets and an admin will add it for you.';
+  var NO_AUTO_REQUEST = 'This show can\'t be requested automatically yet. Request it anyway and the admin will be told to add it for you.';
 
   // The buttons under a title: request (standard and 4K), trailer, watchlist, report a problem.
   function actions(kind, d) {
@@ -777,12 +777,15 @@
         return (s.number > 0 || me.settings.specials) && !(four ? s.requested4k : s.requested) && seasonOpen(four ? s.status4k : s.status);
       });
     };
-    // A show TheTVDB does not know yet cannot go to Sonarr, so Seerr takes the request and makes nothing. Say so instead.
+    // A show TheTVDB does not know yet cannot go through Seerr. The server adds it to Sonarr by its IMDb id instead
+    // (autoAdd 'possible'), says it is on its way once Sonarr has it ('added'), or else puts it on the admins' list.
     var noAuto = kind === 'tv' && !d.tvdbId;
-    var mayStd = !noAuto && open(d.media.status) && (kind === 'movie' || tvLeft(false));
+    var direct = noAuto && d.autoAdd === 'added' && open(d.media.status);
+    var mayStd = !direct && open(d.media.status) && (kind === 'movie' || tvLeft(false));
     var may4k = !noAuto && me.settings[kind === 'movie' ? 'movie4k' : 'series4k'] && can4k && open(d.media.status4k) && (kind === 'movie' || tvLeft(true));
-    if (noAuto && canKind && open(d.media.status)) box.appendChild(el('p', { class: 'rq-note', 'data-no-auto': '1', text: NO_AUTO_REQUEST }));
-    if (canKind && mayStd) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--accent', 'data-more': d.media.status === 'partial' ? '1' : null, onclick: function () { requestDialog(kind, d, false); } }, icon('plus', 18), d.media.status === 'partial' ? (kind === 'tv' ? 'Request more seasons' : 'Request more') : 'Request'));
+    if (noAuto && !d.autoAdd && canKind && open(d.media.status)) box.appendChild(el('p', { class: 'rq-note', 'data-no-auto': '1', text: NO_AUTO_REQUEST }));
+    if (direct) box.appendChild(el('span', { class: 'rq-btn rq-btn--ghost', 'aria-disabled': 'true', 'data-direct': '1' }, icon('clock', 18), 'Requested'));
+    else if (canKind && mayStd) box.appendChild(el('button', { type: 'button', class: 'rq-btn rq-btn--accent', 'data-more': d.media.status === 'partial' ? '1' : null, onclick: function () { requestDialog(kind, d, false); } }, icon('plus', 18), d.media.status === 'partial' ? (kind === 'tv' ? 'Request more seasons' : 'Request more') : 'Request'));
     else if (['pending', 'processing'].indexOf(d.media.status) >= 0) box.appendChild(el('span', { class: 'rq-btn rq-btn--ghost', 'aria-disabled': 'true', 'data-statebtn': d.media.status === 'processing' ? '1' : null }, icon('clock', 18), d.media.status === 'pending' ? 'Requested' : 'In progress'));
     var follow = followBox(d);
     if (follow) box.appendChild(follow);

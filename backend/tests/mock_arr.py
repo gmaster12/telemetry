@@ -8,7 +8,7 @@ state: dict = {}
 
 def reset():
     state.clear()
-    state.update(movies=[], series=[], episodes=[], files=[], queue={"radarr": [], "sonarr": []}, calls=[])
+    state.update(movies=[], series=[], episodes=[], files=[], queue={"radarr": [], "sonarr": []}, calls=[], lookup=[], added=[], commands=[])
 
 
 reset()
@@ -49,6 +49,30 @@ def delete_movie(mid: int, request: Request):
 def series(request: Request, tvdbId: int | None = None):
     check(request, "sonarr")
     return [s for s in state["series"] if tvdbId is None or s["tvdbId"] == tvdbId]
+
+
+@app.get("/sonarr/api/v3/series/lookup")
+def lookup(request: Request, term: str):
+    check(request, "sonarr")
+    have = {s["tvdbId"]: s["id"] for s in state["series"]}
+    return [{**x, "id": have.get(x["tvdbId"])} for x in state["lookup"] if term == f"imdb:{x.get('imdbId')}"]
+
+
+@app.post("/sonarr/api/v3/series")
+async def add_series(request: Request):
+    check(request, "sonarr")
+    body = await request.json()
+    body["id"] = 100 + len(state["series"])
+    state["series"].append(body)
+    state["added"].append(body)
+    return body
+
+
+@app.post("/sonarr/api/v3/command")
+async def command(request: Request):
+    check(request, "sonarr")
+    state["commands"].append(await request.json())
+    return {"id": 1, "status": "queued"}
 
 
 @app.get("/sonarr/api/v3/series/{sid}")

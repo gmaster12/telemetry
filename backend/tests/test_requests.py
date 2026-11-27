@@ -181,9 +181,9 @@ def test_a_season_seerr_will_not_take_is_not_reported_as_requested(env):
     assert len([r for r in rows if r["tmdb"] == 1399]) == 1  # only the request Seerr really made is logged
 
 
-def test_a_show_without_a_tvdb_id_says_to_submit_an_issue(env):
-    """Seerr takes a request for a show TheTVDB does not know (Sonarr cannot add it) and makes nothing. The person
-    used to be told it was already on Plex or requested; tell them to submit an issue instead, and never ask Seerr."""
+def test_a_show_without_a_tvdb_id_goes_to_the_admins(env):
+    """Seerr takes a request for a show TheTVDB does not know (Sonarr cannot add it) and makes nothing. With no Sonarr
+    to add it directly, never ask Seerr: tell the person the admin was told, and put it on the Needs you list."""
     store, d, svc = env
     M.SHOWS[341891] = {"name": "Chris Harrison's the Vow", "firstAirDate": "2026-11-10", "posterPath": "/v.jpg",
                        "backdropPath": "/vb.jpg", "seasons": 1, "have": {}, "tvdb": None}
@@ -194,8 +194,10 @@ def test_a_show_without_a_tvdb_id_says_to_submit_an_issue(env):
         before = len(M.state.get("bodies", []))
         r = c.post("/api/requests/request", json={"mediaType": "tv", "mediaId": 341891, "seasons": [1]})
         assert r.status_code == 409
-        assert "can't be requested automatically" in r.json()["detail"] and "submit an issue" in r.json()["detail"]
+        assert "can't be requested automatically" in r.json()["detail"] and "let the admin know" in r.json()["detail"]
         assert len(M.state.get("bodies", [])) == before  # nothing was sent to Seerr
+        flags = svc.help.needs_you()
+        assert [(f["request_id"], f["tmdb_id"], f["title"], f["subject"]) for f in flags] == [(-341891, 341891, "Chris Harrison's the Vow", "2002")]
         # a normal show still goes through
         assert c.post("/api/requests/request", json={"mediaType": "tv", "mediaId": 1396, "seasons": [1]}).json()["ok"]
     finally:

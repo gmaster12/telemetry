@@ -184,6 +184,14 @@ docker compose exec telemetry python -m app.tools.probe netdata   # raw Netdata 
 curl -s http://127.0.0.1:8791/healthz
 ```
 
+**Shows with no TheTVDB id.** New streaming shows often have no TheTVDB id on
+TMDB yet, so Seerr cannot send them to Sonarr. A request for one is added to
+Sonarr directly, found by its IMDb id (exactly one match, first-air year within
+a year), with the profile and folder of Seerr's default Sonarr server. The
+request log tags it "Added to Sonarr". If that is not possible (no IMDb id, no
+single match, 4K, or the person's series requests need approval), the show goes
+on Settings, Request log, **Needs you** as "Add by hand".
+
 ## Layout
 
 | Path | What |

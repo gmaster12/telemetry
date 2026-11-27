@@ -2,6 +2,7 @@
 
 - A failed request can be tried again once by the person who made it; after that they get Notify admin, which puts it
   on the admins' list (Settings, Request log, "Needs you", and the Settings home's "needs a look") until handled.
+  A show that cannot be requested automatically (see requests_api.add_without_seerr) lands on the same list.
   Request managers are not limited.
 - Notify me too: someone can follow a request another person made. It then shows in their My requests as
   "Requested by another member"; the other person's name is never sent to them.
@@ -78,6 +79,11 @@ class RequestHelp:
 
     def mark_notified(self, request_id: int, subject: str, info: dict) -> None:
         self._upsert(request_id, subject, info, "notified_at")
+
+    def ask_to_add(self, tmdb_id: int, subject: str, title: str | None) -> None:
+        """A show nobody can request automatically (no TheTVDB id, and Sonarr found no exact IMDb match): put it on
+        the same Needs you list. There is no Seerr request, so its row uses the negative TMDB id as request_id."""
+        self._upsert(-int(tmdb_id), subject, {"kind": "tv", "tmdbId": int(tmdb_id), "title": title}, "notified_at")
 
     def mark_handled(self, request_id: int) -> None:
         self._run("UPDATE request_flags SET handled_at = ? WHERE request_id = ?", int(time.time()), int(request_id))

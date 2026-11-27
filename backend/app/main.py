@@ -1659,7 +1659,9 @@ def requests_help():
     for f in seerr.help.needs_you():
         u = directory.get_user(f["subject"]) or {}
         out.append({"request": f["request_id"], "kind": f["kind"], "tmdb": f["tmdb_id"], "title": f["title"] or "Unknown title",
-                    "who": u.get("title") or u.get("username") or f["subject"], "notified_at": f["notified_at"]})
+                    "who": u.get("title") or u.get("username") or f["subject"], "notified_at": f["notified_at"],
+                    # a negative id is a show that could not be requested automatically (RequestHelp.ask_to_add)
+                    "why": "add" if int(f["request_id"]) < 0 else "failed"})
     return {"count": len(out), "rows": out}
 
 

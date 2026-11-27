@@ -66,6 +66,8 @@ class RequestIn(BaseModel):
 
 NO_AUTO_REQUEST = ("This show can't be requested automatically yet. Please submit an issue in our Discord support tickets "
                    "and an admin will add it for you.")
+NO_AUTO_FLAGGED = ("This show can't be requested automatically yet, so we've let the admin know. They'll add it for you, "
+                   "and you don't need to do anything else.")
 
 
 class IssueIn(BaseModel):
@@ -464,6 +466,17 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 "requests": requests_on(mi, me_id, manage, watching), "watchlisted": bool(d.get("onUserWatchlist")),
                 **detail_extra(d)}
 
+    async def auto_add(d: dict) -> str | None:
+        """Only for a show TMDB has no TheTVDB id for: "added" when Sonarr already has it (asked for outside Seerr),
+        "possible" when a request can add it there (see add_without_seerr), None otherwise."""
+        if not arr or (d.get("externalIds") or {}).get("tvdbId"):
+            return None
+        try:
+            hit = await arr.show_by_imdb((d.get("externalIds") or {}).get("imdbId"), int(year(d)) if year(d) else None)
+        except (ArrError, ValueError):
+            return None
+        return None if not hit else "added" if hit.get("id") else "possible"
+
     @r.get("/tv/{tmdb_id}")
     async def tv(request: Request, tmdb_id: int):
         p, uid = await who(request)
@@ -491,7 +504,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
                 "genres": [{"id": g.get("id"), "name": g.get("name")} for g in d.get("genres") or []], "vote": d.get("voteAverage"),
                 "firstAir": d.get("firstAirDate"), "lastAir": d.get("lastAirDate"), "status": d.get("status"),
                 "networks": [{"id": n.get("id"), "name": n.get("name")} for n in (d.get("networks") or [])[:3]],
-                "tvdbId": (d.get("externalIds") or {}).get("tvdbId"), "episodeRuntime": (d.get("episodeRunTime") or [None])[0],
+                "tvdbId": (d.get("externalIds") or {}).get("tvdbId"), "autoAdd": await auto_add(d), "episodeRuntime": (d.get("episodeRunTime") or [None])[0],
                 "certification": next((c.get("rating") for c in ((d.get("contentRatings") or {}).get("results") or []) if c.get("iso_3166_1") == "US"), None),
                 "seasons": seasons, "media": media_state(mi), "requests": requests_on(mi, me_id, manage, watching), "watchlisted": bool(d.get("onUserWatchlist")),
                 "next": (d.get("nextEpisodeToAir") or {}).get("airDate"), **detail_extra(d)}
@@ -558,7 +571,7 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             # Without a TheTVDB id Sonarr cannot add the show: Seerr answers 201 and makes nothing. Tell them what to do.
             d = await run(svc.get(f"/tv/{b['mediaId']}", user=uid, ttl=FAST))
             if not (d.get("externalIds") or {}).get("tvdbId"):
-                raise HTTPException(409, NO_AUTO_REQUEST)
+                return await add_without_seerr(p, uid, u, b, d)
         res = await run(svc.send("POST", "/request", user=uid, body=b))
         if not isinstance(res, dict) or res.get("id") is None:
             # Seerr answers 202 "No seasons available to request" (and makes nothing) when every season picked is
@@ -585,6 +598,56 @@ def make_router(svc: Requests, directory, need: Callable[[Request, str], Any], m
             except Exception:  # noqa: BLE001
                 log.exception("Could not start tracking a request for Unwatched cleanup")
         return {"ok": True, "status": status, "id": (res or {}).get("id")}
+
+    async def sonarr_defaults() -> dict | None:
+        """Seerr's default standard Sonarr server: the profile, folder and season-folder choice a normal request uses."""
+        try:
+            rows = await svc.client().call("GET", "/settings/sonarr")
+        except SeerrError:
+            return None
+        pick = [x for x in rows or [] if not x.get("is4k")]
+        x = next((y for y in pick if y.get("isDefault")), pick[0] if pick else None)
+        if not x or x.get("activeProfileId") is None or not x.get("activeDirectory"):
+            return None
+        return {"profile_id": int(x["activeProfileId"]), "root": str(x["activeDirectory"]),
+                "season_folder": bool(x.get("enableSeasonFolders")), "series_type": x.get("seriesType") or None}
+
+    async def add_without_seerr(p, uid, u: dict, b: dict, d: dict) -> dict:
+        """A show TMDB has no TheTVDB id for: Seerr would answer 201 and make nothing. Sonarr can still find most of
+        these by IMDb id, so add it there directly with Seerr's own default profile and folder; once it is on Plex,
+        Seerr's library scan marks it available as usual. When that is not possible (no IMDb id, no single exact
+        match, 4K, no Sonarr, or the person's requests need approval) it goes on the admins' Needs you list."""
+        title = d.get("name") or d.get("title")
+        if isinstance(b.get("seasons"), list):
+            seasons = sorted({int(n) for n in b["seasons"]})
+        else:
+            seasons = [int(s["seasonNumber"]) for s in d.get("seasons") or [] if int(s.get("seasonNumber") or 0) > 0]
+        perms = u.get("permissions")
+        if not has(perms, "REQUEST", "REQUEST_TV"):
+            raise HTTPException(403, "Your account cannot request series. Ask the admin if you need to.")
+        hit, conf = None, None
+        if arr and not b.get("is4k") and seasons and has(perms, "AUTO_APPROVE", "AUTO_APPROVE_TV", "MANAGE_REQUESTS"):
+            try:
+                hit = await arr.show_by_imdb((d.get("externalIds") or {}).get("imdbId"), int(year(d)) if year(d) else None)
+            except (ArrError, ValueError) as e:
+                log.warning("Sonarr IMDb lookup failed for TMDB %s: %s", b["mediaId"], e)
+            conf = await sonarr_defaults() if hit else None
+        if not (hit and conf):
+            svc.help.ask_to_add(b["mediaId"], p.subject, title)
+            raise HTTPException(409, NO_AUTO_FLAGGED)
+        try:
+            res = await arr.add_show(hit, seasons, **conf)
+        except ArrError as e:
+            log.warning("Could not add TMDB %s to Sonarr: %s", b["mediaId"], e.message)
+            svc.help.ask_to_add(b["mediaId"], p.subject, title)
+            raise HTTPException(409, NO_AUTO_FLAGGED)
+        log.info("Added TMDB %s (TheTVDB %s) to Sonarr directly for %s, seasons %s", b["mediaId"], res.get("tvdbId"), p.name, seasons)
+        try:
+            svc.log_request(p, uid, None, "tv", b["mediaId"], await title_info("tv", b["mediaId"]), seasons, False, "approved",
+                            source="sonarr")
+        except Exception:  # noqa: BLE001
+            log.exception("Could not add a direct Sonarr add to the request log")
+        return {"ok": True, "status": "approved", "id": None, "direct": True}
 
     @r.delete("/request/{request_id}")
     async def cancel_request(request: Request, request_id: int, failed: bool = False):

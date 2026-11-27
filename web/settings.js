@@ -1722,7 +1722,7 @@
     if (!rows.length) { box.replaceChildren(); return; }
     box.replaceChildren(
       el('h3', { class: 'st-needs__title' }, el('span', { class: 'st-needs__mark', 'aria-hidden': 'true' }), 'Needs you (' + rows.length + ')'),
-      el('p', { class: 'st-note', text: 'Each of these failed, the person tried it again once, it failed again, and they asked you to look.' }),
+      el('p', { class: 'st-note', text: 'Each of these failed, the person tried it again once, it failed again, and they asked you to look. A show marked \u201cAdd by hand\u201d could not be requested automatically: add it in Sonarr, then mark it handled.' }),
       el('ul', { class: 'st-needs' }, rows.map(function (r) {
         var done = el('button', { type: 'button', class: 'st-btn', text: 'Mark handled', onclick: function () {
           done.disabled = true; done.textContent = 'Saving…';
@@ -1731,7 +1731,7 @@
         return el('li', null,
           el('div', { class: 'st-needs__what' },
             el('a', { class: 'st-log__title', href: '#/requests/' + (r.kind === 'tv' ? 'series/' : 'movie/') + r.tmdb, text: r.title, onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } }),
-            el('span', { class: 'st-log__meta', text: [r.kind === 'tv' ? 'Series' : 'Movie', r.who, 'asked ' + when(r.notified_at)].join(' · ') })),
+            el('span', { class: 'st-log__meta', text: [r.kind === 'tv' ? 'Series' : 'Movie', r.why === 'add' ? 'Add by hand' : null, r.who, 'asked ' + when(r.notified_at)].filter(Boolean).join(' · ') })),
           done);
       })));
   }
@@ -1857,7 +1857,7 @@
       el('div', { class: 'st-log__what' },
         href ? el('a', { class: 'st-log__title', href: href, text: r.title, onclick: function () { if (window.sdOpenSettings) window.sdOpenSettings(false); } })
           : el('span', { class: 'st-log__title', text: r.title }),
-        el('span', { class: 'st-log__meta' }, bits, soon, r.is4k ? el('span', { class: 'st-tag', text: '4K' }) : null, r.source === 'imported' ? el('span', { class: 'st-tag', text: 'Imported', title: 'Brought in from Seerr; logged before the request log existed.' }) : null,
+        el('span', { class: 'st-log__meta' }, bits, soon, r.is4k ? el('span', { class: 'st-tag', text: '4K' }) : null, r.source === 'imported' ? el('span', { class: 'st-tag', text: 'Imported', title: 'Brought in from Seerr; logged before the request log existed.' }) : null, r.source === 'sonarr' ? el('span', { class: 'st-tag', text: 'Added to Sonarr', title: 'TMDB has no TheTVDB id for this show, so Seerr could not take it. It was added to Sonarr directly by its IMDb id.' }) : null,
           r.help === 'notified' ? el('span', { class: 'st-tag st-tag--danger', text: 'Needs you', title: 'They tried it again once and then asked you to look.' })
             : r.help === 'retried' ? el('span', { class: 'st-tag', text: 'Tried again', title: 'They used their one try again.' }) : null)),
       el('div', { class: 'st-log__who' },
